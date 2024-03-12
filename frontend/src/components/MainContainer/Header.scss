@@ -1,0 +1,70 @@
+.main-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    height: 4rem;
+    width: 100%;
+    padding: 1rem 1.5rem;
+    
+    position: absolute;
+    z-index: 2;
+
+    button {
+        background-color: transparent;
+        border: none;
+    }
+    
+    .navigation {
+        display: flex;
+        gap: 0.5rem;
+
+        button {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            color: white;
+            background-color: black;
+            border-radius: 50%;
+            height: 2rem;
+            width: 2rem;
+
+            cursor: pointer;
+        }
+
+        button:disabled {
+            color: rgba(white, 0.7);
+            background-color: rgba(black, 0.7);
+            cursor: not-allowed;
+        }
+    }
+
+    .user-details {
+        display: flex;
+        gap: 0.5rem;
+        
+        button {
+            font-family: inherit;
+            font-weight: bold;
+            transition: 33ms;
+            cursor: pointer;
+            text-align: center;
+            border-radius: 999px;
+            font-size: 0.875rem;
+
+            min-block-size: 2rem;
+            padding: 0.25rem 1rem;
+        }
+
+        .white-button {
+            color: black;
+            background-color: white;
+        }
+
+        .black-button {
+            color: white;
+            background-color: black;
+        }
+    }
+}

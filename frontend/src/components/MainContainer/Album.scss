@@ -1,0 +1,122 @@
+@use '../../scrollbar.scss';
+
+@container title (min-width: 10px) {
+    h1 {
+        font-size: 3rem;
+    }
+}
+
+.album {
+    position: relative;
+    height: 100%;
+
+    border-radius: 0.5rem 0 0 0.5rem;
+
+    overflow: auto;
+    @include scrollbar.scrollbars;
+
+    .album-content {
+        .top-gradient {
+            // rgb(192, 56, 0)
+            // rgb(83, 83, 83);
+            background: linear-gradient(rgba(black, 0.6) 0, #121212 100%), rgb(83, 83, 83);
+        }
+    
+        .album-meta {
+            position: relative;
+            z-index: 10;
+            
+            display: flex;
+            flex-direction: row;
+            align-items: flex-end;
+            
+            padding: 0 1.5rem 1.5rem;
+
+            button {
+                background-color: transparent;
+                border: none;
+                border-radius: 0.25rem;
+                
+                width: 15rem;
+                height: 15rem;
+                padding: 0;
+                margin-right: 1.5rem;
+
+                transition: transform 0.1s linear;
+
+                img {
+                    width: 15rem;
+                    height: 15rem;
+                    object-fit: cover;
+                    object-position: center center;
+                    border-radius: 0.25rem;
+                }
+            }
+
+            button:hover {
+                transform: scale(1.02);
+            }
+
+            .album-info {
+                flex: 1;
+
+                display: flex;
+                flex-direction: column;
+
+                gap: 0.75rem;
+
+                h1 {
+                    font-size: 6rem;
+                    line-height: 6.5rem;
+                    font-weight: 900;
+                    overflow: hidden;
+                    word-break: break-word;
+
+                    container-name: title;
+                }
+
+                .additional-info {
+                    display: flex;
+                    align-items: center;
+
+                    span {
+                        font-size: 0.875rem;
+                    }
+
+                    span:first-child {
+                        font-weight: bold;
+                    }
+
+                    span:not(:first-child):before {
+                        content: "•";
+                        margin: 0 0.25rem;
+                    }
+                }
+            }
+        }
+    
+        .tracks {
+            li {
+                display: flex;
+                margin-top: 0.75rem;
+                cursor: pointer;
+    
+                .disc-num {
+                    text-align: center;
+                }
+    
+                .track-num {
+                    text-align: center;
+                }
+    
+                .disc-num, .track-num {
+                    width: 2rem;
+                }
+    
+                .title {
+                    margin-left: 1rem;
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,196 @@
+.now-playing {
+    grid-area: now-playing-bar;
+    width: 100%;
+    height: 5rem;
+    padding: 0.25rem;
+
+    display: flex;
+    align-items: center;
+
+    .track-meta {
+        width: 30%;
+        min-width: 11.25rem;
+
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+
+        img {
+            object-fit: cover;
+            object-position: center center;
+            border-radius: 0.25rem;
+
+            width: 3.5rem;
+            height: 3.5rem;
+        }
+
+        .track-info {
+            display: grid;
+            align-items: center;
+            row-gap: 0.5rem;
+            grid-template:
+                "title title"
+                "badges subtitle"/auto 1fr;
+
+            a {
+                display: block;
+                text-decoration: none;
+                color: inherit;
+            }
+
+            .track-title {
+                grid-area: title;
+                justify-self: start;
+
+                margin-left: -0.5rem;
+                margin-right: -0.5rem;
+
+                mask-image: linear-gradient(90deg, transparent 0, black 0.5rem, black calc(100% - 1rem), transparent);
+
+                width: 100%;
+
+                a {
+                    width: 100%;
+    
+                    padding-left: 0.5rem;
+                    padding-right: 1.75rem;
+    
+                    white-space: nowrap;
+                }
+
+                a:hover {
+                    text-decoration: underline;
+                }
+            }
+
+            > a {
+                grid-area: subtitle;
+                color: #b3b3b3;
+                font-size: 0.6875rem;
+            }
+        }
+    }
+
+    .player-controls {
+        width: 40%;
+        max-width: 45rem;
+
+        display: flex;
+        align-items: center;
+        flex-direction: column;
+        justify-content: center;
+
+        .control-buttons {
+            display: flex;
+            gap: 0.5rem;
+
+            button {
+                font-size: 2rem;
+                position: relative;
+
+                color: rgba(white, 0.7);
+                background-color: transparent;
+                border: none;
+            }
+
+            button:hover:not(:nth-child(3), :disabled) {
+                color: white;
+            }
+
+            button:nth-child(3) {
+                color: black;
+                background-color: white;
+                border-radius: 50%;
+
+                transition: none 33ms cubic-bezier(0.3, 0, 0, 1);
+            }
+
+            button:nth-child(3):hover {
+                transform: scale(1.06);
+            }
+
+            .active {
+                color: var(--primary-color);
+            }
+
+            .active:after {
+                display: block;
+                height: 0.25rem;
+                width: 0.25rem;
+
+                position: absolute;
+                left: 50%;
+                bottom: 0;
+                transform: translateX(-50%);
+
+                content: "";
+                background-color: var(--primary-color);
+                border-radius: 50%;
+            }
+
+            .active:hover {
+                color: #6cacf4;
+            }
+
+            .active:hover:after {
+                background-color: #6cacf4;
+            }
+        }
+
+        .progress {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+
+            width: 100%;
+
+            p {
+                min-width: 2.5rem;
+                font-size: 0.6875rem;
+                color: #a7a7a7;
+            }
+
+            p:first-child {
+                text-align: right;
+            }
+        }
+    }
+
+    .player-options {
+        width: 30%;
+
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+
+        button {
+            font-size: 2rem;
+            position: relative;
+
+            color: rgba(white, 0.7);
+            background-color: transparent;
+            border: none;
+        }
+
+        button:hover {
+            color: white;
+        }
+
+        > button {
+            cursor: pointer;
+        }
+
+        .volume-slider {
+            flex: 0 1 9rem;
+
+            display: flex;
+            align-items: center;
+
+            margin-right: 1rem;
+
+            button {
+                margin: 0.5rem;
+            }
+        }
+    }
+}
