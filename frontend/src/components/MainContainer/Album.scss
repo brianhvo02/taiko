@@ -45,8 +45,10 @@
                 transition: transform 0.1s linear;
 
                 img {
-                    width: 15rem;
-                    height: 15rem;
+                    max-width: 232px;
+                    max-height: 232px;
+                    // width: 15rem;
+                    // height: 15rem;
                     object-fit: cover;
                     object-position: center center;
                     border-radius: 0.25rem;
