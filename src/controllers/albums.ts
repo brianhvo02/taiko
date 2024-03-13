@@ -10,7 +10,7 @@ export const getAlbums = async (req: Request, res: Response, next: NextFunction)
     if (!withTracks) {
         const payload = await db.all<Omit<Album, 'tracks'>>(
             `SELECT
-                albums.id as id, albums.name AS name, artists.name AS artist, cover_file
+                albums.id as id, albums.name AS name, artists.name AS artist, cover_file, year
             FROM albums
             JOIN artists
                 ON albums.artist_id = artists.id
@@ -27,12 +27,12 @@ export const getAlbums = async (req: Request, res: Response, next: NextFunction)
         return res.json({
             payload,
             success: true
-        })
+        });
     }
 
     const rawAlbums = await db.all<Track>(
         `SELECT 
-            album_artist, album, track_number, title, cover_file, file_path,
+            album_artist, album, track_number, title, year, duration, cover_file, file_path,
             tracks.id AS track_id, album_id,
             GROUP_CONCAT(artists.name, ";") AS artists
         FROM (
@@ -64,6 +64,7 @@ export const getAlbums = async (req: Request, res: Response, next: NextFunction)
             id: track.album_id,
             name: track.album,
             artist: track.album_artist,
+            year: track.year,
             cover_file: track.cover_file,
             tracks: [] as Track[]
         }).tracks.push(track);
@@ -82,7 +83,7 @@ export const getAlbum = async (req: Request, res: Response, next: NextFunction) 
 
     const tracks = await db.all<Track>(
         `SELECT 
-            track_number, title, cover_file, file_path, tracks.album_id,
+            track_number, title, year, duration, cover_file, file_path, tracks.album_id,
             tracks.id AS track_id,
             album_artists.name AS album_artist,
             albums.name AS album, 
@@ -111,6 +112,7 @@ export const getAlbum = async (req: Request, res: Response, next: NextFunction) 
             id: tracks[0].album_id,
             name: tracks[0].album,
             artist: tracks[0].album_artist,
+            year: tracks[0].year,
             cover_file: tracks[0].cover_file,
             tracks
         }

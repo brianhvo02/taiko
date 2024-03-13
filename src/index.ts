@@ -2,6 +2,7 @@ import { createServer } from 'http';
 import { db } from './MetadataDatabase.js';
 import { app } from './app.js';
 import { libraryUpdateServer } from './ws.js';
+import { getAudioDurationInSeconds } from 'get-audio-duration';
 
 const server = createServer(app);
 

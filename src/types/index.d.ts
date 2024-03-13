@@ -7,6 +7,8 @@ interface Track {
     track_id: string;
     title: string;
     track_number: number;
+    year: string;
+    duration: number;
     cover_file: string;
     file_path: string;
     album_id: string;
@@ -19,6 +21,7 @@ interface Album {
     id: string;
     name: string;
     artist: string;
+    year: string;
     cover_file: string;
     tracks: Track[];
 }

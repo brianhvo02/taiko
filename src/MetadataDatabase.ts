@@ -8,6 +8,7 @@ import { glob } from 'glob';
 import { randomUUID } from 'crypto';
 import { mkdir, rm } from 'fs/promises';
 import EventEmitter from 'events';
+import { getAudioDurationInSeconds } from 'get-audio-duration';
 
 const DATABASE_PATH = './metadata.db';
 
@@ -58,6 +59,8 @@ export default class MetadataDatabase {
                 id TEXT PRIMARY KEY, 
                 title TEXT NOT NULL, 
                 track_number INTEGER NOT NULL, 
+                year TEXT,
+                duration INTEGER,
                 cover_file TEXT, 
                 file_path TEXT UNIQUE, 
                 album_id TEXT, 
@@ -120,10 +123,10 @@ export default class MetadataDatabase {
                 const file = files[i];
                 emitter.emit('progress', file, (i + 1) / files.length * 100);
                 const { tags: { 
-                    title, artist: artistRaw, album, track, picture, aART, TPE2,
+                    title, artist: artistRaw, album, track, picture, year, aART, TPE2,
                 } } = await getTags(join(path, file));
         
-                if (!title || !artistRaw || !album || !track || (!aART && !TPE2))
+                if (!title || !artistRaw || !album || !track || !year || (!aART && !TPE2))
                     continue;
 
                 const albumArtist: string = (aART ?? TPE2).data;
@@ -152,15 +155,16 @@ export default class MetadataDatabase {
                     await this.run('INSERT INTO track_artists (track_id, artist_id) VALUES (?, ?)', trackId, artistId);
                 }
                 
+                const duration = await getAudioDurationInSeconds(join(path, file));
                 const cover = await this.saveCover(picture);
                 await this.run(
                     `INSERT INTO tracks (
-                        id, title, track_number, cover_file, file_path, album_id
-                    ) VALUES (?, ?, ?, ?, ?, ?)`, 
-                    trackId, title, track, cover, file, albumId
+                        id, title, track_number, year, duration, cover_file, file_path, album_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, 
+                    trackId, title, track, year, duration, cover, file, albumId
                 );
                 emitter.emit('operation', { 
-                    title, album, 
+                    title, album, year, duration,
                     artists: artistRaw,
                     track_id: trackId, 
                     album_id: albumId,

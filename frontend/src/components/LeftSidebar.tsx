@@ -26,7 +26,7 @@ const LeftSidebar = () => {
     const [librarySearch, setLibrarySearch] = useState('');
     const [librarySearchFocus, setLibrarySearchFocus] = useState(false);
     const librarySearchRef = useRef<HTMLInputElement>(null);
-    const [sort, setSort] = useState<SortBy>('recents');
+    const [sort] = useState<SortBy>('recents');
     const { data: albums } = useGetAlbumsQuery();
     const location = useLocation();
 

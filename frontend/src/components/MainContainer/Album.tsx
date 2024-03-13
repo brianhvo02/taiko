@@ -4,7 +4,6 @@ import { useParams } from 'react-router-dom';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { setCurrentAudio } from '../../store/audio';
 import { useDispatch } from 'react-redux';
-import _ from 'lodash';
 import { useState } from 'react';
 import { getDuration } from '../../utils';
 
@@ -16,7 +15,7 @@ const Album = () => {
 
     if (!album) return null;
 
-    // const totalDuration = album.tracks.reduce((total, track) => total + track.duration, 0);
+    const totalDuration = album.tracks.reduce((total, track) => total + track.duration, 0);
 
     return (
         <main className='album' onScroll={e => setTop(e.currentTarget.scrollTop === 0)}>
@@ -31,8 +30,8 @@ const Album = () => {
                         <h1>{album.name}</h1>
                         <div className='additional-info'>
                             <span>{album.artist}</span>
-                            {/* <span>{album.year}</span> */}
-                            {/* <span>{album.tracks.length} songs, {getDuration(totalDuration)}</span> */}
+                            <span>{album.year}</span>
+                            <span>{album.tracks.length} songs, {getDuration(totalDuration)}</span>
                         </div>
                     </div>
                 </div>

@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { forwardOne, previousOne, setElapsed, setDuration, setIsPlaying, setVolume, toggleRepeat, toggleShuffle, useAudio, setCurrentAudio } from '../store/audio';
+import { forwardOne, previousOne, setElapsed, setDuration, setIsPlaying, setVolume, toggleRepeat, toggleShuffle, useAudio } from '../store/audio';
 import './NowPlaying.scss';
 import { Slider } from '@mui/material';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
