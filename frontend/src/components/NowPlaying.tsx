@@ -14,12 +14,11 @@ import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import VolumeDownIcon from '@mui/icons-material/VolumeDown';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { secondsToTime } from '../utils';
 import { useDispatch } from 'react-redux';
 
-const NowPlaying = () => {
-    const audio = useRef<HTMLAudioElement>(new Audio());
+const NowPlaying = ({ audio }: AudioProps) => {
     const { currentAudio, elapsed, duration, isPlaying, shuffle, repeat, volume } = useAudio();
     const dispatch = useDispatch();
     const [seeker, setSeeker] = useState<number>();

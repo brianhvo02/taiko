@@ -97,26 +97,46 @@
         }
     
         .tracks {
-            li {
+            padding: 0 1.5rem 1.5rem;
+
+            .spacer th {
+                border: 0;
+            }
+
+            th {
+                font-size: 0.875rem;
+                padding: 0.25rem 1rem;
+            }
+
+            td {
+                border: 0;
+                padding: 0.75rem 1rem;
+            }
+
+            td:first-child {
+                svg {
+                    font-size: 1.5rem;
+                }
+
+                width: 4rem;
+                font-size: 1rem;
+            }
+
+            th, td {
+                font-family: inherit;
+                color: var(--mui-palette-text-secondary);
+            }
+
+            .track-title {
                 display: flex;
-                margin-top: 0.75rem;
-                cursor: pointer;
-    
-                .disc-num {
-                    text-align: center;
+                flex-direction: column;
+                span:first-child {
+                    color: var(--mui-palette-text-primary);
                 }
-    
-                .track-num {
-                    text-align: center;
-                }
-    
-                .disc-num, .track-num {
-                    width: 2rem;
-                }
-    
-                .title {
-                    margin-left: 1rem;
-                }
+            }
+
+            tr:hover .track-title span:last-child {
+                color: var(--mui-palette-text-primary);
             }
         }
     }

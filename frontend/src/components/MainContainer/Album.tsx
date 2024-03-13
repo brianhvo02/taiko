@@ -2,18 +2,22 @@ import './Album.scss';
 import { useGetAlbumQuery } from '../../store/backend';
 import { useParams } from 'react-router-dom';
 import { skipToken } from '@reduxjs/toolkit/query';
-import { setCurrentAudio } from '../../store/audio';
+import { setCurrentAudio, useAudio } from '../../store/audio';
 import { useDispatch } from 'react-redux';
 import { useState } from 'react';
 import { getDuration, secondsToTime } from '../../utils';
-import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
-import { AccessTime } from '@mui/icons-material';
+import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme } from '@mui/material';
+import { AccessTime, BarChart, Pause, PlayArrow } from '@mui/icons-material';
 
-const Album = () => {
+const Album = ({ audio }: AudioProps) => {
+    const theme = useTheme();
+    const { currentAudio, isPlaying } = useAudio();
     const { albumId } = useParams();
     const { data: album } = useGetAlbumQuery(albumId ?? skipToken);
     const dispatch = useDispatch();
     const [top, setTop] = useState(true);
+    const [hover, setHover] = useState<number | null>(null);
+    const [selected, setSelected] = useState<number | null>(null);
 
     if (!album) return null;
 
@@ -39,47 +43,85 @@ const Album = () => {
                         </div>
                     </div>
                 </div>
-                <Table sx={{ minWidth: 650 }} aria-label="simple table">
-                    <TableHead>
-                        <TableRow>
-                            <TableCell align='center'>#</TableCell>
-                            <TableCell>Title</TableCell>
-                            <TableCell align="right">
-                                <AccessTime />
-                            </TableCell>
-                        </TableRow>
-                    </TableHead>
-                    <TableBody>
-                    { album.tracks.map(track => (
-                        <TableRow
-                            key={track.track_id}
-                            sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
-                        >
-                            <TableCell align='center'>
-                                {track.track_number}
-                            </TableCell>
-                            <TableCell component="th" scope="row">
-                                {track.title}
-                            </TableCell>
-                            <TableCell align="right">{secondsToTime(track.duration)}</TableCell>
-                        </TableRow>
-                    )) }
-                    </TableBody>
-                </Table>
-                {/* <ul className='tracks'>
-                    {album.tracks.map((track, idx) => {
-                        return (
-                    <li key={track.track_id} 
-                        onClick={() => dispatch(setCurrentAudio({
-                            idx, track,
-                            trackList: album.tracks,
-                        }))}>
-                        <p className='track-num'>{track.track_number}</p>
-                        <p className='title'>{track.title}</p>
-                    </li>
-                        );
-                    })}
-                </ul> */}
+                <TableContainer className='tracks'>
+                    <Table>
+                        <TableHead>
+                            <TableRow>
+                                <TableCell align='right'>
+                                    #
+                                </TableCell>
+                                <TableCell>
+                                    Title
+                                </TableCell>
+                                <TableCell align='right'>
+                                    <AccessTime />
+                                </TableCell>
+                            </TableRow>
+                            <TableRow className='spacer'>
+                                <TableCell align='right' />
+                                <TableCell />
+                                <TableCell align='right' />
+                            </TableRow>
+                        </TableHead>
+                        <TableBody>
+                        { album.tracks.map((track, i) => (
+                            <TableRow 
+                                key={track.track_id} 
+                                hover={true}
+                                selected={selected === i}
+                                onMouseEnter={() => setHover(i)} 
+                                onMouseLeave={() => setHover(null)}
+                                onClick={() => setSelected(i)}
+                                onDoubleClick={() => dispatch(setCurrentAudio({
+                                    track, idx: i,
+                                    trackList: album.tracks,
+                                }))}
+                            >
+                                <TableCell align='right'>
+                                    { hover === i ? (
+                                        isPlaying && currentAudio?.idx === i ?
+                                        <Pause 
+                                            onClick={() => audio.current.pause()}
+                                            onDoubleClick={(e) => e.stopPropagation()}
+                                        /> :
+                                        <PlayArrow 
+                                            onClick={() => currentAudio?.idx === i ? 
+                                                audio.current.play() : 
+                                                dispatch(setCurrentAudio({
+                                                    track, idx: i,
+                                                    trackList: album.tracks,
+                                                }))
+                                            } 
+                                            onDoubleClick={(e) => e.stopPropagation()}
+                                        />
+                                    ) : 
+                                    <span style={
+                                        currentAudio?.idx === i
+                                            ? { color: theme.palette.primary.main }
+                                            : {}
+                                    }>{ isPlaying && currentAudio?.idx === i ?
+                                        <BarChart /> :
+                                        track.track_number
+                                    }</span> }
+                                </TableCell>
+                                <TableCell className='track-title'>
+                                    <span style={
+                                        currentAudio?.idx === i
+                                            ? { color: theme.palette.primary.main }
+                                            : {}
+                                    }>
+                                        {track.title}
+                                    </span>
+                                    <span>{track.artists.replaceAll(';', ', ')}</span>
+                                </TableCell>
+                                <TableCell align='right'>
+                                    {secondsToTime(track.duration)}
+                                </TableCell>
+                            </TableRow>
+                        )) }
+                        </TableBody>
+                    </Table>
+                </TableContainer>
             </div>
         </main>
     );

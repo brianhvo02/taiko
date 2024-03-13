@@ -6,7 +6,7 @@ import Header from './Header';
 import Footer from './Footer';
 import { useLayout } from '../../store/layout';
 
-const MainContainer = () => {
+const MainContainer = ({ audio }: AudioProps) => {
     const layout = useLayout();
 
     return (
@@ -14,7 +14,7 @@ const MainContainer = () => {
             <Header />
             <Routes>
                 <Route path='/' Component={Home} />
-                <Route path='/albums/:albumId' Component={Album} />
+                <Route path='/albums/:albumId' element={<Album audio={audio}></Album>} />
             </Routes>
             <Footer />
         </div>
