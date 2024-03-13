@@ -10,6 +10,8 @@ export const updateLibraryRequest = async (req: Request, res: Response, next: Ne
 
     if (updatingFlag)
         return res.json({ success: false });
+    else
+        updatingFlag = true;
 
     db.saveMetadata(req.body.path)
         .on('progress', (file, progress) => {
@@ -20,6 +22,7 @@ export const updateLibraryRequest = async (req: Request, res: Response, next: Ne
         })
         .on('finished', () => {
             broadcast(libraryUpdateServer, 'finished');
+            updatingFlag = false;
         })
         .on('error', err => {
             console.error(err);

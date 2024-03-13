@@ -1,14 +1,16 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
-import { AlbumWithArtist, AlbumWithTracks } from '../../../src/types';
 
 export const backendApi = createApi({
     reducerPath: 'backendApi',
     baseQuery: fetchBaseQuery({ baseUrl: '/api' }),
     endpoints: (builder) => ({
-        getAlbums: builder.query<AlbumWithArtist[], void>({
-            query: () => '/albums?includeArtist=true',
+        getAlbums: builder.query<Omit<Album, 'tracks'>[], void>({
+            query: () => '/albums',
         }),
-        getAlbum: builder.query<AlbumWithTracks, string>({
+        getAlbumsWithTracks: builder.query<Album[], void>({
+            query: () => '/albums?withTracks',
+        }),
+        getAlbum: builder.query<Album, string>({
             query: albumId => '/albums/' + albumId,
         }),
     }),

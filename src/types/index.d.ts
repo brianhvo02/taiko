@@ -1,11 +1,20 @@
 interface Track {
-    id: string;
+    track_id: string;
     title: string;
     track_number: number;
-    cover_name: string;
-    path: string;
+    cover_file: string;
+    file_path: string;
+    album_id: string;
     album: string;
+    album_artist: string;
+    artists: string;
+}
+
+interface Album {
+    id: string;
+    name: string;
     artist: string;
+    tracks: Track[];
 }
 
 interface MetadataEventMap {

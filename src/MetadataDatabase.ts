@@ -9,15 +9,14 @@ import { randomUUID } from 'crypto';
 import { mkdir, rm } from 'fs/promises';
 import EventEmitter from 'events';
 
-const DATABASE_PATH = '';
+const DATABASE_PATH = './metadata.db';
 
 export default class MetadataDatabase {
     db: sqlite3.Database;
 
     static async resetEnvironment() {
-        await rm('./metadata.db');
+        await rm('./metadata.db', { recursive: true, force: true });
         await rm('./images', { recursive: true, force: true });
-        await mkdir('./images')
     }
 
     private constructor(dbPath: string) {
@@ -31,16 +30,21 @@ export default class MetadataDatabase {
             'tracks',
             'albums',
             'artists',
+            'track_artists',
         ].map(tableName => db.get<Boolean>('SELECT name FROM sqlite_master WHERE type="table" AND name=(?)', tableName)));
 
         if (tables.every(table => table)) 
             return db;
+
+        await mkdir('./images', { recursive: true });
         
         await db.exec('CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT UNIQUE)');
         await db.exec('CREATE TABLE albums (id TEXT PRIMARY KEY, name TEXT NOT NULL, artist_id TEXT, FOREIGN KEY(artist_id) REFERENCES artists(id))');
         await db.exec('CREATE UNIQUE INDEX album_idx ON albums (name, artist_id)');
-        await db.exec('CREATE TABLE tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, track_number INTEGER NOT NULL, cover_name TEXT, path TEXT UNIQUE, album_id TEXT, FOREIGN KEY(album_id) REFERENCES albums(id))');
+        await db.exec('CREATE TABLE tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, track_number INTEGER NOT NULL, cover_file TEXT, file_path TEXT UNIQUE, album_id TEXT, FOREIGN KEY(album_id) REFERENCES albums(id))');
         await db.exec('CREATE UNIQUE INDEX track_idx ON tracks (album_id, track_number)');
+        await db.exec('CREATE TABLE track_artists (track_id TEXT, artist_id TEXT, FOREIGN KEY(track_id) REFERENCES tracks(id), FOREIGN KEY(artist_id) REFERENCES artists(id))');
+        await db.exec('CREATE UNIQUE INDEX track_artists_idx ON track_artists (track_id, artist_id)');
 
         return db;
     }
@@ -53,21 +57,17 @@ export default class MetadataDatabase {
         (resolve, reject) => this.db.exec(sql, err => err ? reject(err) : resolve())
     );
 
-    run = async (sql: string, ...params: string[]) => new Promise<void>(
+    run = async (sql: string, ...params: (string | number)[]) => new Promise<void>(
         (resolve, reject) => this.db.run(sql, params, err => err ? reject(err) : resolve())
     );
 
-    get = async <T>(sql: string, ...params: string[]) => new Promise<T | undefined>(
+    get = async <T>(sql: string, ...params: (string | number)[]) => new Promise<T | undefined>(
         (resolve, reject) => this.db.get<T>(sql, params, (err, row) => err ? reject(err) : resolve(row))
     );
 
-    all = async <T>(sql: string, ...params: string[]) => new Promise<T[] | undefined>(
+    all = async <T>(sql: string, ...params: (string | number)[]) => new Promise<T[] | undefined>(
         (resolve, reject) => this.db.all<T>(sql, params, (err, rows) => err ? reject(err) : resolve(rows))
     );
-
-    // exec = async (sql: string) => new Promise<void>(
-    //     (resolve, reject) => this.db.exec(sql, err => err ? reject(err) : resolve())
-    // );
 
     async saveCover(picture?: PictureType) {
         if (!picture)
@@ -75,7 +75,7 @@ export default class MetadataDatabase {
     
         const buf = Buffer.from(new Uint8Array(picture.data));
         const hash = generateHash(buf);
-        const filename = `${hash}.${picture.format === 'image/png' ? '.png' : '.jpg'}`;
+        const filename = `${hash}.${picture.format === 'image/png' ? 'png' : 'jpg'}`;
         const imagePath = join('images', filename);
         if (!existsSync(imagePath))
             await writeFile(imagePath, buf);
@@ -91,35 +91,54 @@ export default class MetadataDatabase {
                 const file = files[i];
                 emitter.emit('progress', file, (i + 1) / files.length * 100);
                 const { tags: { 
-                    title, artist, album, track, picture,
+                    title, artist: artistRaw, album, track, picture, aART, TPE2,
                 } } = await getTags(join(path, file));
         
-                if (!title || !artist || !album || !track)
+                if (!title || !artistRaw || !album || !track || (!aART && !TPE2))
                     continue;
-    
-                const artistRow = await this.get<{ id: string }>('SELECT id FROM artists WHERE name = (?)', artist);
-                const artistId = artistRow ? artistRow.id : randomUUID();
-                if (!artistRow)
-                    await this.run('INSERT INTO artists (id, name) VALUES (?, ?)', artistId, artist);
 
-                const albumRow = await this.get<{ id: string }>('SELECT id FROM albums WHERE name = (?) AND artist_id = (?)', album, artistId);
+                const albumArtist: string = (aART ?? TPE2).data;
+                const albumArtistRow = await this.get<{ id: string }>('SELECT id FROM artists WHERE name = (?)', albumArtist);
+                const albumArtistId = albumArtistRow ? albumArtistRow.id : randomUUID();
+                if (!albumArtistRow)
+                    await this.run('INSERT INTO artists (id, name) VALUES (?, ?)', albumArtistId, albumArtist);
+
+                const albumRow = await this.get<{ id: string }>('SELECT id FROM albums WHERE name = (?) AND artist_id = (?)', album, albumArtistId);
                 const albumId = albumRow ? albumRow.id : randomUUID();
                 if (!albumRow)
-                    await this.run('INSERT INTO albums (id, name, artist_id) VALUES (?, ?, ?)', albumId, album, artistId);
+                    await this.run('INSERT INTO albums (id, name, artist_id) VALUES (?, ?, ?)', albumId, album, albumArtistId);
 
                 const trackRow = await this.get<{ id: string }>('SELECT id FROM tracks WHERE title = (?) AND album_id = (?)', title, albumId);
                 if (trackRow)
                     continue;
                 const trackId = randomUUID();
+
+                const artists = artistRaw.split(';');
+    
+                for (const artist of artists) {
+                    const artistRow = await this.get<{ id: string }>('SELECT id FROM artists WHERE name = (?)', artist);
+                    const artistId = artistRow ? artistRow.id : randomUUID();
+                    if (!artistRow)
+                        await this.run('INSERT INTO artists (id, name) VALUES (?, ?)', artistId, artist);
+                    await this.run('INSERT INTO track_artists (track_id, artist_id) VALUES (?, ?)', trackId, artistId);
+                }
                 
                 const cover = await this.saveCover(picture);
-                await this.run('INSERT INTO tracks (id, title, track_number, cover_name, path, album_id) VALUES (?, ?, ?, ?, ?, ?)', trackId, title, track, cover, file, albumId);
+                await this.run(
+                    `INSERT INTO tracks (
+                        id, title, track_number, cover_file, file_path, album_id
+                    ) VALUES (?, ?, ?, ?, ?, ?)`, 
+                    trackId, title, track, cover, file, albumId
+                );
                 emitter.emit('operation', { 
-                    title, artist, album, 
-                    id: trackId, 
-                    cover_name: cover, 
+                    title, album, 
+                    artists: artistRaw,
+                    track_id: trackId, 
+                    album_id: albumId,
+                    album_artist: albumArtist,
+                    cover_file: cover, 
                     track_number: parseInt(track), 
-                    path: file, 
+                    file_path: file, 
                 });
             }
 
@@ -131,4 +150,4 @@ export default class MetadataDatabase {
 }
 
 // await MetadataDatabase.resetEnvironment();
-export const db = await MetadataDatabase.init('./metadata.db');
+export const db = await MetadataDatabase.init(DATABASE_PATH);
