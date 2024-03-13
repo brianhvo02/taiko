@@ -16,7 +16,7 @@ const Album = () => {
 
     if (!album) return null;
 
-    const totalDuration = album.tracks.reduce((total, track) => total + track.duration, 0);
+    // const totalDuration = album.tracks.reduce((total, track) => total + track.duration, 0);
 
     return (
         <main className='album' onScroll={e => setTop(e.currentTarget.scrollTop === 0)}>
@@ -25,33 +25,32 @@ const Album = () => {
                 <div className='top-gradient' />
                 <div className='album-meta'>
                     <button>
-                        <img src={`/images/${album.covers[0]}`} alt='album cover' />
+                        <img src={`/images/${album.cover_file}`} alt='album cover' />
                     </button>
                     <div className='album-info'>
                         <h1>{album.name}</h1>
                         <div className='additional-info'>
                             <span>{album.artist}</span>
-                            <span>{album.year}</span>
-                            <span>{album.tracks.length} songs, {getDuration(totalDuration)}</span>
+                            {/* <span>{album.year}</span> */}
+                            {/* <span>{album.tracks.length} songs, {getDuration(totalDuration)}</span> */}
                         </div>
                     </div>
                 </div>
-                {/* <ul className='tracks'>
+                <ul className='tracks'>
                     {album.tracks.map((track, idx) => {
                         return (
-                    <li key={track._id} 
+                    <li key={track.track_id} 
                         onClick={() => dispatch(setCurrentAudio({
                             idx, track,
-                            album: _.omit(album, 'tracks'),
                             trackList: album.tracks,
                         }))}>
-                        <p className='disc-num'>{track.discNum}</p>
-                        <p className='track-num'>{track.trackNum}</p>
+                        {/* <p className='disc-num'>{track.discNum}</p> */}
+                        <p className='track-num'>{track.track_number}</p>
                         <p className='title'>{track.title}</p>
                     </li>
                         );
                     })}
-                </ul> */}
+                </ul>
             </div>
         </main>
     );

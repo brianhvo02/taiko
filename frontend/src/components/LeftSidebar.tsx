@@ -113,19 +113,17 @@ const LeftSidebar = () => {
                         </button>
                     </div>
                     <ul className='library-items'>
-                        {albums?.map(({ _id, name, artist, covers}) => {
-                            return (
-                        <li key={'library-item-' + _id}>
-                            <Link to={'/albums/' + _id}>
-                                <img src={`/images/${covers[0]}`} alt='album cover' />
+                        {albums?.map(({ id, name, artist, cover_file }) => (
+                        <li key={'library-item-' + id}>
+                            <Link to={'/albums/' + id}>
+                                <img src={`/images/${cover_file}`} alt='album cover' />
                                 <div className='item-content'>
                                     <p>{name}</p>
                                     <p>Album • {artist}</p>
                                 </div>
                             </Link>
                         </li>
-                            );
-                        })}
+                        ))}
                     </ul>
                 </div>
                 </div>

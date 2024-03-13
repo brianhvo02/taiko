@@ -2,7 +2,6 @@ import { createServer } from 'http';
 import { db } from './MetadataDatabase.js';
 import { app } from './app.js';
 import { libraryUpdateServer } from './ws.js';
-import { getTags } from './utils.js';
 
 const server = createServer(app);
 

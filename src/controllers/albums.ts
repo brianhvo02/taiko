@@ -8,20 +8,24 @@ export const getAlbums = async (req: Request, res: Response, next: NextFunction)
     const limit = parseInt(defaultStringParam(req.query.limit, '10'));
 
     if (!withTracks) {
-        const albums = await db.all<Omit<Album, 'tracks'>>(
+        const payload = await db.all<Omit<Album, 'tracks'>>(
             `SELECT
-                albums.id as id, albums.name AS name, artists.name AS artist
+                albums.id as id, albums.name AS name, artists.name AS artist, cover_file
             FROM albums
             JOIN artists
                 ON albums.artist_id = artists.id
+            LEFT JOIN tracks
+                ON albums.id = tracks.album_id
+            GROUP BY albums.id
+            HAVING MIN(track_number)
             ORDER BY artist, name
             LIMIT (?)
             OFFSET (?)`,
             limit, (page - 1) * limit
         );
 
-        res.json({
-            albums,
+        return res.json({
+            payload,
             success: true
         })
     }
@@ -60,13 +64,14 @@ export const getAlbums = async (req: Request, res: Response, next: NextFunction)
             id: track.album_id,
             name: track.album,
             artist: track.album_artist,
+            cover_file: track.cover_file,
             tracks: [] as Track[]
         }).tracks.push(track);
         return map;
     }, {});
 
     res.json({
-        albums: Object.values(albumsMap),
+        payload: Object.values(albumsMap),
         success: true,
     });
 }
@@ -79,13 +84,14 @@ export const getAlbum = async (req: Request, res: Response, next: NextFunction) 
         `SELECT 
             track_number, title, cover_file, file_path, tracks.album_id,
             tracks.id AS track_id,
-            album_artists.name AS album_artist, albums.name AS album, 
+            album_artists.name AS album_artist,
+            albums.name AS album, 
             GROUP_CONCAT(artists.name, ";") AS artists
-        FROM albums
+        FROM tracks
         JOIN artists AS album_artists
-            ON albums.artist_id = artists.id
-        JOIN tracks 
-            ON album_id = albums.id 
+            ON albums.artist_id = album_artists.id
+        JOIN albums 
+            ON tracks.album_id = albums.id 
         JOIN track_artists
             ON track_artists.track_id = tracks.id
         JOIN artists
@@ -101,11 +107,12 @@ export const getAlbum = async (req: Request, res: Response, next: NextFunction) 
 
     res.json({
         success: true,
-        album: {
+        payload: {
             id: tracks[0].album_id,
             name: tracks[0].album,
             artist: tracks[0].album_artist,
+            cover_file: tracks[0].cover_file,
             tracks
         }
-    })
+    });
 }

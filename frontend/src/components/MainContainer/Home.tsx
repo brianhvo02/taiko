@@ -31,11 +31,14 @@ const Home = () => {
                     <section className='top'>
                         <h1>Good {getTimeOfDay()}</h1>
                         <ul>
-                            {albums?.map(({ _id, name, artist, year, covers }) => {
+                            {albums?.map(({ id, name, artist, cover_file }) => {
                                 return (
-                            <li key={_id} onClick={() => navigate(`/albums/${_id}`)}>
-                                <img src={'/images/' + covers[0]} alt='album cover' />
-                                <h1>{name} ({year})</h1>
+                            <li key={id} onClick={() => navigate(`/albums/${id}`)}>
+                                <img src={'/images/' + cover_file} alt='album cover' />
+                                <h1>
+                                    {name} 
+                                    {/* ({year}) */}
+                                </h1>
                                 <h2>{artist}</h2>
                             </li>
                                 );

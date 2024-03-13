@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { getAllTracks } from '../controllers/tracks.js';
+import { getTrackAudio } from '../controllers/tracks.js';
 
 const tracksRouter = Router();
 
-tracksRouter.get('/', getAllTracks);
+tracksRouter.get('/:trackId/audio', getTrackAudio);
 
 export default tracksRouter;

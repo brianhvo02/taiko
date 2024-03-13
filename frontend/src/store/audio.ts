@@ -1,13 +1,11 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { useAppSelector } from './hooks';
-import { AlbumWithArtist, TrackPayload } from '../../../src/types';
 
 export interface CurrentAudio {
     idx: number,
-    trackList: TrackPayload[];
-    track: TrackPayload;
-    album: AlbumWithArtist;
+    trackList: Track[];
+    track: Track;
 }
 
 const REPEAT_MODES = ['off', 'all', 'one'] as const;
@@ -16,6 +14,7 @@ export type RepeatMode = typeof REPEAT_MODES[number];
 interface AudioState {
     currentAudio: CurrentAudio | null;
     elapsed: number;
+    duration: number;
     isPlaying: boolean;
     shuffle: boolean;
     repeat: RepeatMode;
@@ -25,6 +24,7 @@ interface AudioState {
 const initialState: AudioState = {
     currentAudio: null,
     elapsed: 0,
+    duration: 0,
     isPlaying: false,
     shuffle: false,
     repeat: 'off',
@@ -40,6 +40,9 @@ export const audioSlice = createSlice({
         },
         setElapsed: (state, { payload }: PayloadAction<number>) => {
             state.elapsed = payload;
+        },
+        setDuration: (state, { payload }: PayloadAction<number>) => {
+            state.duration = payload;
         },
         toggleIsPlaying: state => {
             state.isPlaying = !state.isPlaying;
@@ -88,7 +91,7 @@ export const audioSlice = createSlice({
 })
 
 export const { 
-    setCurrentAudio, setElapsed, setIsPlaying,
+    setCurrentAudio, setElapsed, setDuration, setIsPlaying,
     toggleIsPlaying, toggleShuffle, toggleRepeat,
     forwardOne, previousOne, setVolume
 } = audioSlice.actions;

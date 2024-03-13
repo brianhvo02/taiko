@@ -1,8 +1,14 @@
 import { NextFunction, Request, Response } from 'express';
 import { db } from '../MetadataDatabase.js';
+import { createReadStream } from 'fs';
+import { join } from 'path';
 
-export const getAllTracks = async (req: Request, res: Response, next: NextFunction) => {
-    const tracks = await db.all<Track>('SELECT title, track_number, cover_name, path, albums.name AS album, artists.name AS artist FROM tracks JOIN albums ON album_id = albums.id JOIN artists ON artist_id = artists.id');
+export const getTrackAudio = async (req: Request, res: Response, next: NextFunction) => {
+    const track = await db.get<Track>('SELECT file_path FROM tracks WHERE id = (?)', req.params.trackId);
 
-    res.json(tracks);
+    if (!track)
+        return res.status(422).end();
+
+    res.setHeader("Content-Type", "audio/mp4")
+        .sendFile(join('/mnt/mediaserver/Music', track.file_path));
 }

@@ -1,3 +1,8 @@
+interface Query<T> {
+    success: boolean;
+    payload: T;
+}
+
 interface Track {
     track_id: string;
     title: string;
@@ -14,6 +19,7 @@ interface Album {
     id: string;
     name: string;
     artist: string;
+    cover_file: string;
     tracks: Track[];
 }
 

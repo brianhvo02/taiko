@@ -8,7 +8,6 @@
         "@mui/icons-material": "^5.14.19",
         "@mui/material": "^5.14.19",
         "@reduxjs/toolkit": "^2.0.1",
-        "howler": "^2.2.4",
         "lodash": "^4.17.21",
         "react": "^18.2.0",
         "react-dom": "^18.2.0",
@@ -18,7 +17,6 @@
     },
     "devDependencies": {
         "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
-        "@types/howler": "^2.2.11",
         "@types/lodash": "^4.14.200",
         "@types/node": "^16.18.59",
         "@types/react": "^18.2.32",
@@ -49,5 +47,5 @@
             "last 1 safari version"
         ]
     },
-    "proxy": "http://localhost:5000"
+    "proxy": "http://localhost:3050"
 }

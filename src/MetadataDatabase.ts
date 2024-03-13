@@ -38,12 +38,41 @@ export default class MetadataDatabase {
 
         await mkdir('./images', { recursive: true });
         
-        await db.exec('CREATE TABLE artists (id TEXT PRIMARY KEY, name TEXT UNIQUE)');
-        await db.exec('CREATE TABLE albums (id TEXT PRIMARY KEY, name TEXT NOT NULL, artist_id TEXT, FOREIGN KEY(artist_id) REFERENCES artists(id))');
+        await db.exec(
+            `CREATE TABLE artists (
+                id TEXT PRIMARY KEY, 
+                name TEXT UNIQUE
+            )`
+        );
+        await db.exec(
+            `CREATE TABLE albums (
+                id TEXT PRIMARY KEY, 
+                name TEXT NOT NULL, 
+                artist_id TEXT, 
+                FOREIGN KEY(artist_id) REFERENCES artists(id)
+            )`
+        );
         await db.exec('CREATE UNIQUE INDEX album_idx ON albums (name, artist_id)');
-        await db.exec('CREATE TABLE tracks (id TEXT PRIMARY KEY, title TEXT NOT NULL, track_number INTEGER NOT NULL, cover_file TEXT, file_path TEXT UNIQUE, album_id TEXT, FOREIGN KEY(album_id) REFERENCES albums(id))');
+        await db.exec(
+            `CREATE TABLE tracks (
+                id TEXT PRIMARY KEY, 
+                title TEXT NOT NULL, 
+                track_number INTEGER NOT NULL, 
+                cover_file TEXT, 
+                file_path TEXT UNIQUE, 
+                album_id TEXT, 
+                FOREIGN KEY(album_id) REFERENCES albums(id)
+            )`
+        );
         await db.exec('CREATE UNIQUE INDEX track_idx ON tracks (album_id, track_number)');
-        await db.exec('CREATE TABLE track_artists (track_id TEXT, artist_id TEXT, FOREIGN KEY(track_id) REFERENCES tracks(id), FOREIGN KEY(artist_id) REFERENCES artists(id))');
+        await db.exec(
+            `CREATE TABLE track_artists (
+                track_id TEXT, 
+                artist_id TEXT, 
+                FOREIGN KEY(track_id) REFERENCES tracks(id), 
+                FOREIGN KEY(artist_id) REFERENCES artists(id)
+            )`
+        );
         await db.exec('CREATE UNIQUE INDEX track_artists_idx ON track_artists (track_id, artist_id)');
 
         return db;
