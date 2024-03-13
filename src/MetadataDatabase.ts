@@ -15,11 +15,6 @@ const DATABASE_PATH = './metadata.db';
 export default class MetadataDatabase {
     db: sqlite3.Database;
 
-    static async resetEnvironment() {
-        await rm('./metadata.db', { recursive: true, force: true });
-        await rm('./images', { recursive: true, force: true });
-    }
-
     private constructor(dbPath: string) {
         this.db = new sqlite3.Database(dbPath);
     }

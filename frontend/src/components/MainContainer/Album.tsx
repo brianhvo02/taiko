@@ -5,7 +5,9 @@ import { skipToken } from '@reduxjs/toolkit/query';
 import { setCurrentAudio } from '../../store/audio';
 import { useDispatch } from 'react-redux';
 import { useState } from 'react';
-import { getDuration } from '../../utils';
+import { getDuration, secondsToTime } from '../../utils';
+import { Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow } from '@mui/material';
+import { AccessTime } from '@mui/icons-material';
 
 const Album = () => {
     const { albumId } = useParams();
@@ -27,7 +29,9 @@ const Album = () => {
                         <img src={`/images/${album.cover_file}`} alt='album cover' />
                     </button>
                     <div className='album-info'>
-                        <h1>{album.name}</h1>
+                        <span className='album-name'>
+                            <h1>{album.name}</h1>
+                        </span>
                         <div className='additional-info'>
                             <span>{album.artist}</span>
                             <span>{album.year}</span>
@@ -35,7 +39,34 @@ const Album = () => {
                         </div>
                     </div>
                 </div>
-                <ul className='tracks'>
+                <Table sx={{ minWidth: 650 }} aria-label="simple table">
+                    <TableHead>
+                        <TableRow>
+                            <TableCell align='center'>#</TableCell>
+                            <TableCell>Title</TableCell>
+                            <TableCell align="right">
+                                <AccessTime />
+                            </TableCell>
+                        </TableRow>
+                    </TableHead>
+                    <TableBody>
+                    { album.tracks.map(track => (
+                        <TableRow
+                            key={track.track_id}
+                            sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
+                        >
+                            <TableCell align='center'>
+                                {track.track_number}
+                            </TableCell>
+                            <TableCell component="th" scope="row">
+                                {track.title}
+                            </TableCell>
+                            <TableCell align="right">{secondsToTime(track.duration)}</TableCell>
+                        </TableRow>
+                    )) }
+                    </TableBody>
+                </Table>
+                {/* <ul className='tracks'>
                     {album.tracks.map((track, idx) => {
                         return (
                     <li key={track.track_id} 
@@ -43,13 +74,12 @@ const Album = () => {
                             idx, track,
                             trackList: album.tracks,
                         }))}>
-                        {/* <p className='disc-num'>{track.discNum}</p> */}
                         <p className='track-num'>{track.track_number}</p>
                         <p className='title'>{track.title}</p>
                     </li>
                         );
                     })}
-                </ul>
+                </ul> */}
             </div>
         </main>
     );

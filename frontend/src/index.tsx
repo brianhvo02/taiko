@@ -6,17 +6,26 @@ import './reset.css';
 import './index.scss';
 import { Provider } from 'react-redux';
 import { store } from './store';
+import { ThemeProvider, createTheme } from '@mui/material';
 
 const root = ReactDOM.createRoot(
     document.getElementById('root') as HTMLElement
 );
 
+const theme = createTheme({
+    palette: {
+        mode: 'dark',
+    },
+});
+
 root.render(
     <React.StrictMode>
-        <Provider store={store}>
-            <BrowserRouter>
-                <App />
-            </BrowserRouter>
-        </Provider>
+        <ThemeProvider theme={theme}>
+            <Provider store={store}>
+                <BrowserRouter>
+                    <App />
+                </BrowserRouter>
+            </Provider>
+        </ThemeProvider>
     </React.StrictMode>
 );

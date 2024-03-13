@@ -7,7 +7,8 @@
     "scripts": {
         "build": "tsc",
         "start": "node ./dist/index.js",
-        "dev": "nodemon -w src -e ts --ignore '**/*.d.ts' -x 'npm run build && npm start'"
+        "dev": "nodemon -w src -e ts --ignore '**/*.d.ts' -x 'npm run build && npm start'",
+        "reset": "rm -rf images metadata.db"
     },
     "keywords": [],
     "author": "Brian Vo",
