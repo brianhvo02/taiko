@@ -119,7 +119,7 @@ const LeftSidebar = () => {
                                 <img src={`/images/${cover_file}`} alt='album cover' />
                                 <div className='item-content'>
                                     <p>{name}</p>
-                                    <p>Album • {artist}</p>
+                                    <p>Album <span>•</span> {artist}</p>
                                 </div>
                             </Link>
                         </li>

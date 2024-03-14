@@ -33,12 +33,15 @@ const Album = ({ audio }: AudioProps) => {
                         <img src={`/images/${album.cover_file}`} alt='album cover' />
                     </button>
                     <div className='album-info'>
+                        <span>Album</span>
                         <span className='album-name'>
                             <h1>{album.name}</h1>
                         </span>
                         <div className='additional-info'>
                             <span>{album.artist}</span>
+                            <span className='divider'>•</span>
                             <span>{album.year}</span>
+                            <span className='divider'>•</span>
                             <span>{album.tracks.length} songs, {getDuration(totalDuration)}</span>
                         </div>
                     </div>
