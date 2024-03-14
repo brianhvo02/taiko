@@ -1,7 +1,9 @@
 import './Home.scss';
 import { useGetAlbumsQuery } from '../../store/backend';
 import { useNavigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useAppDispatch } from '../../store/hooks';
+import { setHeaderText, setShowHeaderText } from '../../store/layout';
 
 const getTimeOfDay = () => {
     const date = new Date();
@@ -20,7 +22,16 @@ const getTimeOfDay = () => {
 const Home = () => {
     const { data: albums } = useGetAlbumsQuery();
     const navigate = useNavigate();
+    const dispatch = useAppDispatch();
     const [top, setTop] = useState(true);
+
+    useEffect(() => {
+        dispatch(setHeaderText('Good ' + getTimeOfDay()));
+    }, [dispatch]);
+
+    useEffect(() => {
+        dispatch(setShowHeaderText(!top));
+    }, [top, dispatch]);
 
     return (
         <main className='home' onScroll={e => setTop(e.currentTarget.scrollTop === 0)}>
@@ -31,14 +42,11 @@ const Home = () => {
                     <section className='top'>
                         <h1>Good {getTimeOfDay()}</h1>
                         <ul>
-                            {albums?.map(({ id, name, artist, cover_file }) => {
+                            {albums?.map(({ id, name, year, artist, cover_file }) => {
                                 return (
                             <li key={id} onClick={() => navigate(`/albums/${id}`)}>
                                 <img src={'/images/' + cover_file} alt='album cover' />
-                                <h1>
-                                    {name} 
-                                    {/* ({year}) */}
-                                </h1>
+                                <h1>{name} ({year.slice(0, 4)})</h1>
                                 <h2>{artist}</h2>
                             </li>
                                 );

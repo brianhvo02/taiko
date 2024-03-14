@@ -7,6 +7,7 @@ interface Track {
     track_id: string;
     title: string;
     track_number: number;
+    disc_number: number;
     year: string;
     duration: number;
     cover_file: string;

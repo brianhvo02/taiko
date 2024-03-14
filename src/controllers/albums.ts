@@ -32,7 +32,7 @@ export const getAlbums = async (req: Request, res: Response, next: NextFunction)
 
     const rawAlbums = await db.all<Track>(
         `SELECT 
-            album_artist, album, track_number, title, year, duration, cover_file, file_path,
+            album_artist, album, track_number, disc_number, title, year, duration, cover_file, file_path,
             tracks.id AS track_id, album_id,
             GROUP_CONCAT(artists.name, ";") AS artists
         FROM (
@@ -52,7 +52,7 @@ export const getAlbums = async (req: Request, res: Response, next: NextFunction)
         JOIN artists
             ON track_artists.artist_id = artists.id
         GROUP BY tracks.id
-        ORDER BY album_artist, album, track_number`,
+        ORDER BY album_artist, album, disc_number, track_number`,
         limit, (page - 1) * limit
     );
 
@@ -83,7 +83,7 @@ export const getAlbum = async (req: Request, res: Response, next: NextFunction) 
 
     const tracks = await db.all<Track>(
         `SELECT 
-            track_number, title, year, duration, cover_file, file_path, tracks.album_id,
+            track_number, disc_number, title, year, duration, cover_file, file_path, tracks.album_id,
             tracks.id AS track_id,
             album_artists.name AS album_artist,
             albums.name AS album, 
@@ -99,7 +99,7 @@ export const getAlbum = async (req: Request, res: Response, next: NextFunction) 
             ON track_artists.artist_id = artists.id
         WHERE albums.id = (?)
         GROUP BY tracks.id
-        ORDER BY track_number`,
+        ORDER BY disc_number, track_number`,
         req.params.albumId
     );
 

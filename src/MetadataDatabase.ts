@@ -54,6 +54,7 @@ export default class MetadataDatabase {
                 id TEXT PRIMARY KEY, 
                 title TEXT NOT NULL, 
                 track_number INTEGER NOT NULL, 
+                disc_number INTEGER NOT NULL,
                 year TEXT,
                 duration INTEGER,
                 cover_file TEXT, 
@@ -62,7 +63,7 @@ export default class MetadataDatabase {
                 FOREIGN KEY(album_id) REFERENCES albums(id)
             )`
         );
-        await db.exec('CREATE UNIQUE INDEX track_idx ON tracks (album_id, track_number)');
+        await db.exec('CREATE UNIQUE INDEX track_idx ON tracks (album_id, disc_number, track_number)');
         await db.exec(
             `CREATE TABLE track_artists (
                 track_id TEXT, 
@@ -118,7 +119,7 @@ export default class MetadataDatabase {
                 const file = files[i];
                 emitter.emit('progress', file, (i + 1) / files.length * 100);
                 const { tags: { 
-                    title, artist: artistRaw, album, track, picture, year, aART, TPE2,
+                    title, artist: artistRaw, album, track, picture, year, disk, aART, TPE2,
                 } } = await getTags(join(path, file));
         
                 if (!title || !artistRaw || !album || !track || !year || (!aART && !TPE2))
@@ -154,9 +155,9 @@ export default class MetadataDatabase {
                 const cover = await this.saveCover(picture);
                 await this.run(
                     `INSERT INTO tracks (
-                        id, title, track_number, year, duration, cover_file, file_path, album_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, 
-                    trackId, title, track, year, duration, cover, file, albumId
+                        id, title, track_number, year, duration, cover_file, file_path, album_id, disc_number
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+                    trackId, title, track, year, duration, cover, file, albumId, disk?.data.disk ?? 1
                 );
                 emitter.emit('operation', { 
                     title, album, year, duration,
@@ -166,6 +167,7 @@ export default class MetadataDatabase {
                     album_artist: albumArtist,
                     cover_file: cover, 
                     track_number: parseInt(track), 
+                    disc_number: parseInt(disk?.data.disk ?? '1'),
                     file_path: file, 
                 });
             }
