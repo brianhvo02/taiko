@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { forwardOne, previousOne, setElapsed, setDuration, setIsPlaying, setVolume, toggleRepeat, toggleShuffle, useAudio } from '../store/audio';
+import { forwardOne, previousOne, setElapsed, setDuration, setIsPlaying, setVolume, toggleRepeat, toggleShuffle, useAudio, toggleMute } from '../store/audio';
 import './NowPlaying.scss';
 import { Slider } from '@mui/material';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
@@ -17,6 +17,7 @@ import FullscreenIcon from '@mui/icons-material/Fullscreen';
 import { useEffect, useState } from 'react';
 import { secondsToTime } from '../utils';
 import { useDispatch } from 'react-redux';
+import { toggleRightSidebar } from '../store/layout';
 
 const NowPlaying = ({ audio }: AudioProps) => {
     const { currentAudio, elapsed, duration, isPlaying, shuffle, repeat, volume } = useAudio();
@@ -50,17 +51,17 @@ const NowPlaying = ({ audio }: AudioProps) => {
             audioEl.removeEventListener('durationchange', onDurationChange);
             audioEl.removeEventListener('ended', onEnded);
         }
-    }, [dispatch]);
+    }, [audio, dispatch]);
 
     useEffect(() => {
         if (!currentAudio) return;
         
         audio.current.src = `/api/tracks/${currentAudio.track.track_id}/audio`;
-    }, [currentAudio, dispatch]);
+    }, [audio, currentAudio, dispatch]);
 
     useEffect(() => {
         audio.current.loop = repeat === 'one';
-    }, [repeat]);
+    }, [audio, repeat]);
 
     if (!currentAudio) return null;
 
@@ -140,10 +141,10 @@ const NowPlaying = ({ audio }: AudioProps) => {
             </div>
             <div className='player-options'>
                 <button>
-                    <VideoLibraryIcon />
+                    <VideoLibraryIcon onClick={() => dispatch(toggleRightSidebar())} />
                 </button>
                 <div className='volume-slider'>
-                    <button onClick={() => audio.current.volume = 0}>
+                    <button onClick={() => dispatch(toggleMute(audio))}>
                         { volume === 0 ?
                         <VolumeOffIcon /> :
                         volume < 50 ?

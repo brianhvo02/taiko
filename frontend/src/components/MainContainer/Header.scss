@@ -24,8 +24,8 @@
             align-items: center;
             justify-content: center;
 
-            color: white;
-            background-color: black;
+            color: var(--mui-palette-text-primary);
+            background-color: rgba(black, 0.7);;
             border-radius: 50%;
             height: 2rem;
             width: 2rem;
@@ -35,7 +35,7 @@
 
         button:disabled {
             color: rgba(white, 0.7);
-            background-color: rgba(black, 0.7);
+            background-color: rgba(black, 0.4);
             cursor: not-allowed;
         }
     }
@@ -59,11 +59,11 @@
 
         .white-button {
             color: black;
-            background-color: white;
+            background-color: var(--mui-palette-text-primary);
         }
 
         .black-button {
-            color: white;
+            color: var(--mui-palette-text-primary);
             background-color: black;
         }
     }

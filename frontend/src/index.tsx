@@ -16,12 +16,16 @@ const themeOptions: ThemeOptions = {
     palette: {
         mode: 'dark',
         text: {
-            primary: 'white',
+            primary: '#ffffff',
             secondary: '#a7a7a7'
         },
         primary: {
             main: '#2d89ef',
-        }
+            200: '#6cacf4'
+        },
+        // background: {
+        //     default: ''
+        // },
     },
     components: {
         MuiTableCell: {
@@ -31,10 +35,7 @@ const themeOptions: ThemeOptions = {
                 }
             }
         }
-    }
-    // palette: {
-    //     mode: 'dark',
-    // },
+    },
 }
 
 const theme = createTheme(themeOptions);

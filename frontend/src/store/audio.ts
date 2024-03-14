@@ -1,6 +1,7 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { useAppSelector } from './hooks';
+import { MutableRefObject } from 'react';
 
 export interface CurrentAudio {
     idx: number,
@@ -19,6 +20,7 @@ interface AudioState {
     shuffle: boolean;
     repeat: RepeatMode;
     volume: number;
+    volumeMemory: number | null;
 }
 
 const initialState: AudioState = {
@@ -29,6 +31,7 @@ const initialState: AudioState = {
     shuffle: false,
     repeat: 'off',
     volume: 100,
+    volumeMemory: null,
 }
 
 export const audioSlice = createSlice({
@@ -86,6 +89,17 @@ export const audioSlice = createSlice({
         },
         setVolume: (state, { payload }: PayloadAction<number>) => {
             state.volume = payload;
+            if (payload > 0 && state.volumeMemory !== null)
+                state.volumeMemory = null;
+        },
+        toggleMute: (state, { payload }: PayloadAction<MutableRefObject<HTMLAudioElement>>) => {
+            if (state.volume > 0 && state.volumeMemory === null) {
+                state.volumeMemory = state.volume;
+                payload.current.volume = 0;
+            } else {
+                payload.current.volume = (state.volumeMemory ?? 0) / 100;
+                state.volumeMemory = null;
+            }
         }
     },
 })
@@ -93,7 +107,7 @@ export const audioSlice = createSlice({
 export const { 
     setCurrentAudio, setElapsed, setDuration, setIsPlaying,
     toggleIsPlaying, toggleShuffle, toggleRepeat,
-    forwardOne, previousOne, setVolume
+    forwardOne, previousOne, setVolume, toggleMute
 } = audioSlice.actions;
 
 export const useAudio = () => useAppSelector(state => state.audio);

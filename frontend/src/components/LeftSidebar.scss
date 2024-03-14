@@ -39,13 +39,13 @@
             }
 
             a:hover {
-                color: white;
+                color: var(--mui-palette-text-primary);
             }
         }
 
         li.active {
             a {
-                color: white;
+                color: var(--mui-palette-text-primary);
             }
         }
     }
@@ -74,7 +74,7 @@
                 font-size: 1rem;
                 font-weight: bold;
 
-                color: #a7a7a7;
+                color: var(--mui-palette-text-secondary);
                 background-color: transparent;
                 border: none;
 
@@ -83,7 +83,7 @@
             }
 
             button:hover {
-                color: white;
+                color: var(--mui-palette-text-primary);
             }
 
             .library-button {
@@ -210,7 +210,7 @@
     
                     button:hover {
                         background-color: rgba(white, 0.1);
-                        color: white;
+                        color: var(--mui-palette-text-primary);
                         border-radius: 50%;
                     }
                 }
@@ -226,7 +226,7 @@
                     font-size: 0.8125rem;
                     font-weight: 700;
     
-                    color: #a7a7a7;
+                    color: var(--mui-palette-text-secondary);
                     background-color: transparent;
                     border: none;
     
@@ -241,13 +241,14 @@
     
                 .sort:hover {
                     transform: scale(1.04);
-                    color: white;
+                    color: var(--mui-palette-text-primary);
                 }
             }
     
             ul.library-items {
                 a {
                     display: flex;
+                    align-items: center;
                     height: 3rem;
                     gap: 0.75rem;
                     padding: 0.5rem;
@@ -267,16 +268,18 @@
                     }
     
                     .item-content {
+                        flex: 1;
+                        
                         display: flex;
                         flex-direction: column;
-                        justify-content: space-around;
+                        gap: 0.5rem;
     
                         p:last-child {
                             display: flex;
                             align-items: center;
 
                             font-size: 0.875rem;
-                            color: #a7a7a7;
+                            color: var(--mui-palette-text-secondary);
 
                             span {
                                 font-size: 0.5rem;

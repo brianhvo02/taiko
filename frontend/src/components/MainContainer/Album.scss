@@ -6,6 +6,45 @@
     }
 }
 
+.album-table-header {
+    position: sticky;
+    top: 4rem;
+    
+    opacity: 0;
+    transition: background-color 0.25s, opacity 0.4s ease-out;
+    z-index: 15;
+
+    display: flex;
+    align-items: center;
+    padding: 0.25rem 1.325rem;
+
+    background-color: #121212;
+
+    span {
+        font-size: 0.875rem;
+        font-weight: 500;
+        padding: 0.25rem 1rem;
+        color: var(--mui-palette-text-secondary);
+
+        svg {
+            font-size: 1.25rem;
+        }
+    }
+
+    span:first-child {
+        box-sizing: content-box;
+        width: 2rem;
+        text-align: right;
+    }
+
+    span:nth-child(2) {
+        flex: 1;
+    }
+
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
 .album {
     position: relative;
     height: 100%;
@@ -13,6 +52,7 @@
     border-radius: 0.5rem 0 0 0.5rem;
 
     overflow: auto;
+    user-select: none;
     @include scrollbar.scrollbars;
 
     .album-content {
@@ -21,9 +61,10 @@
             // rgb(83, 83, 83);
             background: linear-gradient(rgba(black, 0.6) 0, #121212 100%), rgb(83, 83, 83);
         }
-    
+
         .album-meta {
             position: relative;
+            top: -2.5rem;
             z-index: 10;
             
             display: flex;
@@ -69,6 +110,7 @@
 
                 h1 {
                     font-size: 4vw;
+                    line-height: calc(4vw + 0.5rem);
                     font-weight: 900;
                     overflow: hidden;
                     word-break: break-word;
@@ -100,6 +142,8 @@
         }
     
         .tracks {
+            position: relative;
+            top: -2.5rem;
             padding: 0 1.5rem 1.5rem;
 
             .spacer th {
@@ -109,16 +153,25 @@
             th {
                 font-size: 0.875rem;
                 padding: 0.25rem 1rem;
+
+                svg {
+                    font-size: 1.25rem;
+                }
             }
 
             td {
                 border: 0;
-                padding: 0.75rem 1rem;
+                border-radius: 4px;
+                padding: 0.5rem 1rem;
             }
 
             td:first-child {
                 svg {
                     font-size: 1.5rem;
+                }
+
+                > svg {
+                    color: var(--mui-palette-text-primary);
                 }
 
                 width: 4rem;
@@ -135,6 +188,8 @@
                 flex-direction: column;
                 span:first-child {
                     color: var(--mui-palette-text-primary);
+                    font-size: 1rem;
+                    line-height: 1.75rem;
                 }
             }
 

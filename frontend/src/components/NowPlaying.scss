@@ -94,7 +94,7 @@
             }
 
             button:hover:not(:nth-child(3), :disabled) {
-                color: white;
+                color: var(--mui-palette-text-primary);
             }
 
             button:nth-child(3) {
@@ -110,7 +110,7 @@
             }
 
             .active {
-                color: var(--primary-color);
+                color: var(--mui-palette-primary-main);
             }
 
             .active:after {
@@ -124,16 +124,16 @@
                 transform: translateX(-50%);
 
                 content: "";
-                background-color: var(--primary-color);
+                background-color: var(--mui-palette-primary-main);
                 border-radius: 50%;
             }
 
-            .active:hover {
-                color: #6cacf4;
+            button:not(:nth-child(3), :disabled).active:hover {
+                color: var(--mui-palette-primary-200);
             }
 
             .active:hover:after {
-                background-color: #6cacf4;
+                background-color: var(--mui-palette-primary-200);
             }
         }
 
@@ -147,7 +147,7 @@
             p {
                 min-width: 2.5rem;
                 font-size: 0.6875rem;
-                color: #a7a7a7;
+                color: var(--mui-palette-text-secondary);
             }
 
             p:first-child {
@@ -173,7 +173,7 @@
         }
 
         button:hover {
-            color: white;
+            color: var(--mui-palette-text-primary);
         }
 
         > button {

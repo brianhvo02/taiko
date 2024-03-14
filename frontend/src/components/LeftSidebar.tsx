@@ -5,10 +5,13 @@ import SearchIcon from '@mui/icons-material/Search';
 import LibraryIcon from '@mui/icons-material/LocalLibrary';
 import AddIcon from '@mui/icons-material/Add';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
 import { useEffect, useRef, useState } from 'react';
 import _ from 'lodash';
 import { useGetAlbumsQuery } from '../store/backend';
+import { useTheme } from '@mui/material';
+import { useAudio } from '../store/audio';
 
 type SortBy = 'recents' | 'recently-added' | 'alphabetical' | 'creator';
 const getSortBy = (sortBy: SortBy) => {
@@ -23,6 +26,8 @@ const getSortBy = (sortBy: SortBy) => {
 }
 
 const LeftSidebar = () => {
+    const theme = useTheme();
+    const { currentAudio, isPlaying } = useAudio();
     const [librarySearch, setLibrarySearch] = useState('');
     const [librarySearchFocus, setLibrarySearchFocus] = useState(false);
     const librarySearchRef = useRef<HTMLInputElement>(null);
@@ -118,9 +123,13 @@ const LeftSidebar = () => {
                             <Link to={'/albums/' + id}>
                                 <img src={`/images/${cover_file}`} alt='album cover' />
                                 <div className='item-content'>
-                                    <p>{name}</p>
+                                    <p style={{ color: currentAudio?.track.album_id === id ? 
+                                        theme.palette.primary.main : theme.palette.text.primary
+                                    }}>{name}</p>
                                     <p>Album <span>•</span> {artist}</p>
                                 </div>
+                                { currentAudio?.track.album_id === id && isPlaying &&
+                                <VolumeUpIcon color='primary' /> }
                             </Link>
                         </li>
                         ))}

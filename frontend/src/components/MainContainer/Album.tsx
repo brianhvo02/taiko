@@ -6,7 +6,7 @@ import { setCurrentAudio, useAudio } from '../../store/audio';
 import { useDispatch } from 'react-redux';
 import { useState } from 'react';
 import { getDuration, secondsToTime } from '../../utils';
-import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme } from '@mui/material';
+import { Button, Dialog, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme } from '@mui/material';
 import { AccessTime, BarChart, Pause, PlayArrow } from '@mui/icons-material';
 
 const Album = ({ audio }: AudioProps) => {
@@ -15,21 +15,40 @@ const Album = ({ audio }: AudioProps) => {
     const { albumId } = useParams();
     const { data: album } = useGetAlbumQuery(albumId ?? skipToken);
     const dispatch = useDispatch();
-    const [top, setTop] = useState(true);
+    const [scrollHeight, setScrollHeight] = useState(0);
     const [hover, setHover] = useState<number | null>(null);
     const [selected, setSelected] = useState<number | null>(null);
+    const [showCover, setShowCover] = useState(false);
 
     if (!album) return null;
 
     const totalDuration = album.tracks.reduce((total, track) => total + track.duration, 0);
 
     return (
-        <main className='album' onScroll={e => setTop(e.currentTarget.scrollTop === 0)}>
-            <div className='home-header-spacer' style={top ? {} : { backgroundColor: '#121212', opacity: 1 }} />
+        <main className='album' onScroll={e => setScrollHeight(e.currentTarget.scrollTop)}>
+            <Dialog onClose={() => setShowCover(false)} open={showCover} PaperProps={{
+                sx: { backgroundColor: 'transparent', boxShadow: 'none', }
+            }}>
+                <img src={`/images/${album.cover_file}`} alt='album cover' />
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2rem' }}>
+                    <Button variant='text' sx={{ 
+                        textTransform: 'none', color: theme.palette.text.primary,
+                        fontFamily: 'inherit', fontSize: '1rem', fontWeight: '700'
+                    }} onClick={() => setShowCover(false)}>Close</Button>
+                </div>
+            </Dialog>
+            <div className='home-header-spacer' style={scrollHeight >= 245 ? { opacity: 1 } : {}} />
+            <div className='album-table-header' style={scrollHeight >= 304 ? { opacity: 1 } : {}}>
+                <span>#</span>
+                <span>Title</span>
+                <span>
+                    <AccessTime />
+                </span>
+            </div>
             <div className='album-content'>
                 <div className='top-gradient' />
                 <div className='album-meta'>
-                    <button>
+                    <button onClick={() => setShowCover(true)}>
                         <img src={`/images/${album.cover_file}`} alt='album cover' />
                     </button>
                     <div className='album-info'>
@@ -82,13 +101,15 @@ const Album = ({ audio }: AudioProps) => {
                             >
                                 <TableCell align='right'>
                                     { hover === i ? (
-                                        isPlaying && currentAudio?.idx === i ?
+                                        isPlaying && currentAudio?.track.album_id === albumId && 
+                                        currentAudio?.idx === i ?
                                         <Pause 
                                             onClick={() => audio.current.pause()}
                                             onDoubleClick={(e) => e.stopPropagation()}
                                         /> :
                                         <PlayArrow 
-                                            onClick={() => currentAudio?.idx === i ? 
+                                            onClick={() => currentAudio?.idx === i && 
+                                            currentAudio?.track.album_id === albumId ? 
                                                 audio.current.play() : 
                                                 dispatch(setCurrentAudio({
                                                     track, idx: i,
@@ -99,17 +120,18 @@ const Album = ({ audio }: AudioProps) => {
                                         />
                                     ) : 
                                     <span style={
-                                        currentAudio?.idx === i
+                                        currentAudio?.idx === i && currentAudio?.track.album_id === albumId
                                             ? { color: theme.palette.primary.main }
                                             : {}
-                                    }>{ isPlaying && currentAudio?.idx === i ?
+                                    }>{ isPlaying && currentAudio?.track.album_id === albumId && 
+                                        currentAudio?.idx === i ?
                                         <BarChart /> :
                                         track.track_number
                                     }</span> }
                                 </TableCell>
                                 <TableCell className='track-title'>
                                     <span style={
-                                        currentAudio?.idx === i
+                                        currentAudio?.idx === i && currentAudio?.track.album_id === albumId
                                             ? { color: theme.palette.primary.main }
                                             : {}
                                     }>
