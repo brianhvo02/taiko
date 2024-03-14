@@ -8,7 +8,7 @@
     align-items: center;
 
     .track-meta {
-        width: 30%;
+        flex: 1;
         min-width: 11.25rem;
 
         display: flex;
@@ -72,8 +72,8 @@
     }
 
     .player-controls {
-        width: 40%;
         max-width: 45rem;
+        flex: 2;
 
         display: flex;
         align-items: center;
@@ -157,7 +157,7 @@
     }
 
     .player-options {
-        width: 30%;
+        flex: 1;
 
         display: flex;
         align-items: center;
@@ -181,7 +181,8 @@
         }
 
         .volume-slider {
-            flex: 0 1 9rem;
+            flex: 1;
+            max-width: 8rem;
 
             display: flex;
             align-items: center;

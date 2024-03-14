@@ -38,7 +38,30 @@ const LeftSidebar = () => {
     useEffect(() => {
         if (librarySearchFocus)
             librarySearchRef.current?.focus();
-    }, [librarySearchFocus])
+    }, [librarySearchFocus]);
+
+    const albumEntries = albums?.reduce((arr: JSX.Element[], { id, name, artist, cover_file }) => {
+        if (
+            (librarySearch.length > 0 && name.toLowerCase().includes(librarySearch.toLowerCase())) 
+            || librarySearch.length === 0
+        ) arr.push(
+            <li key={'library-item-' + id}>
+                <Link to={'/albums/' + id}>
+                    <img src={`/images/${cover_file}`} alt='album cover' />
+                    <div className='item-content'>
+                        <p style={{ color: currentAudio.tracks[currentAudio.idx]?.album_id === id ? 
+                            theme.palette.primary.main : theme.palette.text.primary
+                        }}>{name}</p>
+                        <p>Album <span>•</span> {artist}</p>
+                    </div>
+                    { currentAudio.tracks[currentAudio.idx]?.album_id === id && isPlaying &&
+                    <VolumeUpIcon color='primary' /> }
+                </Link>
+            </li>
+        );
+
+        return arr;
+    }, []);
 
     return (
         <nav className='left-sidebar'>
@@ -118,21 +141,7 @@ const LeftSidebar = () => {
                         </button>
                     </div>
                     <ul className='library-items'>
-                        {albums?.map(({ id, name, artist, cover_file }) => (
-                        <li key={'library-item-' + id}>
-                            <Link to={'/albums/' + id}>
-                                <img src={`/images/${cover_file}`} alt='album cover' />
-                                <div className='item-content'>
-                                    <p style={{ color: currentAudio?.track.album_id === id ? 
-                                        theme.palette.primary.main : theme.palette.text.primary
-                                    }}>{name}</p>
-                                    <p>Album <span>•</span> {artist}</p>
-                                </div>
-                                { currentAudio?.track.album_id === id && isPlaying &&
-                                <VolumeUpIcon color='primary' /> }
-                            </Link>
-                        </li>
-                        ))}
+                        {albumEntries}
                     </ul>
                 </div>
                 </div>

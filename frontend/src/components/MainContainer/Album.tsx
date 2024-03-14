@@ -2,9 +2,9 @@ import './Album.scss';
 import { useGetAlbumQuery } from '../../store/backend';
 import { useParams } from 'react-router-dom';
 import { skipToken } from '@reduxjs/toolkit/query';
-import { setCurrentAudio, useAudio } from '../../store/audio';
+import { setCurrentAudio, useAudio, useCurrentTrack } from '../../store/audio';
 import { useDispatch } from 'react-redux';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getDuration, secondsToTime } from '../../utils';
 import { Button, Dialog, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme } from '@mui/material';
 import { AccessTime, BarChart, Pause, PlayArrow, Album as Disc } from '@mui/icons-material';
@@ -12,7 +12,7 @@ import { setHeaderText, setShowHeaderText } from '../../store/layout';
 
 const Album = ({ audio }: AudioProps) => {
     const theme = useTheme();
-    const { currentAudio, isPlaying } = useAudio();
+    const { isPlaying } = useAudio();
     const { albumId } = useParams();
     const { data: album } = useGetAlbumQuery(albumId ?? skipToken);
     const dispatch = useDispatch();
@@ -20,6 +20,12 @@ const Album = ({ audio }: AudioProps) => {
     const [hover, setHover] = useState<number | null>(null);
     const [selected, setSelected] = useState<number | null>(null);
     const [showCover, setShowCover] = useState(false);
+    const containerRef = useRef<HTMLElement>(null);
+
+    useEffect(() => {
+        containerRef.current?.scrollTo({ top: 0 });
+        setSelected(null);
+    }, [albumId]);
 
     useEffect(() => {
         dispatch(setHeaderText(album?.name ?? ''));
@@ -28,6 +34,8 @@ const Album = ({ audio }: AudioProps) => {
     useEffect(() => {
         dispatch(setShowHeaderText(scrollHeight >= 245));
     }, [scrollHeight, dispatch]);
+
+    const currentTrack = useCurrentTrack();
 
     if (!album) return null;
 
@@ -57,43 +65,43 @@ const Album = ({ audio }: AudioProps) => {
                 onMouseLeave={() => setHover(null)}
                 onClick={() => setSelected(i)}
                 onDoubleClick={() => dispatch(setCurrentAudio({
-                    track, idx: i,
-                    trackList: album.tracks,
+                    idx: i,
+                    tracks: album.tracks,
                 }))}
             >
                 <TableCell align='right'>
                     { hover === i ? (
-                        isPlaying && currentAudio?.track.album_id === albumId && 
-                        currentAudio?.idx === i ?
+                        isPlaying && currentTrack?.track_id === track.track_id ?
                         <Pause 
                             onClick={() => audio.current.pause()}
                             onDoubleClick={(e) => e.stopPropagation()}
                         /> :
                         <PlayArrow 
-                            onClick={() => currentAudio?.idx === i && 
-                            currentAudio?.track.album_id === albumId ? 
+                            onClick={() => currentTrack?.track_id === track.track_id ? 
                                 audio.current.play() : 
                                 dispatch(setCurrentAudio({
-                                    track, idx: i,
-                                    trackList: album.tracks,
+                                    idx: i,
+                                    tracks: album.tracks,
                                 }))
                             } 
                             onDoubleClick={(e) => e.stopPropagation()}
                         />
                     ) : 
                     <span style={
-                        currentAudio?.idx === i && currentAudio?.track.album_id === albumId
+                        currentTrack?.track_id === track.track_id && 
+                        currentTrack?.album_id === albumId
                             ? { color: theme.palette.primary.main }
                             : {}
-                    }>{ isPlaying && currentAudio?.track.album_id === albumId && 
-                        currentAudio?.idx === i ?
+                    }>{ isPlaying && currentTrack?.album_id === albumId && 
+                        currentTrack?.track_id === track.track_id ?
                         <BarChart /> :
                         track.track_number
                     }</span> }
                 </TableCell>
                 <TableCell className='track-title'>
                     <span style={
-                        currentAudio?.idx === i && currentAudio?.track.album_id === albumId
+                        currentTrack?.track_id === track.track_id && 
+                        currentTrack?.album_id === albumId
                             ? { color: theme.palette.primary.main }
                             : {}
                     }>{track.title}</span>
@@ -108,7 +116,7 @@ const Album = ({ audio }: AudioProps) => {
     }, []);
 
     return (
-        <main className='album' onScroll={e => setScrollHeight(e.currentTarget.scrollTop)}>
+        <main className='album' ref={containerRef} onScroll={e => setScrollHeight(e.currentTarget.scrollTop)}>
             <Dialog onClose={() => setShowCover(false)} open={showCover} PaperProps={{
                 sx: { backgroundColor: 'transparent', boxShadow: 'none', }
             }}>

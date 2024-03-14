@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { forwardOne, previousOne, setElapsed, setDuration, setIsPlaying, setVolume, toggleRepeat, toggleShuffle, useAudio, toggleMute } from '../store/audio';
+import { forwardOne, previousOne, setElapsed, setDuration, setIsPlaying, setVolume, toggleRepeat, toggleShuffle, useAudio, toggleMute, useCurrentTrack } from '../store/audio';
 import './NowPlaying.scss';
 import { Slider } from '@mui/material';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
@@ -20,7 +20,7 @@ import { useDispatch } from 'react-redux';
 import { toggleRightSidebar } from '../store/layout';
 
 const NowPlaying = ({ audio }: AudioProps) => {
-    const { currentAudio, elapsed, duration, isPlaying, shuffle, repeat, volume } = useAudio();
+    const { currentAudio, shuffleState, elapsed, duration, isPlaying, repeat, volume } = useAudio();
     const dispatch = useDispatch();
     const [seeker, setSeeker] = useState<number>();
 
@@ -52,41 +52,41 @@ const NowPlaying = ({ audio }: AudioProps) => {
             audioEl.removeEventListener('ended', onEnded);
         }
     }, [audio, dispatch]);
+    
+    const currentTrack = useCurrentTrack();
 
     useEffect(() => {
-        if (!currentAudio) return;
+        if (!currentTrack) return;
         
-        audio.current.src = `/api/tracks/${currentAudio.track.track_id}/audio`;
-    }, [audio, currentAudio, dispatch]);
+        audio.current.src = `/api/tracks/${currentTrack.track_id}/audio`;
+    }, [audio, currentTrack, dispatch]);
 
     useEffect(() => {
         audio.current.loop = repeat === 'one';
     }, [audio, repeat]);
 
-    if (!currentAudio) return null;
-
-    const { track, trackList, idx } = currentAudio;
+    if (!currentAudio || !currentTrack) return null;
 
     return (
         <div className='now-playing'>
             <div className='track-meta'>
-                {track.cover_file &&
-                <img src={'/images/' + track.cover_file} alt='track cover'/>
+                {currentTrack.cover_file &&
+                <img src={'/images/' + currentTrack.cover_file} alt='track cover'/>
                 }
                 <div className='track-info'>
                     <div className='track-title'>
-                        <Link to={'/albums/' + track.album_id}>
-                            {track.title}
+                        <Link to={'/albums/' + currentTrack.album_id}>
+                            {currentTrack.title}
                         </Link>
                     </div>
-                    <Link to={'#'}>{track.album_artist}</Link>
+                    <Link to={'#'}>{currentTrack.album_artist}</Link>
                 </div>
             </div>
             <div className='player-controls'>
                 <div className='control-buttons'>
                     <button 
                         onClick={() => dispatch(toggleShuffle())} 
-                        className={shuffle ? 'active' : ''}
+                        className={shuffleState.active ? 'active' : ''}
                     ><ShuffleIcon />
                     </button>
                     <button
@@ -96,7 +96,7 @@ const NowPlaying = ({ audio }: AudioProps) => {
                             
                             audio.current.currentTime = 0;
                         }} 
-                        disabled={repeat === 'off' && idx === 0}
+                        disabled={repeat === 'off' && currentAudio?.idx === 0}
                     ><SkipPreviousIcon />
                     </button>
                     <button>
@@ -107,7 +107,7 @@ const NowPlaying = ({ audio }: AudioProps) => {
                     </button>
                     <button 
                         onClick={() => dispatch(forwardOne(true))} 
-                        disabled={repeat === 'off' && idx === trackList.length - 1}
+                        disabled={repeat === 'off' && currentAudio.idx === currentAudio.tracks.length - 1}
                     ><SkipNextIcon />
                     </button>
                     <button 

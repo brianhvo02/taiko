@@ -1,34 +1,45 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { useAppSelector } from './hooks';
-import { MutableRefObject } from 'react';
+import { MutableRefObject, useEffect, useMemo, useRef } from 'react';
+import _ from 'lodash';
 
-export interface CurrentAudio {
+interface CurrentAudio {
     idx: number,
-    trackList: Track[];
-    track: Track;
+    tracks: Track[];
+}
+
+interface ShuffleState {
+    active: boolean;
+    map: number[];
 }
 
 const REPEAT_MODES = ['off', 'all', 'one'] as const;
 export type RepeatMode = typeof REPEAT_MODES[number];
 
 interface AudioState {
-    currentAudio: CurrentAudio | null;
+    currentAudio: CurrentAudio;
+    shuffleState: ShuffleState;
     elapsed: number;
     duration: number;
     isPlaying: boolean;
-    shuffle: boolean;
     repeat: RepeatMode;
     volume: number;
     volumeMemory: number | null;
 }
 
 const initialState: AudioState = {
-    currentAudio: null,
+    currentAudio: {
+        idx: -1,
+        tracks: [],
+    },
+    shuffleState: {
+        active: false,
+        map: [],
+    },
     elapsed: 0,
     duration: 0,
     isPlaying: false,
-    shuffle: false,
     repeat: 'off',
     volume: 100,
     volumeMemory: null,
@@ -39,6 +50,19 @@ export const audioSlice = createSlice({
     initialState,
     reducers: {
         setCurrentAudio: (state, { payload }: PayloadAction<CurrentAudio>) => {
+            if (state.shuffleState.active) {
+                const { idx, tracks } = payload;
+                const indices = [...Array(tracks.length).keys()];
+                state.shuffleState.map = _.shuffle(indices.slice(0, idx).concat(indices.slice(idx + 1, tracks.length)));
+                state.shuffleState.map.unshift(idx);
+                state.currentAudio = {
+                    tracks,
+                    idx: 0,
+                }
+
+                return;
+            }
+
             state.currentAudio = payload;
         },
         setElapsed: (state, { payload }: PayloadAction<number>) => {
@@ -54,7 +78,19 @@ export const audioSlice = createSlice({
             state.isPlaying = payload;
         },
         toggleShuffle: state => {
-            state.shuffle = !state.shuffle;
+            state.shuffleState.active = !state.shuffleState.active;
+            if (!state.currentAudio) return;
+
+            if (state.shuffleState.active) {
+                const { idx, tracks } = state.currentAudio;
+                const indices = [...Array(tracks.length).keys()];
+                state.shuffleState.map = _.shuffle(indices.slice(0, idx).concat(indices.slice(idx + 1, tracks.length)));
+                state.shuffleState.map.unshift(idx);
+                state.currentAudio.idx = 0;
+            } else {
+                state.currentAudio.idx = state.shuffleState.map[state.currentAudio.idx];
+                state.shuffleState.map = [];
+            }
         },
         toggleRepeat: state => {
             state.repeat = REPEAT_MODES[(REPEAT_MODES.indexOf(state.repeat) + 1) % 3];
@@ -63,12 +99,11 @@ export const audioSlice = createSlice({
             if (!state.currentAudio || (state.repeat === 'one' && !payload))
                 return;
 
-            const { trackList, idx } = state.currentAudio;
-            if (state.repeat === 'off' && idx === trackList.length - 1)
+            const { tracks, idx } = state.currentAudio;
+            if (state.repeat === 'off' && idx === tracks.length - 1)
                 return;
 
-            state.currentAudio.idx = (idx + 1) % trackList.length;
-            state.currentAudio.track = trackList[state.currentAudio.idx];
+            state.currentAudio.idx = (idx + 1) % tracks.length;
 
             if (state.repeat === 'one')
                 state.repeat = 'all';
@@ -77,12 +112,11 @@ export const audioSlice = createSlice({
             if (!state.currentAudio)
                 return;
 
-            const { trackList, idx } = state.currentAudio;
+            const { tracks, idx } = state.currentAudio;
             if (state.repeat === 'off' && idx === 0)
                 return;
 
-            state.currentAudio.idx = idx - 1 < 0 ? trackList.length - 1 : idx - 1;
-            state.currentAudio.track = trackList[state.currentAudio.idx];
+            state.currentAudio.idx = idx - 1 < 0 ? tracks.length - 1 : idx - 1;
 
             if (state.repeat === 'one')
                 state.repeat = 'all';
@@ -111,5 +145,17 @@ export const {
 } = audioSlice.actions;
 
 export const useAudio = () => useAppSelector(state => state.audio);
+
+export const useCurrentTrack = () => {
+    const { currentAudio, shuffleState } = useAudio();
+
+    const currentTrack = useMemo(() => {
+        return currentAudio.tracks[
+            shuffleState.active ? shuffleState.map[currentAudio.idx] : currentAudio.idx
+        ]
+    }, [currentAudio, shuffleState]);
+
+    return currentTrack;
+}
 
 export default audioSlice;
