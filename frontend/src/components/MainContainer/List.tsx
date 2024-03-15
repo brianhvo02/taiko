@@ -2,8 +2,8 @@ import './List.scss';
 import { backendApi, useCurrentUser, useGetAlbumQuery, useGetPlaylistQuery, useGetPlaylistsQuery } from '../../store/backend';
 import { useNavigate, useParams } from 'react-router-dom';
 import { skipToken } from '@reduxjs/toolkit/query';
-import { setCurrentAudio, useAudio, useCurrentTrack } from '../../store/audio';
-import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { setCurrentAudio, useCurrentAudio, useCurrentTrack, useIsPlaying } from '../../store/audio';
+import { MouseEvent, createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { getDuration, secondsToTime } from '../../utils';
 import { Button, Dialog, DialogTitle, ListItemIcon, ListItemText, Menu, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, useTheme } from '@mui/material';
 import { AccessTime, BarChart, Pause, PlayArrow, Album as Disc, Add, Album, DeleteOutline } from '@mui/icons-material';
@@ -15,7 +15,8 @@ const List = ({ audio }: AudioProps) => {
     const theme = useTheme();
     const navigate = useNavigate();
     const dispatch = useAppDispatch();
-    const { isPlaying, currentAudio } = useAudio();
+    const currentAudio = useCurrentAudio();
+    const isPlaying = useIsPlaying();
     const { albumId, playlistId } = useParams();
     const { data: playlists } = useGetPlaylistsQuery();
     const { data: album, isLoading: albumIsLoading } = useGetAlbumQuery(albumId ?? skipToken);
@@ -26,6 +27,7 @@ const List = ({ audio }: AudioProps) => {
     const [selected, setSelected] = useState<number | null>(null);
     const [showCover, setShowCover] = useState(false);
     const [showPlaylistAdd, setShowPlaylistAdd] = useState(false);
+    const [coverLoading, setCoverLoading] = useState(true);
     const [error, setError] = useState('');
     const containerRef = useRef<HTMLElement>(null);
     const currentUser = useCurrentUser();
@@ -118,7 +120,20 @@ const List = ({ audio }: AudioProps) => {
 
     const listId = albumId ?? playlistId ?? '';
 
+    const listCover = useMemo(() => {
+        setCoverLoading(true);
+        const coverPath = (albumId ? album?.cover_file : (playlist && playlist.id + '.png')) ?? '';
+        const image = createElement('img', {
+            onLoad: () => {
+                setCoverLoading(false);
+            },
+            src: `/images/${coverPath}?t=${new Date().getTime()}`
+        });
+        return image;
+    }, [album, albumId, playlist]);
+
     if (!tracks || albumIsLoading || playlistIsLoading) return null;
+    if (coverLoading) return <div style={{ opacity: 0 }}>{listCover}</div>;
 
     const totalDuration = tracks.reduce((total, track) => total + track.duration, 0);
 
@@ -203,14 +218,12 @@ const List = ({ audio }: AudioProps) => {
         return arr;
     }, []);
 
-    const imagePath = albumId ? album?.cover_file : (playlist && playlist.id + '.png') ?? '';
-
     return (
         <main className='list' ref={containerRef} onScroll={e => setScrollHeight(e.currentTarget.scrollTop)}>
             <Dialog onClose={() => setShowCover(false)} open={showCover} PaperProps={{
                 sx: { backgroundColor: 'transparent', boxShadow: 'none', }
             }}>
-                <img src={`/images/${imagePath}?t=${new Date().getTime()}`} alt='list cover' />
+                {listCover}
                 <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2rem' }}>
                     <Button variant='text' sx={{ 
                         textTransform: 'none', color: theme.palette.text.primary,
@@ -284,7 +297,7 @@ const List = ({ audio }: AudioProps) => {
                 <div className='top-gradient' />
                 <div className='list-meta'>
                     <button onClick={() => setShowCover(true)}>
-                        <img src={`/images/${imagePath}?t=${new Date().getTime()}`} alt='album cover' />
+                        {listCover}
                     </button>
                     <div className='list-info'>
                         <span>{albumId ? 'Album' : 'Playlist'}</span>

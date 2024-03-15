@@ -11,7 +11,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react';
 import _ from 'lodash';
 import { backendApi, useCurrentUser, useGetAlbumsQuery, useGetPlaylistsQuery } from '../store/backend';
 import { Box, Button, Dialog, DialogTitle, FormHelperText, TextField, useTheme } from '@mui/material';
-import { useAudio } from '../store/audio';
+import { useCurrentAudio, useIsPlaying } from '../store/audio';
 import { useAppDispatch } from '../store/hooks';
 import { setShowAuth } from '../store/layout';
 import { Close } from '@mui/icons-material';
@@ -31,7 +31,8 @@ const getSortBy = (sortBy: SortBy) => {
 
 const LeftSidebar = () => {
     const theme = useTheme();
-    const { currentAudio, isPlaying } = useAudio();
+    const currentAudio = useCurrentAudio();
+    const isPlaying = useIsPlaying();
     const [librarySearch, setLibrarySearch] = useState('');
     const [librarySearchFocus, setLibrarySearchFocus] = useState(false);
     const librarySearchRef = useRef<HTMLInputElement>(null);

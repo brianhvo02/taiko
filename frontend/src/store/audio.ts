@@ -147,9 +147,13 @@ export const {
 } = audioSlice.actions;
 
 export const useAudio = () => useAppSelector(state => state.audio);
+export const useCurrentAudio = () => useAppSelector(state => state.audio.currentAudio);
+export const useShuffleState = () => useAppSelector(state => state.audio.shuffleState);
+export const useIsPlaying = () => useAppSelector(state => state.audio.isPlaying);
 
 export const useCurrentTrack = () => {
-    const { currentAudio, shuffleState } = useAudio();
+    const currentAudio = useCurrentAudio();
+    const shuffleState = useShuffleState();
 
     const currentTrack = useMemo(() => {
         return currentAudio.tracks[
