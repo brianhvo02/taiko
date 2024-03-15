@@ -15,6 +15,7 @@ const MainContainer = ({ audio }: AudioProps) => {
             <Routes>
                 <Route path='/' Component={Home} />
                 <Route path='/albums/:albumId' element={<List audio={audio}></List>} />
+                <Route path='/playlists/:playlistId' element={<List audio={audio}></List>} />
             </Routes>
             <Footer />
         </div>

@@ -61,6 +61,7 @@ const Header = () => {
     useEffect(() => {
         if (showAuth) return;
 
+        setError('');
         setDisplayName('');
         setUsername('');
         setPassword('');

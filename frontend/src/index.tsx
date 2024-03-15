@@ -17,15 +17,16 @@ const themeOptions: ThemeOptions = {
         mode: 'dark',
         text: {
             primary: '#ffffff',
-            secondary: '#a7a7a7'
+            secondary: '#a7a7a7',
         },
         primary: {
             main: '#2d89ef',
-            200: '#6cacf4'
+            200: '#6cacf4',
         },
-        // background: {
-        //     default: ''
-        // },
+        background: {
+            default: '#121212',
+            paper: '#282828',
+        },
     },
     components: {
         MuiTableCell: {

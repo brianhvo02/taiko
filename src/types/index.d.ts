@@ -21,6 +21,10 @@ interface Track {
     album: string;
     album_artist: string;
     artists: string;
+    playlist_index?: number;
+    playlist_id?: string;
+    playlist_name?: string;
+    playlist_owner?: string;
 }
 
 interface Album {

@@ -15,7 +15,10 @@ export const getAlbums = async (req: Request, res: Response, next: NextFunction)
 
     db.getAlbumsWithTracks(limit, page)
         .then(payload => res.json({ payload, success: true }))
-        .catch(() => res.status(500).json({ success: false }));
+        .catch(e => {
+            console.error(e);
+            res.status(500).json({ success: false })
+        });
 }
 
 export const getAlbum = async (req: Request, res: Response, next: NextFunction) => {
@@ -25,5 +28,8 @@ export const getAlbum = async (req: Request, res: Response, next: NextFunction) 
     db.getAlbum(req.params.albumId)
         .then(payload => res.status(payload ? 200 : 404)
             .json({ payload, success: !!payload }))
-        .catch(() => res.status(500).json({ success: false }));
+        .catch(e => {
+            console.error(e);
+            res.status(500).json({ success: false })
+        });
 }

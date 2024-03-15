@@ -9,7 +9,7 @@ const App = () => {
     const audio = useRef<HTMLAudioElement>(new Audio());
 
     return (
-        <div className='app'>
+        <div className='app' onContextMenu={e => e.preventDefault()}>
             <LeftSidebar />
             <NowPlaying audio={audio} />
             <MainContainer audio={audio} />

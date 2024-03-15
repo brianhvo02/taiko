@@ -18,7 +18,7 @@
     align-items: center;
     padding: 0.25rem 1.325rem;
 
-    background-color: #121212;
+    background-color: var(--mui-palette-background-default);
 
     span {
         font-size: 0.875rem;
@@ -165,6 +165,10 @@
                 padding: 0.5rem 1rem;
             }
 
+            th:first-child {
+                width: 4rem;
+            }
+
             td:first-child {
                 svg {
                     font-size: 1.5rem;
@@ -174,7 +178,6 @@
                     color: var(--mui-palette-text-primary);
                 }
 
-                width: 4rem;
                 font-size: 1rem;
             }
 
@@ -185,11 +188,25 @@
 
             .track-title {
                 display: flex;
-                flex-direction: column;
-                span:first-child {
-                    color: var(--mui-palette-text-primary);
-                    font-size: 1rem;
-                    line-height: 1.75rem;
+                align-items: center;
+                gap: 1rem;
+
+                img {
+                    width: 40px;
+                    height: 40px;
+                    object-fit: cover;
+                    border-radius: 4px;
+                }
+                
+                div {
+                    display: flex;
+                    flex-direction: column;
+                    
+                    span:first-child {
+                        color: var(--mui-palette-text-primary);
+                        font-size: 1rem;
+                        line-height: 1.75rem;
+                    }
                 }
             }
 
@@ -197,5 +214,32 @@
                 color: var(--mui-palette-text-primary);
             }
         }
+    }
+}
+
+.list-context li {
+    font-family: inherit;
+
+    svg {
+        color: var(--mui-palette-text-secondary);
+    }
+
+    span {
+        font-family: inherit;
+        font-size: 0.875rem;
+    }
+}
+
+.playlist-selection {
+    margin-top: 1rem;
+
+    li {
+        padding: 1rem;
+        font-size: 1rem;
+        line-height: 1.25rem;
+    }
+
+    li:hover {
+        background-color: var(--mui-palette-action-hover);
     }
 }

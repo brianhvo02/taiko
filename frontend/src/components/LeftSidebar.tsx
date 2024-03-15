@@ -7,7 +7,7 @@ import AddIcon from '@mui/icons-material/Add';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import _ from 'lodash';
 import { backendApi, useCurrentUser, useGetAlbumsQuery, useGetPlaylistsQuery } from '../store/backend';
 import { Box, Button, Dialog, DialogTitle, FormHelperText, TextField, useTheme } from '@mui/material';
@@ -77,7 +77,7 @@ const LeftSidebar = () => {
             librarySearchRef.current?.focus();
     }, [librarySearchFocus]);
 
-    const entries = [...(albums ?? []), ...playlists ?? []].reduce((arr: JSX.Element[], list) => {
+    const entries = useMemo(() => [...(albums ?? []), ...playlists ?? []].reduce((arr: JSX.Element[], list) => {
         const { id, name } = list;
 
         const isPlaylist = (list: any): list is Omit<Playlist, 'tracks'> => !!list.owner;
@@ -89,8 +89,8 @@ const LeftSidebar = () => {
             || librarySearch.length === 0
         ) arr.push(
             <li key={'library-item-' + id}>
-                <Link to={(isPlaylist(list) ? '/playlist/' : '/albums/') + id}>
-                    <img src={`/images/${imagePath}`} alt='album cover' />
+                <Link to={(isPlaylist(list) ? '/playlists/' : '/albums/') + id}>
+                    <img src={`/images/${imagePath}?t=${new Date().getTime()}`} alt='album cover' />
                     <div className='item-content'>
                         <p style={{ color: currentAudio.tracks[currentAudio.idx]?.album_id === id ? 
                             theme.palette.primary.main : theme.palette.text.primary
@@ -104,7 +104,7 @@ const LeftSidebar = () => {
         );
 
         return arr;
-    }, []);
+    }, []), [albums, currentAudio, isPlaying, librarySearch, playlists, theme]);
 
     return (
         <nav className='left-sidebar'>

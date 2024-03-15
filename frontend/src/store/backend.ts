@@ -19,7 +19,7 @@ export const backendApi = createApi({
             transformResponse: (res: Query<Omit<Playlist, 'tracks'>[]>) => res.success ? res.payload : []
         }),
         getPlaylist: builder.query<Playlist | null, string>({
-            query: albumId => '/albums/' + albumId,
+            query: playlistId => '/playlists/' + playlistId,
             providesTags: result => result ? [{ type: 'Playlist', id: result.id }, 'Playlist'] : ['Playlist'],
             transformResponse: (res: Query<Playlist>) => res.success ? res.payload : null
         }),

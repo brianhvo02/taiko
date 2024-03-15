@@ -35,7 +35,7 @@ const Home = () => {
 
     return (
         <main className='home' onScroll={e => setTop(e.currentTarget.scrollTop === 0)}>
-            <div className='home-header-spacer' style={top ? {} : { backgroundColor: '#121212', opacity: 1 }} />
+            <div className='home-header-spacer' style={top ? {} : { backgroundColor: 'var(--mui-palette-text-primary)', opacity: 1 }} />
             <div className='home-content'>
                 <div className='top-gradient' />
                 <div className='content-container'>

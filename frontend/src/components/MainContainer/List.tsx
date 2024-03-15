@@ -1,37 +1,114 @@
 import './List.scss';
-import { useGetAlbumQuery, useGetPlaylistQuery } from '../../store/backend';
-import { useParams } from 'react-router-dom';
+import { backendApi, useCurrentUser, useGetAlbumQuery, useGetPlaylistQuery, useGetPlaylistsQuery } from '../../store/backend';
+import { useNavigate, useParams } from 'react-router-dom';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { setCurrentAudio, useAudio, useCurrentTrack } from '../../store/audio';
-import { useDispatch } from 'react-redux';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { getDuration, secondsToTime } from '../../utils';
-import { Button, Dialog, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, useTheme } from '@mui/material';
-import { AccessTime, BarChart, Pause, PlayArrow, Album as Disc } from '@mui/icons-material';
-import { setHeaderText, setShowHeaderText } from '../../store/layout';
+import { Button, Dialog, DialogTitle, ListItemIcon, ListItemText, Menu, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, useTheme } from '@mui/material';
+import { AccessTime, BarChart, Pause, PlayArrow, Album as Disc, Add, Album, DeleteOutline } from '@mui/icons-material';
+import { setHeaderText, setShowAuth, setShowHeaderText } from '../../store/layout';
+import { useAppDispatch } from '../../store/hooks';
+import Cookies from 'js-cookie';
 
 const List = ({ audio }: AudioProps) => {
     const theme = useTheme();
+    const navigate = useNavigate();
+    const dispatch = useAppDispatch();
     const { isPlaying } = useAudio();
     const { albumId, playlistId } = useParams();
-    const { data: album } = useGetAlbumQuery(albumId ?? skipToken);
-    const { data: playlist } = useGetPlaylistQuery(playlistId ?? skipToken);
-    const tracks = useMemo(() => (album ?? playlist)?.tracks, [album, playlist]);
-    const dispatch = useDispatch();
+    const { data: playlists } = useGetPlaylistsQuery();
+    const { data: album, isLoading: albumIsLoading } = useGetAlbumQuery(albumId ?? skipToken);
+    const { data: playlist, isLoading: playlistIsLoading } = useGetPlaylistQuery(playlistId ?? skipToken);
+    const tracks = useMemo(() => (albumId ? album : playlist)?.tracks, [album, albumId, playlist]);
     const [scrollHeight, setScrollHeight] = useState(0);
     const [hover, setHover] = useState<number | null>(null);
     const [selected, setSelected] = useState<number | null>(null);
     const [showCover, setShowCover] = useState(false);
+    const [showPlaylistAdd, setShowPlaylistAdd] = useState(false);
+    const [error, setError] = useState('');
     const containerRef = useRef<HTMLElement>(null);
+    const currentUser = useCurrentUser();
+
+    const [contextMenu, setContextMenu] = useState<{
+        track: Track;
+        mouseX: number;
+        mouseY: number;
+    } | null>(null);
+    
+    const handleContextMenu = (track: Track, e: MouseEvent) => {
+        e.preventDefault();
+        if (!playlist && !currentUser) return;
+
+        setContextMenu(
+            contextMenu === null ? {
+                track,
+                mouseX: e.clientX + 2,
+                mouseY: e.clientY - 6,
+            } : null
+        );
+    };
+
+    const handlePlaylistAdd = (playlistId: string) => {
+        if (!contextMenu) return;
+
+        fetch(`/api/playlists/${playlistId}/track`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': Cookies.get('token') ?? ''
+            },
+            body: JSON.stringify({ trackId: contextMenu.track.track_id }),
+        }).then(res => res.json())
+            .then(({ success }) => {
+                if (success) {
+                    setShowPlaylistAdd(false);
+                    setContextMenu(null);
+                    dispatch(backendApi.util.invalidateTags(['Playlist', { type: 'Playlist', id: playlistId }]));
+                } else {
+                    setError('Couldn\'t add track to playlist, may be a duplicate.');
+                }
+            })
+            .catch(e => {
+                console.error(e);
+                setError('Couldn\'t add track to playlist, may be a duplicate.');
+            });
+    }
+
+    const handlePlaylistRemove = () => {
+        if (!contextMenu) return;
+
+        fetch(`/api/playlists/${playlistId}/track`, {
+            method: 'DELETE',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': Cookies.get('token') ?? ''
+            },
+            body: JSON.stringify({ trackId: contextMenu.track.track_id }),
+        }).then(res => res.json())
+            .then(({ success }) => {
+                if (success) {
+                    setContextMenu(null);
+                    dispatch(backendApi.util.invalidateTags(['Playlist', { type: 'Playlist', id: playlistId }]));
+                } else {
+                    setError('Couldn\'t remove track from playlist.');
+                }
+            })
+            .catch(e => {
+                console.error(e);
+                setError('Couldn\'t remove track from playlist.');
+            });
+    }
 
     useEffect(() => {
         containerRef.current?.scrollTo({ top: 0 });
         setSelected(null);
-    }, [albumId]);
+        setError('');
+    }, [albumId, playlistId]);
 
     useEffect(() => {
-        dispatch(setHeaderText((album ?? playlist)?.name ?? ''));
-    }, [dispatch, album, playlist]);
+        dispatch(setHeaderText((albumId ? album : playlist)?.name ?? ''));
+    }, [dispatch, albumId, album, playlist]);
 
     useEffect(() => {
         dispatch(setShowHeaderText(scrollHeight >= 245));
@@ -39,7 +116,7 @@ const List = ({ audio }: AudioProps) => {
 
     const currentTrack = useCurrentTrack();
 
-    if (!tracks) return null;
+    if (!tracks || albumIsLoading || playlistIsLoading) return null;
 
     const totalDuration = tracks.reduce((total, track) => total + track.duration, 0);
 
@@ -65,6 +142,7 @@ const List = ({ audio }: AudioProps) => {
                 selected={selected === i}
                 onMouseEnter={() => setHover(i)} 
                 onMouseLeave={() => setHover(null)}
+                onContextMenu={handleContextMenu.bind(null, track)}
                 onClick={() => setSelected(i)}
                 onDoubleClick={() => dispatch(setCurrentAudio({
                     idx: i,
@@ -97,17 +175,21 @@ const List = ({ audio }: AudioProps) => {
                     }>{ isPlaying && currentTrack?.album_id === albumId && 
                         currentTrack?.track_id === track.track_id ?
                         <BarChart /> :
-                        track.track_number
+                        (albumId ? track.track_number : i + 1)
                     }</span> }
                 </TableCell>
                 <TableCell className='track-title'>
-                    <span style={
-                        currentTrack?.track_id === track.track_id && 
-                        currentTrack?.album_id === albumId
-                            ? { color: theme.palette.primary.main }
-                            : {}
-                    }>{track.title}</span>
-                    <span>{track.artists.replaceAll(';', ', ')}</span>
+                    { playlistId &&
+                    <img src={'/images/' + track.cover_file} alt='album cover' /> }
+                    <div>
+                        <span style={
+                            currentTrack?.track_id === track.track_id && 
+                            currentTrack?.album_id === albumId
+                                ? { color: theme.palette.primary.main }
+                                : {}
+                        }>{track.title}</span>
+                        <span>{track.artists.replaceAll(';', ', ')}</span>
+                    </div>
                 </TableCell>
                 <TableCell align='right'>
                     {secondsToTime(track.duration)}
@@ -117,14 +199,14 @@ const List = ({ audio }: AudioProps) => {
         return arr;
     }, []);
 
-    const imagePath = album?.cover_file ?? (playlist ? playlist.id + '.png ': '');
+    const imagePath = albumId ? album?.cover_file : (playlist && playlist.id + '.png') ?? '';
 
     return (
         <main className='list' ref={containerRef} onScroll={e => setScrollHeight(e.currentTarget.scrollTop)}>
             <Dialog onClose={() => setShowCover(false)} open={showCover} PaperProps={{
                 sx: { backgroundColor: 'transparent', boxShadow: 'none', }
             }}>
-                <img src={`/images/${imagePath}`} alt='list cover' />
+                <img src={`/images/${imagePath}?t=${new Date().getTime()}`} alt='list cover' />
                 <div style={{ display: 'flex', justifyContent: 'center', marginTop: '2rem' }}>
                     <Button variant='text' sx={{ 
                         textTransform: 'none', color: theme.palette.text.primary,
@@ -132,6 +214,60 @@ const List = ({ audio }: AudioProps) => {
                     }} onClick={() => setShowCover(false)}>Close</Button>
                 </div>
             </Dialog>
+            <Dialog onClose={() => {
+                setShowPlaylistAdd(false);
+                setContextMenu(null);
+            }} open={showPlaylistAdd} PaperProps={{ sx: { p: '1rem' } }}>
+                <DialogTitle sx={{ mb: 1 }}>Select playlist to add "{contextMenu?.track.title}"</DialogTitle>
+                <p>{error}</p>
+                <TextField label='Find a playlist' autoComplete='playlists' />
+                <ul className='playlist-selection'>
+                    { playlists?.map(playlist => {
+                        return (
+                    <li key={playlist.id} onClick={handlePlaylistAdd.bind(null, playlist.id)}>
+                        <span>{playlist.name}</span>
+                    </li>
+                        )
+                    }) }
+                </ul>
+            </Dialog>
+            <Menu
+                className='list-context'
+                open={contextMenu !== null}
+                onClose={() => setContextMenu(null)}
+                anchorReference='anchorPosition'
+                anchorPosition={
+                    contextMenu !== null
+                        ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+                        : undefined
+                }
+            >
+                { currentUser &&
+                <MenuItem onClick={() => setShowPlaylistAdd(true)} sx={{ fontFamily: 'inherit' }}>
+                    <ListItemIcon>
+                        <Add />
+                    </ListItemIcon>
+                    <ListItemText>Add to playlist</ListItemText>
+                </MenuItem>
+                }
+                { playlistId && currentUser &&
+                <MenuItem onClick={handlePlaylistRemove} sx={{ fontFamily: 'inherit' }}>
+                    <ListItemIcon>
+                        <DeleteOutline />
+                    </ListItemIcon>
+                    <ListItemText>Remove from this playlist</ListItemText>
+                </MenuItem> }
+                { playlistId &&
+                <MenuItem onClick={() => {
+                    setContextMenu(null);
+                    navigate('/albums/' + contextMenu?.track.album_id);
+                }} sx={{ fontFamily: 'inherit' }}>
+                    <ListItemIcon>
+                        <Album />
+                    </ListItemIcon>
+                    <span>Go to album</span>
+                </MenuItem> }
+            </Menu>
             <div className='home-header-spacer' style={scrollHeight >= 245 ? { opacity: 1 } : {}} />
             <div className='list-table-header' style={scrollHeight >= 304 ? { opacity: 1 } : {}}>
                 <span>#</span>
@@ -144,19 +280,19 @@ const List = ({ audio }: AudioProps) => {
                 <div className='top-gradient' />
                 <div className='list-meta'>
                     <button onClick={() => setShowCover(true)}>
-                        <img src={`/images/${imagePath}`} alt='album cover' />
+                        <img src={`/images/${imagePath}?t=${new Date().getTime()}`} alt='album cover' />
                     </button>
                     <div className='list-info'>
-                        <span>Album</span>
+                        <span>{albumId ? 'Album' : 'Playlist'}</span>
                         <span className='list-name'>
-                            <h1>{(album ?? playlist)?.name ?? ''}</h1>
+                            <h1>{(albumId ? album : playlist)?.name ?? ''}</h1>
                         </span>
                         <div className='additional-info'>
-                            { playlist && <>
+                            { playlistId && playlist && <>
                             <span>{playlist.owner}</span>
                             <span className='divider'>•</span>
                             </> }
-                            { album && <>
+                            { albumId && album && <>
                             <span>{album.artist}</span>
                             <span className='divider'>•</span>
                             <span>{album.year.slice(0, 4)}</span>
