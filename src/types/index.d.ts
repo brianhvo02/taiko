@@ -54,8 +54,3 @@ interface UserWithPasswordDigest extends User {
 }
 
 type UserLogin = Pick<UserWithPassword, 'username' | 'password'>;
-
-interface UserPayload {
-    token: string;
-    user: User;
-}

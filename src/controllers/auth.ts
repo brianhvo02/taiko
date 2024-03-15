@@ -42,7 +42,7 @@ export const createUser = async (req: Request, res: Response, next: NextFunction
     
     const token = jwt.sign(user.id, jwtSecret);
 
-    res.json({ payload: { token, user }, success: true });
+    res.cookie('token', token).json({ payload: user, success: true });
 }
 
 export const loginUser = async (req: Request, res: Response, next: NextFunction) => {
@@ -56,5 +56,5 @@ export const loginUser = async (req: Request, res: Response, next: NextFunction)
 
     const token = jwt.sign(user.id, jwtSecret);
 
-    res.json({ payload: { token, user }, success: true });
+    res.cookie('token', token).json({ payload: user, success: true });
 }
