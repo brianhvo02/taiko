@@ -6,11 +6,14 @@ import { existsSync } from 'fs';
 import { writeFile } from 'fs/promises';
 import { glob } from 'glob';
 import { randomUUID } from 'crypto';
-import { mkdir, rm } from 'fs/promises';
+import { mkdir } from 'fs/promises';
 import EventEmitter from 'events';
 import { getAudioDurationInSeconds } from 'get-audio-duration';
+import { compare, hash } from 'bcrypt';
+import _ from 'lodash';
 
 const DATABASE_PATH = './metadata.db';
+const SALT_ROUNDS = 10;
 
 export default class MetadataDatabase {
     db: sqlite3.Database;
@@ -40,6 +43,7 @@ export default class MetadataDatabase {
                 name TEXT UNIQUE
             )`
         );
+
         await db.exec(
             `CREATE TABLE albums (
                 id TEXT PRIMARY KEY, 
@@ -49,6 +53,7 @@ export default class MetadataDatabase {
             )`
         );
         await db.exec('CREATE UNIQUE INDEX album_idx ON albums (name, artist_id)');
+
         await db.exec(
             `CREATE TABLE tracks (
                 id TEXT PRIMARY KEY, 
@@ -64,6 +69,7 @@ export default class MetadataDatabase {
             )`
         );
         await db.exec('CREATE UNIQUE INDEX track_idx ON tracks (album_id, disc_number, track_number)');
+
         await db.exec(
             `CREATE TABLE track_artists (
                 track_id TEXT, 
@@ -73,6 +79,35 @@ export default class MetadataDatabase {
             )`
         );
         await db.exec('CREATE UNIQUE INDEX track_artists_idx ON track_artists (track_id, artist_id)');
+
+        await db.exec(
+            `CREATE TABLE users (
+                id TEXT PRIMARY KEY, 
+                display_name TEXT NOT NULL, 
+                username TEXT UNIQUE,
+                password_digest TEXT NOT NULL
+            )`
+        );
+
+        await db.exec(
+            `CREATE TABLE playlist (
+                id TEXT PRIMARY KEY, 
+                name TEXT NOT NULL, 
+                owner_id TEXT, 
+                FOREIGN KEY(owner_id) REFERENCES users(id)
+            )`
+        );
+
+        await db.exec(
+            `CREATE TABLE playlist_tracks (
+                idx INTEGER,
+                playlist_id TEXT, 
+                track_id TEXT, 
+                FOREIGN KEY(playlist_id) REFERENCES playlists(id)
+                FOREIGN KEY(track_id) REFERENCES tracks(id), 
+            )`
+        );
+        await db.exec('CREATE UNIQUE INDEX playlist_track_idx ON playlist_tracks (idx, playlist_id)');
 
         return db;
     }
@@ -177,7 +212,157 @@ export default class MetadataDatabase {
 
         return emitter;
     }
+
+    getAlbums = async (limit: number, page: number) => db.all<Omit<Album, 'tracks'>>(
+        `SELECT
+            albums.id as id, albums.name AS name, artists.name AS artist, cover_file, year
+        FROM albums
+        JOIN artists
+            ON albums.artist_id = artists.id
+        LEFT JOIN tracks
+            ON albums.id = tracks.album_id
+        GROUP BY albums.id
+        HAVING MIN(track_number)
+        ORDER BY artist, name
+        LIMIT (?)
+        OFFSET (?)`,
+        limit, (page - 1) * limit
+    );
+
+    async getAlbumsWithTracks(limit: number, page: number) {
+        const rawAlbums = await db.all<Track>(
+            `SELECT 
+                album_artist, album, track_number, disc_number, title, year, duration, cover_file, file_path,
+                tracks.id AS track_id, album_id,
+                GROUP_CONCAT(artists.name, ";") AS artists
+            FROM (
+                SELECT
+                    albums.id, albums.name AS album, artists.name AS album_artist
+                FROM albums
+                JOIN artists
+                    ON albums.artist_id = artists.id
+                ORDER BY album_artist, album
+                LIMIT (?)
+                OFFSET (?)
+            ) AS albums
+            JOIN tracks 
+                ON album_id = albums.id 
+            JOIN track_artists
+                ON track_artists.track_id = tracks.id
+            JOIN artists
+                ON track_artists.artist_id = artists.id
+            GROUP BY tracks.id
+            ORDER BY album_artist, album, disc_number, track_number`,
+            limit, (page - 1) * limit
+        );
+
+        if (!rawAlbums)
+            throw new Error();
+
+        const albumsMap = rawAlbums.reduce((map: Record<string, Album>, track) => {
+            (map[track.album_id] ??= {
+                id: track.album_id,
+                name: track.album,
+                artist: track.album_artist,
+                year: track.year,
+                cover_file: track.cover_file,
+                tracks: [] as Track[]
+            }).tracks.push(track);
+            return map;
+        }, {});
+
+        return Object.values(albumsMap);
+    }
+
+    async getAlbum(albumId: string) {
+        const tracks = await db.all<Track>(
+            `SELECT 
+                track_number, disc_number, title, year, duration, cover_file, file_path, tracks.album_id,
+                tracks.id AS track_id,
+                album_artists.name AS album_artist,
+                albums.name AS album, 
+                GROUP_CONCAT(artists.name, ";") AS artists
+            FROM tracks
+            JOIN artists AS album_artists
+                ON albums.artist_id = album_artists.id
+            JOIN albums 
+                ON tracks.album_id = albums.id 
+            JOIN track_artists
+                ON track_artists.track_id = tracks.id
+            JOIN artists
+                ON track_artists.artist_id = artists.id
+            WHERE albums.id = (?)
+            GROUP BY tracks.id
+            ORDER BY disc_number, track_number`,
+            albumId
+        );
+
+        if (!tracks)
+            throw new Error();
+
+        return tracks[0] ? {
+            id: tracks[0].album_id,
+            name: tracks[0].album,
+            artist: tracks[0].album_artist,
+            year: tracks[0].year,
+            cover_file: tracks[0].cover_file,
+            tracks
+        } : null;
+    }
+
+    async createUser(user: Omit<UserWithPassword, 'id'>): Promise<User | null> {
+        const { display_name, username, password } = user;
+
+        const id = randomUUID();
+        const password_digest = await hash(password, SALT_ROUNDS);
+
+        try {
+            await db.run(
+                `INSERT INTO users (
+                    id, display_name, username, password_digest
+                ) VALUES (?, ?, ?, ?)`,
+                id, display_name, username, password_digest
+            );
+            return { id, display_name, username };
+        } catch (e) {
+            console.error(e);
+            return null;
+        }
+    }
+
+    async getUserByCredentials(login: UserLogin): Promise<User | null> {
+        const requested = await this.get<Pick<UserWithPasswordDigest, 'password_digest'>>(
+            `SELECT password_digest
+            FROM users
+            WHERE username = (?)`,
+            login.username
+        );
+
+        if (!requested) return null;
+
+        if (!await compare(login.password, requested.password_digest)) 
+            return null;
+
+        const user = await this.get<User>(
+            `SELECT id, display_name, username
+            FROM users
+            WHERE username = (?)`,
+            login.username
+        );
+
+        return user ?? null;
+    }
+
+    async getUserById(userId: string) {
+        const user = await this.get<User>(
+            `SELECT id, display_name, username
+            FROM users
+            WHERE id = (?)`,
+            userId
+        );
+
+        return user;
+    }
 }
 
-// await MetadataDatabase.resetEnvironment();
 export const db = await MetadataDatabase.init(DATABASE_PATH);

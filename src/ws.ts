@@ -1,10 +1,5 @@
 import { WebSocket, WebSocketServer } from 'ws';
 
-interface Message<Payload> {
-    type: string;
-    payload: Payload;
-}
-
 const sendMessage = async <Payload>(ws: WebSocket, type: string, payload?: Payload) =>
     new Promise<void>((resolve, reject) => ws.send(
         JSON.stringify({ type, payload }), 
