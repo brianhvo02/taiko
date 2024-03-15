@@ -7,7 +7,7 @@ import { MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { getDuration, secondsToTime } from '../../utils';
 import { Button, Dialog, DialogTitle, ListItemIcon, ListItemText, Menu, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, useTheme } from '@mui/material';
 import { AccessTime, BarChart, Pause, PlayArrow, Album as Disc, Add, Album, DeleteOutline } from '@mui/icons-material';
-import { setHeaderText, setShowAuth, setShowHeaderText } from '../../store/layout';
+import { setHeaderText, setShowHeaderText } from '../../store/layout';
 import { useAppDispatch } from '../../store/hooks';
 import Cookies from 'js-cookie';
 
@@ -15,7 +15,7 @@ const List = ({ audio }: AudioProps) => {
     const theme = useTheme();
     const navigate = useNavigate();
     const dispatch = useAppDispatch();
-    const { isPlaying } = useAudio();
+    const { isPlaying, currentAudio } = useAudio();
     const { albumId, playlistId } = useParams();
     const { data: playlists } = useGetPlaylistsQuery();
     const { data: album, isLoading: albumIsLoading } = useGetAlbumQuery(albumId ?? skipToken);
@@ -116,6 +116,8 @@ const List = ({ audio }: AudioProps) => {
 
     const currentTrack = useCurrentTrack();
 
+    const listId = albumId ?? playlistId ?? '';
+
     if (!tracks || albumIsLoading || playlistIsLoading) return null;
 
     const totalDuration = tracks.reduce((total, track) => total + track.duration, 0);
@@ -145,13 +147,14 @@ const List = ({ audio }: AudioProps) => {
                 onContextMenu={handleContextMenu.bind(null, track)}
                 onClick={() => setSelected(i)}
                 onDoubleClick={() => dispatch(setCurrentAudio({
+                    tracks, listId,
                     idx: i,
-                    tracks,
                 }))}
             >
                 <TableCell align='right'>
                     { hover === i ? (
-                        isPlaying && currentTrack?.track_id === track.track_id ?
+                        isPlaying && currentTrack?.track_id === track.track_id && 
+                        listId ===  currentAudio.listId ?
                         <Pause 
                             onClick={() => audio.current.pause()}
                             onDoubleClick={(e) => e.stopPropagation()}
@@ -160,6 +163,7 @@ const List = ({ audio }: AudioProps) => {
                             onClick={() => currentTrack?.track_id === track.track_id ? 
                                 audio.current.play() : 
                                 dispatch(setCurrentAudio({
+                                    listId,
                                     idx: i,
                                     tracks: tracks,
                                 }))
@@ -169,10 +173,10 @@ const List = ({ audio }: AudioProps) => {
                     ) : 
                     <span style={
                         currentTrack?.track_id === track.track_id && 
-                        currentTrack?.album_id === albumId
+                        currentAudio.listId === listId
                             ? { color: theme.palette.primary.main }
                             : {}
-                    }>{ isPlaying && currentTrack?.album_id === albumId && 
+                    }>{ isPlaying && currentAudio.listId === listId && 
                         currentTrack?.track_id === track.track_id ?
                         <BarChart /> :
                         (albumId ? track.track_number : i + 1)
@@ -184,7 +188,7 @@ const List = ({ audio }: AudioProps) => {
                     <div>
                         <span style={
                             currentTrack?.track_id === track.track_id && 
-                            currentTrack?.album_id === albumId
+                            currentAudio.listId === listId
                                 ? { color: theme.palette.primary.main }
                                 : {}
                         }>{track.title}</span>

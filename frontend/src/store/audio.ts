@@ -6,6 +6,7 @@ import _ from 'lodash';
 
 interface CurrentAudio {
     idx: number,
+    listId: string;
     tracks: Track[];
 }
 
@@ -31,6 +32,7 @@ interface AudioState {
 const initialState: AudioState = {
     currentAudio: {
         idx: -1,
+        listId: '',
         tracks: [],
     },
     shuffleState: {
@@ -51,12 +53,12 @@ export const audioSlice = createSlice({
     reducers: {
         setCurrentAudio: (state, { payload }: PayloadAction<CurrentAudio>) => {
             if (state.shuffleState.active) {
-                const { idx, tracks } = payload;
+                const { idx, tracks, listId } = payload;
                 const indices = [...Array(tracks.length).keys()];
                 state.shuffleState.map = _.shuffle(indices.slice(0, idx).concat(indices.slice(idx + 1, tracks.length)));
                 state.shuffleState.map.unshift(idx);
                 state.currentAudio = {
-                    tracks,
+                    listId, tracks,
                     idx: 0,
                 }
 
