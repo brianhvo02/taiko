@@ -3,12 +3,14 @@ import type { PayloadAction } from '@reduxjs/toolkit';
 import { useAppSelector } from './hooks';
 
 export interface Layout {
+    showAuth: 'login' | 'signup' | null;
     showRightSidebar: boolean;
     showHeaderText: boolean;
     headerText: string;
 }
 
 const initialState: Layout = {
+    showAuth: null,
     showRightSidebar: false,
     showHeaderText: false,
     headerText: '',
@@ -27,10 +29,14 @@ export const layoutSlice = createSlice({
         setShowHeaderText: (state, { payload }: PayloadAction<boolean>) => {
             state.showHeaderText = payload;
         },
+        setShowAuth: (state, { payload }: PayloadAction<'login' | 'signup' | null>) => {
+            state.showAuth = payload;
+        },
     },
 })
 
 export const { 
+    setShowAuth,
     toggleRightSidebar,
     setShowHeaderText,
     setHeaderText,

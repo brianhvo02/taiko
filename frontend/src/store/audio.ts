@@ -1,7 +1,7 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { useAppSelector } from './hooks';
-import { MutableRefObject, useEffect, useMemo, useRef } from 'react';
+import { MutableRefObject, useMemo } from 'react';
 import _ from 'lodash';
 
 interface CurrentAudio {

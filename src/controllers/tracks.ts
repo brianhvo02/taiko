@@ -1,10 +1,9 @@
 import { NextFunction, Request, Response } from 'express';
 import { db } from '../MetadataDatabase.js';
-import { createReadStream } from 'fs';
 import { join } from 'path';
 
 export const getTrackAudio = async (req: Request, res: Response, next: NextFunction) => {
-    const track = await db.get<Track>('SELECT file_path FROM tracks WHERE id = (?)', req.params.trackId);
+    const track = await db.getTrackPath(req.params.trackId);
 
     if (!track)
         return res.status(422).end();

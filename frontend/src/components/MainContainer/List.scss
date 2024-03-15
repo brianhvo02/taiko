@@ -6,7 +6,7 @@
     }
 }
 
-.album-table-header {
+.list-table-header {
     position: sticky;
     top: 4rem;
     
@@ -45,7 +45,7 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.album {
+.list {
     position: relative;
     height: 100%;
 
@@ -55,14 +55,14 @@
     user-select: none;
     @include scrollbar.scrollbars;
 
-    .album-content {
+    .list-content {
         .top-gradient {
             // rgb(192, 56, 0)
             // rgb(83, 83, 83);
             background: linear-gradient(rgba(black, 0.6) 0, #121212 100%), rgb(83, 83, 83);
         }
 
-        .album-meta {
+        .list-meta {
             position: relative;
             top: -2.5rem;
             z-index: 10;
@@ -100,7 +100,7 @@
                 transform: scale(1.02);
             }
 
-            .album-info {
+            .list-info {
                 flex: 1;
 
                 display: flex;

@@ -54,3 +54,10 @@ interface UserWithPasswordDigest extends User {
 }
 
 type UserLogin = Pick<UserWithPassword, 'username' | 'password'>;
+
+interface Playlist {
+    id: string;
+    name: string;
+    owner: string;
+    tracks: Track[];
+}

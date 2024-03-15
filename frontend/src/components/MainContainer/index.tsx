@@ -1,7 +1,7 @@
 import { Route, Routes } from 'react-router-dom';
 import './index.scss';
 import Home from './Home';
-import Album from './Album';
+import List from './List';
 import Header from './Header';
 import Footer from './Footer';
 import { useLayout } from '../../store/layout';
@@ -14,7 +14,7 @@ const MainContainer = ({ audio }: AudioProps) => {
             <Header />
             <Routes>
                 <Route path='/' Component={Home} />
-                <Route path='/albums/:albumId' element={<Album audio={audio}></Album>} />
+                <Route path='/albums/:albumId' element={<List audio={audio}></List>} />
             </Routes>
             <Footer />
         </div>

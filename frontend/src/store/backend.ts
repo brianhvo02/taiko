@@ -9,8 +9,20 @@ export const backendApi = createApi({
             headers.set('Authorization', Cookies.get('token') ?? '');
         }
     }),
-    tagTypes: ['User', 'Album'],
+    tagTypes: ['User', 'Album', 'Playlist'],
     endpoints: (builder) => ({
+        getPlaylists: builder.query<Omit<Playlist, 'tracks'>[], void>({
+            query: () => '/playlists',
+            providesTags: result => result ? [
+                ...result.map(({ id }) => ({ type: 'Playlist' as const, id })), 'Playlist'
+            ] : ['Playlist'],
+            transformResponse: (res: Query<Omit<Playlist, 'tracks'>[]>) => res.success ? res.payload : []
+        }),
+        getPlaylist: builder.query<Playlist | null, string>({
+            query: albumId => '/albums/' + albumId,
+            providesTags: result => result ? [{ type: 'Playlist', id: result.id }, 'Playlist'] : ['Playlist'],
+            transformResponse: (res: Query<Playlist>) => res.success ? res.payload : null
+        }),
         getAlbums: builder.query<Omit<Album, 'tracks'>[], void>({
             query: () => '/albums',
             providesTags: result => result ? [
@@ -38,4 +50,9 @@ export const backendApi = createApi({
     }),
 });
 
-export const { useGetAlbumsQuery, useGetAlbumQuery, useGetCurrentUserQuery } = backendApi;
+export const { useGetPlaylistsQuery, useGetPlaylistQuery, useGetAlbumsQuery, useGetAlbumQuery, useGetCurrentUserQuery, } = backendApi;
+export const useCurrentUser = () => {
+    const { data, isSuccess } = useGetCurrentUserQuery();
+
+    return (isSuccess && data) ? data : null;
+}

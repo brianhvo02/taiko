@@ -1,4 +1,4 @@
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import './LeftSidebar.scss';
 import HomeIcon from '@mui/icons-material/Home';
 import SearchIcon from '@mui/icons-material/Search';
@@ -7,11 +7,15 @@ import AddIcon from '@mui/icons-material/Add';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
-import { useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import _ from 'lodash';
-import { useGetAlbumsQuery } from '../store/backend';
-import { useTheme } from '@mui/material';
+import { backendApi, useCurrentUser, useGetAlbumsQuery, useGetPlaylistsQuery } from '../store/backend';
+import { Box, Button, Dialog, DialogTitle, FormHelperText, TextField, useTheme } from '@mui/material';
 import { useAudio } from '../store/audio';
+import { useAppDispatch } from '../store/hooks';
+import { setShowAuth } from '../store/layout';
+import { Close } from '@mui/icons-material';
+import Cookies from 'js-cookie';
 
 type SortBy = 'recents' | 'recently-added' | 'alphabetical' | 'creator';
 const getSortBy = (sortBy: SortBy) => {
@@ -33,26 +37,65 @@ const LeftSidebar = () => {
     const librarySearchRef = useRef<HTMLInputElement>(null);
     const [sort] = useState<SortBy>('recents');
     const { data: albums } = useGetAlbumsQuery();
+    const { data: playlists } = useGetPlaylistsQuery();
     const location = useLocation();
+    const dispatch = useAppDispatch();
+    const currentUser = useCurrentUser();
+    const [showNewPlaylist, setShowNewPlaylist] = useState(false);
+    const [newPlaylistName, setNewPlaylistName] = useState('');
+    const [error, setError] = useState('');
+    const navigate = useNavigate();
+
+    const handleSubmit = (e: FormEvent) => {
+        e.preventDefault();
+
+        fetch('/api/playlists', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': Cookies.get('token') ?? ''
+            },
+            body: JSON.stringify({ name: newPlaylistName }),
+        }).then(res => res.json())
+            .then(({ success, payload }) => {
+                if (success) {
+                    dispatch(backendApi.util.invalidateTags(['Playlist']));
+                    setShowNewPlaylist(false);
+                    navigate('/playlists/' + payload);
+                } else {
+                    setError('Something went wrong.');
+                }
+            })
+            .catch(e => {
+                console.error(e);
+                setError('Something went wrong.');
+            });
+    }
 
     useEffect(() => {
         if (librarySearchFocus)
             librarySearchRef.current?.focus();
     }, [librarySearchFocus]);
 
-    const albumEntries = albums?.reduce((arr: JSX.Element[], { id, name, artist, cover_file }) => {
+    const entries = [...(albums ?? []), ...playlists ?? []].reduce((arr: JSX.Element[], list) => {
+        const { id, name } = list;
+
+        const isPlaylist = (list: any): list is Omit<Playlist, 'tracks'> => !!list.owner;
+        const imagePath = isPlaylist(list) ? id + '.png' : list.cover_file;
+        const attrName = isPlaylist(list) ? list.owner : list.artist;
+
         if (
             (librarySearch.length > 0 && name.toLowerCase().includes(librarySearch.toLowerCase())) 
             || librarySearch.length === 0
         ) arr.push(
             <li key={'library-item-' + id}>
-                <Link to={'/albums/' + id}>
-                    <img src={`/images/${cover_file}`} alt='album cover' />
+                <Link to={(isPlaylist(list) ? '/playlist/' : '/albums/') + id}>
+                    <img src={`/images/${imagePath}`} alt='album cover' />
                     <div className='item-content'>
                         <p style={{ color: currentAudio.tracks[currentAudio.idx]?.album_id === id ? 
                             theme.palette.primary.main : theme.palette.text.primary
                         }}>{name}</p>
-                        <p>Album <span>•</span> {artist}</p>
+                        <p>{isPlaylist(list) ? 'Playlist' : 'Album'} <span>•</span> {attrName}</p>
                     </div>
                     { currentAudio.tracks[currentAudio.idx]?.album_id === id && isPlaying &&
                     <VolumeUpIcon color='primary' /> }
@@ -65,6 +108,24 @@ const LeftSidebar = () => {
 
     return (
         <nav className='left-sidebar'>
+            <Dialog open={!!showNewPlaylist} PaperProps={{ sx: { p: '1rem' }}}>
+                <Close 
+                    onClick={() => setShowNewPlaylist(false)} 
+                    sx={{ 
+                        alignSelf: 'flex-end', cursor: 'pointer',
+                        mr: '1rem', mt: '1rem'
+                    }}
+                />
+                <DialogTitle>Create New Playlist</DialogTitle>
+                <Box component='form' sx={{ 
+                    gap: '1rem', m: '1rem', display: 'flex', flexDirection: 'column' 
+                }} onSubmit={handleSubmit}>
+                    <FormHelperText>{error}</FormHelperText>
+                    <TextField required label='Playlist Name' autoComplete='new-playlist'
+                        value={newPlaylistName} onChange={e => setNewPlaylistName(e.target.value)} />
+                    <Button type='submit'>Create</Button>
+                </Box>
+            </Dialog>
             <ul className='nav-list'>
                 <li className={location.pathname === '/' ? 'active' : ''}>
                     <Link to='/'>
@@ -85,7 +146,10 @@ const LeftSidebar = () => {
                         <LibraryIcon />
                         Your Library
                     </button>
-                    <button>
+                    <button onClick={() => currentUser ? 
+                        setShowNewPlaylist(true) :
+                        dispatch(setShowAuth('login'))
+                    }>
                         <AddIcon />
                     </button>
                     <button>
@@ -141,7 +205,7 @@ const LeftSidebar = () => {
                         </button>
                     </div>
                     <ul className='library-items'>
-                        {albumEntries}
+                        {entries}
                     </ul>
                 </div>
                 </div>

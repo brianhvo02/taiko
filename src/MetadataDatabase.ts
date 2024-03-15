@@ -3,7 +3,7 @@ import sqlite3 from 'sqlite3';
 import { generateHash, getTags } from './utils.js';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { writeFile } from 'fs/promises';
+import { symlink, writeFile } from 'fs/promises';
 import { glob } from 'glob';
 import { randomUUID } from 'crypto';
 import { mkdir } from 'fs/promises';
@@ -90,7 +90,7 @@ export default class MetadataDatabase {
         );
 
         await db.exec(
-            `CREATE TABLE playlist (
+            `CREATE TABLE playlists (
                 id TEXT PRIMARY KEY, 
                 name TEXT NOT NULL, 
                 owner_id TEXT, 
@@ -116,21 +116,23 @@ export default class MetadataDatabase {
         await new Promise<void>((resolve, reject) => this.db.close(err => err ? reject(err) : resolve()));
     }
 
-    exec = async (sql: string) => new Promise<void>(
+    private exec = async (sql: string) => new Promise<void>(
         (resolve, reject) => this.db.exec(sql, err => err ? reject(err) : resolve())
     );
 
-    run = async (sql: string, ...params: (string | number)[]) => new Promise<void>(
+    private run = async (sql: string, ...params: (string | number)[]) => new Promise<void>(
         (resolve, reject) => this.db.run(sql, params, err => err ? reject(err) : resolve())
     );
 
-    get = async <T>(sql: string, ...params: (string | number)[]) => new Promise<T | undefined>(
+    private get = async <T>(sql: string, ...params: (string | number)[]) => new Promise<T | undefined>(
         (resolve, reject) => this.db.get<T>(sql, params, (err, row) => err ? reject(err) : resolve(row))
     );
 
-    all = async <T>(sql: string, ...params: (string | number)[]) => new Promise<T[] | undefined>(
+    private all = async <T>(sql: string, ...params: (string | number)[]) => new Promise<T[] | undefined>(
         (resolve, reject) => this.db.all<T>(sql, params, (err, rows) => err ? reject(err) : resolve(rows))
     );
+
+    getTrackPath = async (trackId: string) => db.get<Track>('SELECT file_path FROM tracks WHERE id = (?)', trackId);
 
     async saveCover(picture?: PictureType) {
         if (!picture)
@@ -275,6 +277,111 @@ export default class MetadataDatabase {
     }
 
     async getAlbum(albumId: string) {
+        const tracks = await db.all<Track>(
+            `SELECT 
+                track_number, disc_number, title, year, duration, cover_file, file_path, tracks.album_id,
+                tracks.id AS track_id,
+                album_artists.name AS album_artist,
+                albums.name AS album, 
+                GROUP_CONCAT(artists.name, ";") AS artists
+            FROM tracks
+            JOIN artists AS album_artists
+                ON albums.artist_id = album_artists.id
+            JOIN albums 
+                ON tracks.album_id = albums.id 
+            JOIN track_artists
+                ON track_artists.track_id = tracks.id
+            JOIN artists
+                ON track_artists.artist_id = artists.id
+            WHERE albums.id = (?)
+            GROUP BY tracks.id
+            ORDER BY disc_number, track_number`,
+            albumId
+        );
+
+        if (!tracks)
+            throw new Error();
+
+        return tracks[0] ? {
+            id: tracks[0].album_id,
+            name: tracks[0].album,
+            artist: tracks[0].album_artist,
+            year: tracks[0].year,
+            cover_file: tracks[0].cover_file,
+            tracks
+        } : null;
+    }
+
+    async createPlaylist(name: string, owner_id: string) {
+        const id = randomUUID();
+        await db.run(
+            `INSERT INTO playlists (
+                id, name, owner_id
+            ) VALUES (?, ?, ?)`,
+            id, name, owner_id
+        );
+        await symlink('./taiko.png', join('images', id + '.png'));
+
+        return id;
+    }
+
+    getPlaylists = async (limit: number, page: number) => db.all<Omit<Playlist, 'tracks'>>(
+        `SELECT
+            playlists.id as id, playlists.name AS name, users.display_name AS owner
+        FROM playlists
+        JOIN users ON playlists.owner_id = users.id
+        ORDER BY owner, name
+        LIMIT (?)
+        OFFSET (?)`,
+        limit, (page - 1) * limit
+    );
+
+    async getPlaylistsWithTracks(limit: number, page: number) {
+        const rawAlbums = await db.all<Track>(
+            `SELECT 
+                album_artist, album, track_number, disc_number, title, year, duration, cover_file, file_path,
+                tracks.id AS track_id, album_id,
+                GROUP_CONCAT(artists.name, ";") AS artists
+            FROM (
+                SELECT
+                    albums.id, albums.name AS album, artists.name AS album_artist
+                FROM albums
+                JOIN artists
+                    ON albums.artist_id = artists.id
+                ORDER BY album_artist, album
+                LIMIT (?)
+                OFFSET (?)
+            ) AS albums
+            JOIN tracks 
+                ON album_id = albums.id 
+            JOIN track_artists
+                ON track_artists.track_id = tracks.id
+            JOIN artists
+                ON track_artists.artist_id = artists.id
+            GROUP BY tracks.id
+            ORDER BY album_artist, album, disc_number, track_number`,
+            limit, (page - 1) * limit
+        );
+
+        if (!rawAlbums)
+            throw new Error();
+
+        const albumsMap = rawAlbums.reduce((map: Record<string, Album>, track) => {
+            (map[track.album_id] ??= {
+                id: track.album_id,
+                name: track.album,
+                artist: track.album_artist,
+                year: track.year,
+                cover_file: track.cover_file,
+                tracks: [] as Track[]
+            }).tracks.push(track);
+            return map;
+        }, {});
+
+        return Object.values(albumsMap);
+    }
+
+    async getPlaylist(albumId: string) {
         const tracks = await db.all<Track>(
             `SELECT 
                 track_number, disc_number, title, year, duration, cover_file, file_path, tracks.album_id,
