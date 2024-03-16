@@ -32,6 +32,11 @@ const List = ({ audio }: AudioProps) => {
     const containerRef = useRef<HTMLElement>(null);
     const currentUser = useCurrentUser();
 
+    const [dragOver, setDragOver] = useState({
+        idx: -1,
+        bottom: false,
+    });
+
     const [contextMenu, setContextMenu] = useState<{
         track: Track;
         mouseX: number;
@@ -165,6 +170,57 @@ const List = ({ audio }: AudioProps) => {
                     tracks, listId,
                     idx: i,
                 }))}
+                draggable
+                onDragStart={e => {
+                    e.dataTransfer.setData('text/plain', `${track.title} • ${track.album}`);
+                    e.dataTransfer.setData('index', `${i}`);
+                }}
+                onDragOver={e => {
+                    if (!e.dataTransfer.types.includes('text/plain')) 
+                        return;
+
+                    e.preventDefault();
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setDragOver({ idx: i, bottom: e.clientY - rect.y > rect.height / 2 });
+                }}
+                onDragLeave={() => {
+                    setDragOver({ idx: -1, bottom: false });
+                }}
+                onDragEnd={e => {
+                    setDragOver({ idx: -1, bottom: false });
+                }}
+                onDrop={e => {
+                    const tempTracks = [...tracks];
+                    const currentIdx = parseInt(e.dataTransfer.getData('index'));
+                    const nextIdx = dragOver.idx + Number(dragOver.bottom);
+                    const [selectedTrack] = tempTracks.splice(currentIdx, 1);
+                    tempTracks.splice(currentIdx < nextIdx ? nextIdx - 1 : nextIdx, 0, selectedTrack);
+                    const trackOrder = tempTracks.map(track => track.track_id).join('');
+                    
+                    fetch(`/api/playlists/${playlistId}/track`, {
+                        method: 'PATCH',
+                        headers: { 
+                            'Content-Type': 'application/json',
+                            'Authorization': Cookies.get('token') ?? ''
+                        },
+                        body: JSON.stringify({ trackOrder }),
+                    }).then(res => res.json())
+                        .then(({ success }) => {
+                            if (success) {
+                                dispatch(backendApi.util.invalidateTags(['Playlist', { type: 'Playlist', id: playlistId }]));
+                            } else {
+                                console.error('Couldn\'t change track order.')
+                            }
+                        })
+                        .catch(e => {
+                            console.error(e);
+                            console.error('Couldn\'t change track order.')
+                        });
+                }}
+                sx={ dragOver.idx === i ? 
+                    { [ dragOver.bottom ? 'borderBottom' : 'borderTop'
+                        ]: '1px solid ' + theme.palette.primary.main } : 
+                    {} }
             >
                 <TableCell align='right'>
                     { hover === i ? (

@@ -77,3 +77,20 @@ export const removeTrack = async (req: Request, res: Response, next: NextFunctio
             res.status(500).json({ success: false })
         });
 }
+
+export const changeTrackOrder = async (req: Request, res: Response, next: NextFunction) => {
+    const user = await getCurrentUser(req);
+    
+    if (!user)
+        return res.status(401).json({ success: false });
+
+    if (!req.params.playlistId || !req.body.trackOrder)
+        return res.status(422).json({ success: false });
+
+    db.changeTrackOrder(user.id, req.params.playlistId, req.body.trackOrder)
+        .then(success => res.status(success ? 200 : 403).json({ success }))
+        .catch(e => {
+            console.error(e);
+            res.status(500).json({ success: false })
+        });
+}

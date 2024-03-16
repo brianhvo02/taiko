@@ -578,6 +578,31 @@ export default class MetadataDatabase {
         return true;
     }
 
+    async changeTrackOrder(userId: string, playlistId: string, trackOrder: string) {
+        const order = await this.get<{ track_order: string }>(
+            `SELECT track_order
+            FROM playlists
+            WHERE id = (?) AND owner_id = (?)`,
+            playlistId, userId
+        );
+
+        if (!order) return false;
+
+        if (order.track_order === trackOrder)
+            return true;
+        
+        await this.run(
+            `UPDATE playlists
+            SET track_order = (?)
+            WHERE id = (?)`,
+            trackOrder, playlistId
+        );
+
+        await this.generatePlaylistCover(trackOrder, playlistId);
+
+        return true;
+    }
+
     async createUser(user: Omit<UserWithPassword, 'id'>): Promise<User | null> {
         const { display_name, username, password } = user;
 
