@@ -79,7 +79,7 @@ const NowPlaying = ({ audio }: AudioProps) => {
                             {currentTrack.title}
                         </Link>
                     </div>
-                    <Link to={'#'}>{currentTrack.album_artist}</Link>
+                    <Link to={'#'}>{currentTrack.artists.replaceAll(';', ', ')}</Link>
                 </div>
             </div>
             <div className='player-controls'>

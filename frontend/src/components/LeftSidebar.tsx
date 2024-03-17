@@ -7,14 +7,14 @@ import AddIcon from '@mui/icons-material/Add';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import FormatListBulletedIcon from '@mui/icons-material/FormatListBulleted';
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import _ from 'lodash';
 import { backendApi, useCurrentUser, useGetAlbumsQuery, useGetPlaylistsQuery } from '../store/backend';
-import { Box, Button, Dialog, DialogTitle, FormHelperText, TextField, useTheme } from '@mui/material';
+import { Box, Button, Dialog, DialogTitle, FormHelperText, ListItemIcon, ListItemText, Menu, MenuItem, TextField, useTheme } from '@mui/material';
 import { useCurrentAudio, useIsPlaying } from '../store/audio';
 import { useAppDispatch } from '../store/hooks';
-import { setShowAuth } from '../store/layout';
-import { Close } from '@mui/icons-material';
+import { setAlertText, setDraggingTrack, setShowAuth, useLayout } from '../store/layout';
+import { Close, DeleteOutline } from '@mui/icons-material';
 import Cookies from 'js-cookie';
 
 type SortBy = 'recents' | 'recently-added' | 'alphabetical' | 'creator';
@@ -29,24 +29,35 @@ const getSortBy = (sortBy: SortBy) => {
     }
 }
 
+const isPlaylist = (list: any): list is Omit<Playlist, 'tracks'> => !!list.owner;
+const getAttr = (list: Omit<Playlist, 'tracks'> | Omit<Album, 'tracks'>) => 
+    isPlaylist(list) ? list.owner : list.artist;
+
 const LeftSidebar = () => {
     const theme = useTheme();
-    const currentAudio = useCurrentAudio();
+    const location = useLocation();
+    const navigate = useNavigate();
+    const dispatch = useAppDispatch();
     const isPlaying = useIsPlaying();
+    const currentAudio = useCurrentAudio();
+    const currentUser = useCurrentUser();
+    const { draggingTrack } = useLayout();
+
+    const [sort] = useState<SortBy>('recents');
     const [librarySearch, setLibrarySearch] = useState('');
     const [librarySearchFocus, setLibrarySearchFocus] = useState(false);
-    const librarySearchRef = useRef<HTMLInputElement>(null);
-    const [sort] = useState<SortBy>('recents');
-    const { data: albums } = useGetAlbumsQuery();
-    const { data: playlists } = useGetPlaylistsQuery();
-    const location = useLocation();
-    const dispatch = useAppDispatch();
-    const currentUser = useCurrentUser();
     const [showNewPlaylist, setShowNewPlaylist] = useState(false);
     const [newPlaylistName, setNewPlaylistName] = useState('');
     const [error, setError] = useState('');
-    const navigate = useNavigate();
+    const [dragPlaylist, setDragPlaylist] = useState('');
+    const [top, setTop] = useState(true);
+    const [showPlaylistDelete, setShowPlaylistDelete] = useState(false);
 
+    const librarySearchRef = useRef<HTMLInputElement>(null);
+
+    const { currentData: albums, isLoading: albumsAreLoading } = useGetAlbumsQuery();
+    const { currentData: playlists, isLoading: playlistsAreLoading } = useGetPlaylistsQuery();
+    
     const handleSubmit = (e: FormEvent) => {
         e.preventDefault();
 
@@ -78,34 +89,105 @@ const LeftSidebar = () => {
             librarySearchRef.current?.focus();
     }, [librarySearchFocus]);
 
-    const entries = [...(albums ?? []), ...playlists ?? []].reduce((arr: JSX.Element[], list) => {
-        const { id, name } = list;
+    const time = useMemo(() => albumsAreLoading && albums && 
+        playlistsAreLoading && playlists && new Date().getTime(), 
+        [albums, albumsAreLoading, playlists, playlistsAreLoading]);
 
-        const isPlaylist = (list: any): list is Omit<Playlist, 'tracks'> => !!list.owner;
-        const imagePath = isPlaylist(list) ? id + '.png' : list.cover_file;
-        const attrName = isPlaylist(list) ? list.owner : list.artist;
+    const [contextMenu, setContextMenu] = useState<{
+        playlist: Omit<Playlist, 'tracks'>;
+        mouseX: number;
+        mouseY: number;
+    } | null>(null);
 
-        if (
-            (librarySearch.length > 0 && name.toLowerCase().includes(librarySearch.toLowerCase())) 
-            || librarySearch.length === 0
-        ) arr.push(
-            <li key={'library-item-' + id}>
-                <Link to={(isPlaylist(list) ? '/playlists/' : '/albums/') + id}>
-                    <img src={`/images/${imagePath}?t=${new Date().getTime()}`} alt='album cover' />
-                    <div className='item-content'>
-                        <p style={{ color: currentAudio.listId === id ? 
-                            theme.palette.primary.main : theme.palette.text.primary
-                        }}>{name}</p>
-                        <p>{isPlaylist(list) ? 'Playlist' : 'Album'} <span>•</span> {attrName}</p>
-                    </div>
-                    { currentAudio.listId === id && isPlaying &&
-                    <VolumeUpIcon color='primary' /> }
-                </Link>
-            </li>
+    const handleContextMenu = (playlist: Omit<Playlist, 'tracks'> | Omit<Album, 'tracks'>, e: MouseEvent) => {
+        e.preventDefault();
+        if (!isPlaylist(playlist) || !currentUser) return;
+
+        setContextMenu(
+            contextMenu === null ? {
+                playlist,
+                mouseX: e.clientX + 2,
+                mouseY: e.clientY - 6,
+            } : null
         );
+    };
 
-        return arr;
-    }, []);
+    const lists = [...(albums ?? []), ...playlists ?? []]
+        .sort((list1, list2) => getAttr(list1).localeCompare(getAttr(list2)))
+        .reduce((arr: JSX.Element[], list) => {
+            const { id, name } = list;
+
+            const imagePath = isPlaylist(list) ? id + '.png' : list.cover_file;
+            const attrName = getAttr(list);
+
+            if (
+                (librarySearch.length > 0 && name.toLowerCase().includes(librarySearch.toLowerCase())) 
+                || librarySearch.length === 0
+            ) arr.push(
+                <li key={'library-item-' + id} 
+                    style={ draggingTrack ? 
+                        isPlaylist(list) ? 
+                            dragPlaylist === id ? 
+                                { border: '2px solid ' + theme.palette.primary.main } : 
+                                {} : 
+                            { opacity: 0.5 } : 
+                        {} }
+                    onContextMenu={handleContextMenu.bind(null, list)}
+                    onDragOver={e => {
+                        if (!e.dataTransfer.types.includes('id')) 
+                            return;
+
+                        e.preventDefault();
+                        setDragPlaylist(id);
+                    }}
+                    onDragLeave={() => setDragPlaylist('')}
+                    onDragEnd={() => {
+                        dispatch(setDraggingTrack(false));
+                        setDragPlaylist('');
+                    }}
+                    onDrop={e => {
+                        if (!e.dataTransfer.types.includes('id')) 
+                            return;
+
+                        const trackId = e.dataTransfer.getData('id');
+
+                        fetch(`/api/playlists/${id}/track`, {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'Authorization': Cookies.get('token') ?? ''
+                            },
+                            body: JSON.stringify({ trackId }),
+                        }).then(res => res.json())
+                            .then(({ success }) => {
+                                if (success) {
+                                    dispatch(backendApi.util.invalidateTags(['Playlist', { type: 'Playlist', id }]));
+                                } else {
+                                    dispatch(setAlertText('Couldn\'t add track to playlist (may be a duplicate).'));
+                                }
+                            })
+                            .catch(e => {
+                                console.error(e);
+                                dispatch(setAlertText('Couldn\'t add track to playlist (may be a duplicate).'));
+                            });
+                    }}
+                >
+                    <Link to={(isPlaylist(list) ? '/playlists/' : '/albums/') + id}>
+                        <img src={`/images/${imagePath}?t=${time || new Date().getTime()}`} alt='album cover' />
+                        <div className='item-content'>
+                            <p style={{ color: currentAudio.listId === id ? 
+                                theme.palette.primary.main : theme.palette.text.primary
+                            }}>{name}</p>
+                            <p>{isPlaylist(list) ? 'Playlist' : 'Album'} <span>•</span> {attrName}</p>
+                        </div>
+                        { currentAudio.listId === id && isPlaying &&
+                        <VolumeUpIcon color='primary' /> }
+                    </Link>
+                </li>
+            );
+
+            return arr;
+        }, []);
 
     return (
         <nav className='left-sidebar'>
@@ -127,6 +209,26 @@ const LeftSidebar = () => {
                     <Button type='submit'>Create</Button>
                 </Box>
             </Dialog>
+            <Menu
+                className='list-context'
+                open={contextMenu !== null}
+                onClose={() => setContextMenu(null)}
+                anchorReference='anchorPosition'
+                anchorPosition={
+                    contextMenu !== null
+                        ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+                        : undefined
+                }
+            >
+                { currentUser &&
+                <MenuItem onClick={() => setShowPlaylistDelete(true)} sx={{ fontFamily: 'inherit' }}>
+                    <ListItemIcon>
+                        <DeleteOutline />
+                    </ListItemIcon>
+                    <ListItemText>Delete playlist</ListItemText>
+                </MenuItem>
+                }
+            </Menu>
             <ul className='nav-list'>
                 <li className={location.pathname === '/' ? 'active' : ''}>
                     <Link to='/'>
@@ -157,12 +259,14 @@ const LeftSidebar = () => {
                         <ArrowForwardIcon />
                     </button>
                 </header>
-                <div className='library-filters'>
+                <div className='library-filters' style={top ? {} : { 
+                    boxShadow: '0 6px 10px rgba(0, 0, 0, 0.6)' 
+                }}>
                     <button>Playlists</button>
                     <button>Artists</button>
                     <button>Albums</button>
                 </div>
-                <div className='item-display'>
+                <div className='item-display' onScroll={e => setTop(e.currentTarget.scrollTop === 0)}>
                     <div className='search-sort'>
                         <div className='search'>
                             <input 
@@ -205,9 +309,7 @@ const LeftSidebar = () => {
                             <FormatListBulletedIcon />
                         </button>
                     </div>
-                    <ul className='library-items'>
-                        {entries}
-                    </ul>
+                    <ul className='library-items'>{lists}</ul>
                 </div>
                 </div>
         </nav>

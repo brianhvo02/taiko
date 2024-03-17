@@ -1,7 +1,7 @@
 import './Home.scss';
-import { useGetAlbumsQuery } from '../../store/backend';
+import { useGetAlbumsQuery, useGetPlaylistsQuery } from '../../store/backend';
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAppDispatch } from '../../store/hooks';
 import { setHeaderText, setShowHeaderText } from '../../store/layout';
 
@@ -19,8 +19,13 @@ const getTimeOfDay = () => {
     }
 }
 
+const isPlaylist = (list: any): list is Omit<Playlist, 'tracks'> => !!list.owner;
+const getAttr = (list: Omit<Playlist, "tracks"> | Omit<Album, "tracks">) => 
+    isPlaylist(list) ? list.owner : list.artist;
+
 const Home = () => {
-    const { data: albums } = useGetAlbumsQuery();
+    const { currentData: albums } = useGetAlbumsQuery();
+    const { currentData: playlists } = useGetPlaylistsQuery();
     const navigate = useNavigate();
     const dispatch = useAppDispatch();
     const [top, setTop] = useState(true);
@@ -33,6 +38,24 @@ const Home = () => {
         dispatch(setShowHeaderText(!top));
     }, [top, dispatch]);
 
+    const lists = useMemo(() => [...(albums ?? []), ...(playlists ?? [])]
+        .sort((list1, list2) => getAttr(list1).localeCompare(getAttr(list2)))
+        .map(list => {
+            const { id, name } = list;
+            const imagePath = isPlaylist(list) ? id + '.png' : list.cover_file;
+            const attrName = getAttr(list);
+
+            return (
+                <li key={id} onClick={() => navigate(`/albums/${id}`)}>
+                    <img src={'/images/' + imagePath} alt='album cover' />
+                    <h1>{name} {!isPlaylist(list) && `(${list.year.slice(0, 4)})`}</h1>
+                    <h2>{attrName}</h2>
+                </li>
+            );
+        }), 
+        [albums, navigate, playlists]
+    );
+
     return (
         <main className='home' onScroll={e => setTop(e.currentTarget.scrollTop === 0)}>
             <div className='home-header-spacer' style={top ? {} : { backgroundColor: 'var(--mui-palette-text-primary)', opacity: 1 }} />
@@ -41,17 +64,7 @@ const Home = () => {
                 <div className='content-container'>
                     <section className='top'>
                         <h1>Good {getTimeOfDay()}</h1>
-                        <ul>
-                            {albums?.map(({ id, name, year, artist, cover_file }) => {
-                                return (
-                            <li key={id} onClick={() => navigate(`/albums/${id}`)}>
-                                <img src={'/images/' + cover_file} alt='album cover' />
-                                <h1>{name} ({year.slice(0, 4)})</h1>
-                                <h2>{artist}</h2>
-                            </li>
-                                );
-                            })}
-                        </ul>
+                        <ul>{lists}</ul>
                     </section>
                 </div>
             </div>

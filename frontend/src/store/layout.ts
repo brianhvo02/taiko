@@ -6,14 +6,18 @@ export interface Layout {
     showAuth: 'login' | 'signup' | null;
     showRightSidebar: boolean;
     showHeaderText: boolean;
+    draggingTrack: boolean;
     headerText: string;
+    alertText: string;
 }
 
 const initialState: Layout = {
     showAuth: null,
     showRightSidebar: false,
     showHeaderText: false,
+    draggingTrack: false,
     headerText: '',
+    alertText: '',
 }
 
 export const layoutSlice = createSlice({
@@ -25,6 +29,12 @@ export const layoutSlice = createSlice({
         },
         setHeaderText: (state, { payload }: PayloadAction<string>) => {
             state.headerText = payload;
+        },
+        setAlertText: (state, { payload }: PayloadAction<string>) => {
+            state.alertText = payload;
+        },
+        setDraggingTrack: (state, { payload }: PayloadAction<boolean>) => {
+            state.draggingTrack = payload;
         },
         setShowHeaderText: (state, { payload }: PayloadAction<boolean>) => {
             state.showHeaderText = payload;
@@ -39,7 +49,9 @@ export const {
     setShowAuth,
     toggleRightSidebar,
     setShowHeaderText,
+    setDraggingTrack,
     setHeaderText,
+    setAlertText,
 } = layoutSlice.actions;
 
 export const useLayout = () => useAppSelector(state => state.layout);

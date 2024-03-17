@@ -4,7 +4,7 @@ import { defaultStringParam } from '../utils.js';
 
 export const getAlbums = async (req: Request, res: Response, next: NextFunction) => {
     const withTracks = !!defaultStringParam(req.query.withTracks, '').length;
-    const limit = parseInt(defaultStringParam(req.query.limit, '10'));
+    const limit = parseInt(defaultStringParam(req.query.limit, '20'));
     const page = parseInt(defaultStringParam(req.query.p, '1'));
 
     if (!withTracks)

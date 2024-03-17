@@ -19,3 +19,18 @@ export const getDuration = (seconds: number) => {
 }
 
 export const secondsToTime = (seconds: number) => `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
+
+const canvas = document.createElement('canvas');
+const ctx = canvas.getContext("2d");
+
+const fontSizes = [ 96, 72, 48, 32, 24 ]
+
+export const getBestTextWidth = (text: string, maxWidth: number, fontSizeIdx = 0): number => {
+    if (!ctx || fontSizeIdx > fontSizes.length - 1) return fontSizes[fontSizes.length - 1];
+    
+    const fontSize = fontSizes[fontSizeIdx];
+    ctx.font = `bold ${fontSize}px CircularStd`;
+    const { width } = ctx.measureText(text);
+    
+    return width < maxWidth ? fontSize : getBestTextWidth(text, maxWidth, fontSizeIdx + 1);
+}

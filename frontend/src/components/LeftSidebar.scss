@@ -120,7 +120,7 @@
         }
 
         .library-filters {
-            margin: 0.5rem 1rem;
+            padding: 0.5rem 1rem;
             
             button {
                 color: inherit;
@@ -246,6 +246,8 @@
             }
     
             ul.library-items {
+                padding-bottom: 1rem;
+
                 a {
                     display: flex;
                     align-items: center;

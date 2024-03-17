@@ -3,13 +3,17 @@ import { backendApi, useCurrentUser, useGetAlbumQuery, useGetPlaylistQuery, useG
 import { useNavigate, useParams } from 'react-router-dom';
 import { skipToken } from '@reduxjs/toolkit/query';
 import { setCurrentAudio, useCurrentAudio, useCurrentTrack, useIsPlaying } from '../../store/audio';
-import { MouseEvent, createElement, useEffect, useMemo, useRef, useState } from 'react';
-import { getDuration, secondsToTime } from '../../utils';
-import { Button, Dialog, DialogTitle, ListItemIcon, ListItemText, Menu, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, useTheme } from '@mui/material';
+import { MouseEvent, createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getBestTextWidth, getDuration, secondsToTime } from '../../utils';
+import { 
+    Box, Button, CircularProgress, Dialog, DialogTitle, ListItemIcon, ListItemText, Menu, MenuItem, 
+    Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, useTheme 
+} from '@mui/material';
 import { AccessTime, BarChart, Pause, PlayArrow, Album as Disc, Add, Album, DeleteOutline } from '@mui/icons-material';
-import { setHeaderText, setShowHeaderText } from '../../store/layout';
+import { setDraggingTrack, setHeaderText, setShowHeaderText } from '../../store/layout';
 import { useAppDispatch } from '../../store/hooks';
 import Cookies from 'js-cookie';
+import { parseInt } from 'lodash';
 
 const List = ({ audio }: AudioProps) => {
     const theme = useTheme();
@@ -18,9 +22,9 @@ const List = ({ audio }: AudioProps) => {
     const currentAudio = useCurrentAudio();
     const isPlaying = useIsPlaying();
     const { albumId, playlistId } = useParams();
-    const { data: playlists } = useGetPlaylistsQuery();
-    const { data: album, isLoading: albumIsLoading } = useGetAlbumQuery(albumId ?? skipToken);
-    const { data: playlist, isLoading: playlistIsLoading } = useGetPlaylistQuery(playlistId ?? skipToken);
+    const { currentData: playlists } = useGetPlaylistsQuery();
+    const { currentData: album, isLoading: albumIsLoading } = useGetAlbumQuery(albumId ?? skipToken);
+    const { currentData: playlist, isLoading: playlistIsLoading } = useGetPlaylistQuery(playlistId ?? skipToken);
     const tracks = useMemo(() => (albumId ? album : playlist)?.tracks, [album, albumId, playlist]);
     const [scrollHeight, setScrollHeight] = useState(0);
     const [hover, setHover] = useState<number | null>(null);
@@ -107,6 +111,25 @@ const List = ({ audio }: AudioProps) => {
             });
     }
 
+    const [headerFont, setHeaderFont] = useState(0);
+
+    const onResize = useCallback(() => {
+        const text = (albumId ? album : playlist)?.name ?? '';
+        const newFont = getBestTextWidth(text, window.innerWidth - 720);
+        
+        setHeaderFont(newFont);
+    }, [album, albumId, playlist]);
+
+    useEffect(() => {
+        onResize();
+        window.addEventListener('resize', onResize);
+        
+        return () => {
+            window.removeEventListener('load', onResize);
+            window.removeEventListener('resize', onResize);
+        }
+    }, [onResize]);
+
     useEffect(() => {
         containerRef.current?.scrollTo({ top: 0 });
         setSelected(null);
@@ -129,6 +152,8 @@ const List = ({ audio }: AudioProps) => {
         setCoverLoading(true);
         const coverPath = (albumId ? album?.cover_file : (playlist && playlist.id + '.png')) ?? '';
         const image = createElement('img', {
+            width: '100%',
+            height: '100%',
             onLoad: () => {
                 setCoverLoading(false);
             },
@@ -137,8 +162,18 @@ const List = ({ audio }: AudioProps) => {
         return image;
     }, [album, albumId, playlist]);
 
-    if (!tracks || albumIsLoading || playlistIsLoading) return null;
-    if (coverLoading) return <div style={{ opacity: 0 }}>{listCover}</div>;
+    if (!tracks || albumIsLoading || playlistIsLoading) return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: '100%' }}>
+            <CircularProgress size='10rem' />
+        </Box>
+    );
+
+    if (coverLoading) return (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', width: '100%', height: '100%' }}>
+            <CircularProgress size='10rem' />
+            <div style={{ opacity: 0, width: 0, height: 0, }}>{listCover}<CircularProgress /></div>
+        </Box>
+    );
 
     const totalDuration = tracks.reduce((total, track) => total + track.duration, 0);
 
@@ -157,6 +192,7 @@ const List = ({ audio }: AudioProps) => {
                     </TableCell>
                 </TableRow>
             );
+
         arr.push(
             <TableRow 
                 key={track.track_id} 
@@ -172,27 +208,37 @@ const List = ({ audio }: AudioProps) => {
                 }))}
                 draggable
                 onDragStart={e => {
+                    dispatch(setDraggingTrack(true));
                     e.dataTransfer.setData('text/plain', `${track.title} • ${track.album}`);
-                    e.dataTransfer.setData('index', `${i}`);
+                    e.dataTransfer.setData('id', track.track_id);
+                    
+                    if (playlistId) 
+                        e.dataTransfer.setData('index', `${i}`);
                 }}
                 onDragOver={e => {
-                    if (!e.dataTransfer.types.includes('text/plain')) 
+                    if (!e.dataTransfer.types.includes('index')) 
                         return;
 
                     e.preventDefault();
                     const rect = e.currentTarget.getBoundingClientRect();
                     setDragOver({ idx: i, bottom: e.clientY - rect.y > rect.height / 2 });
                 }}
-                onDragLeave={() => {
-                    setDragOver({ idx: -1, bottom: false });
-                }}
-                onDragEnd={e => {
+                onDragLeave={() => setDragOver({ idx: -1, bottom: false })}
+                onDragEnd={() => {
+                    dispatch(setDraggingTrack(false));
                     setDragOver({ idx: -1, bottom: false });
                 }}
                 onDrop={e => {
+                    if (!e.dataTransfer.types.includes('index'))
+                        return;
+
                     const tempTracks = [...tracks];
                     const currentIdx = parseInt(e.dataTransfer.getData('index'));
                     const nextIdx = dragOver.idx + Number(dragOver.bottom);
+
+                    if (currentIdx === nextIdx || currentIdx + 1 === nextIdx)
+                        return;
+
                     const [selectedTrack] = tempTracks.splice(currentIdx, 1);
                     tempTracks.splice(currentIdx < nextIdx ? nextIdx - 1 : nextIdx, 0, selectedTrack);
                     const trackOrder = tempTracks.map(track => track.track_id).join('');
@@ -266,11 +312,17 @@ const List = ({ audio }: AudioProps) => {
                         <span>{track.artists.replaceAll(';', ', ')}</span>
                     </div>
                 </TableCell>
+                { playlistId &&
+                    <TableCell>
+                        {track.album}
+                    </TableCell>
+                }
                 <TableCell align='right'>
                     {secondsToTime(track.duration)}
                 </TableCell>
             </TableRow>
         );
+
         return arr;
     }, []);
 
@@ -358,7 +410,7 @@ const List = ({ audio }: AudioProps) => {
                     <div className='list-info'>
                         <span>{albumId ? 'Album' : 'Playlist'}</span>
                         <span className='list-name'>
-                            <h1>{(albumId ? album : playlist)?.name ?? ''}</h1>
+                            <h1 style={{ fontSize: `${headerFont}px` }}>{(albumId ? album : playlist)?.name ?? ''}</h1>
                         </span>
                         <div className='additional-info'>
                             { playlistId && playlist && <>
@@ -385,6 +437,11 @@ const List = ({ audio }: AudioProps) => {
                                 <TableCell>
                                     Title
                                 </TableCell>
+                                { playlistId &&
+                                    <TableCell>
+                                        Album
+                                    </TableCell>
+                                }
                                 <TableCell align='right'>
                                     <AccessTime />
                                 </TableCell>

@@ -9,7 +9,6 @@
 
     .track-meta {
         flex: 1;
-        min-width: 11.25rem;
 
         display: flex;
         align-items: center;
@@ -25,6 +24,8 @@
         }
 
         .track-info {
+            flex: 1;
+
             display: grid;
             align-items: center;
             row-gap: 0.5rem;
@@ -36,6 +37,10 @@
                 display: block;
                 text-decoration: none;
                 color: inherit;
+
+                white-space: nowrap;
+                text-overflow: ellipsis;
+                overflow: hidden;
             }
 
             .track-title {
@@ -54,8 +59,6 @@
     
                     padding-left: 0.5rem;
                     padding-right: 1.75rem;
-    
-                    white-space: nowrap;
                 }
 
                 a:hover {

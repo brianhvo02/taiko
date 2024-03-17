@@ -476,7 +476,6 @@ export default class MetadataDatabase {
             `SELECT cover_file
             FROM tracks
             WHERE id IN (${ids.join(', ')})
-            GROUP BY cover_file
             ORDER BY
                 CASE id
                 ${ids.map((id, i) => `WHEN ${id} THEN ${i + 1}`).join('\n')}
@@ -494,7 +493,8 @@ export default class MetadataDatabase {
         }
 
         const coverBuffers = await Promise.all(
-            covers.slice(0, 4).map(async ({ cover_file }) => readFile(join('images', cover_file)))
+            [...new Set(covers.map(({ cover_file }) => cover_file))].slice(0, 4)
+                .map(async cover => readFile(join('images', cover)))
         );
 
         const resizeOptions: ResizeOptions = { width: 500, height: 500, fit: 'cover' };
