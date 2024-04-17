@@ -65,3 +65,27 @@ interface Playlist {
     owner: string;
     tracks: Track[];
 }
+
+interface CurrentAudio {
+    idx: number,
+    listId: string;
+    tracks: Track[];
+}
+
+interface ShuffleState {
+    active: boolean;
+    map: number[];
+}
+
+type RepeatMode = 'off' | 'all' | 'one';
+
+interface AudioState {
+    currentAudio: CurrentAudio;
+    shuffleState: ShuffleState;
+    elapsed: number;
+    duration: number;
+    isPlaying: boolean;
+    repeat: RepeatMode;
+    volume: number;
+    volumeMemory: number | null;
+}

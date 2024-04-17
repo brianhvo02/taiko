@@ -14,6 +14,7 @@ import { setDraggingTrack, setHeaderText, setShowHeaderText } from '../../store/
 import { useAppDispatch } from '../../store/hooks';
 import Cookies from 'js-cookie';
 import { parseInt } from 'lodash';
+import { AudioProps } from '../../types/props';
 
 const List = ({ audio }: AudioProps) => {
     const theme = useTheme();
@@ -313,7 +314,13 @@ const List = ({ audio }: AudioProps) => {
                     </div>
                 </TableCell>
                 { playlistId &&
-                    <TableCell>
+                    <TableCell className='track-album' 
+                        onClick={() => navigate('/albums/' + track.album_id)}
+                        onDoubleClick={e => {
+                            e.stopPropagation();
+                            navigate('/albums/' + track.album_id);
+                        }}
+                    >
                         {track.album}
                     </TableCell>
                 }

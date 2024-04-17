@@ -16,6 +16,17 @@ import sharp, { ResizeOptions } from 'sharp';
 const DATABASE_PATH = './metadata.db';
 const SALT_ROUNDS = 10;
 
+interface DbUserState {
+    state_list_id?: string;
+    state_idx?: number;
+    state_shuffle_active?: number;
+    state_shuffle_map?: string;
+    state_elapsed?: number;
+    state_duration?: number;
+    state_repeat?: string;
+    state_volume?: number;
+}
+
 export default class MetadataDatabase {
     db: sqlite3.Database;
 
@@ -86,7 +97,15 @@ export default class MetadataDatabase {
                 id TEXT PRIMARY KEY, 
                 display_name TEXT NOT NULL, 
                 username TEXT UNIQUE,
-                password_digest TEXT NOT NULL
+                password_digest TEXT NOT NULL,
+                state_list_id TEXT,
+                state_idx INTEGER,
+                state_shuffle_active INTEGER,
+                state_shuffle_map TEXT,
+                state_elapsed REAL,
+                state_duration REAL,
+                state_repeat TEXT,
+                state_volume INTEGER
             )`
         );
 
@@ -544,7 +563,6 @@ export default class MetadataDatabase {
             trackId, playlistId
         );
 
-
         await this.generatePlaylistCover(order.track_order + trackId, playlistId);
 
         return true;
@@ -655,6 +673,102 @@ export default class MetadataDatabase {
         );
 
         return user;
+    }
+
+    async getUserState(userId: string) {
+        const state = await this.get<DbUserState>(
+            `SELECT state_list_id, state_idx, state_shuffle_active, state_shuffle_map, 
+                state_elapsed, state_duration, state_repeat, state_volume
+            FROM users
+            WHERE id = (?)`,
+            userId
+        );
+
+        const audioState: AudioState = {
+            currentAudio: {
+                idx: -1,
+                listId: '',
+                tracks: [],
+            },
+            shuffleState: {
+                active: false,
+                map: [],
+            },
+            elapsed: 0,
+            duration: 0,
+            isPlaying: false,
+            repeat: 'off',
+            volume: 100,
+            volumeMemory: null,
+        };
+
+        if (!state)
+            return audioState;
+
+        if (state.state_list_id && state.state_idx !== undefined) {
+            const album = await this.getAlbum(state.state_list_id);
+            const playlist = await this.getPlaylist(state.state_list_id);
+            if (album || playlist) {
+                audioState.currentAudio.tracks = album?.tracks ?? playlist?.tracks ?? []; 
+                audioState.currentAudio.listId = state.state_list_id;
+                audioState.currentAudio.idx = state.state_idx;
+            }
+        }
+
+        if (state.state_shuffle_active !== undefined && state.state_shuffle_map) {
+            audioState.shuffleState.active = Boolean(state.state_shuffle_active);
+            audioState.shuffleState.map = state.state_shuffle_map.split(',').map(i => parseInt(i));
+        }
+
+        if (state.state_elapsed)
+            audioState.elapsed = state.state_elapsed;
+
+        if (state.state_duration)
+            audioState.duration = state.state_duration;
+
+        if (state.state_repeat)
+            audioState.repeat = state.state_repeat as RepeatMode;
+
+        if (state.state_volume)
+            audioState.volume = state.state_volume;
+
+        return audioState;
+    }
+
+    async updateUserState(userId: string, state: Partial<AudioState>) {
+        if (!Object.keys(state).length) return;
+
+        const newUserState: DbUserState = {};
+
+        if (state.currentAudio) {
+            newUserState.state_list_id = state.currentAudio.listId;
+            newUserState.state_idx = state.currentAudio.idx;
+        }
+
+        if (state.shuffleState) {
+            newUserState.state_shuffle_active = Number(state.shuffleState.active);
+            newUserState.state_shuffle_map = state.shuffleState.map.join();
+        }
+
+        if (state.elapsed !== undefined)
+            newUserState.state_elapsed = state.elapsed;
+
+        if (state.duration)
+            newUserState.state_duration = state.duration;
+
+        if (state.repeat)
+            newUserState.state_repeat = state.repeat;
+
+        if (state.volume !== undefined)
+            newUserState.state_volume = state.volume;
+
+        await this.run(
+            `UPDATE users
+            SET ${Object.keys(newUserState).map(key => `${key} = (?)`).join(', ')}
+            WHERE id = (?)`,
+            ...Object.values(newUserState),
+            userId
+        );
     }
 }
 

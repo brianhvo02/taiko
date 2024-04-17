@@ -3,31 +3,11 @@ import type { PayloadAction } from '@reduxjs/toolkit';
 import { useAppSelector } from './hooks';
 import { MutableRefObject, useMemo } from 'react';
 import _ from 'lodash';
-
-interface CurrentAudio {
-    idx: number,
-    listId: string;
-    tracks: Track[];
-}
-
-interface ShuffleState {
-    active: boolean;
-    map: number[];
-}
+import { backendApi } from './backend';
+import Cookies from 'js-cookie';
 
 const REPEAT_MODES = ['off', 'all', 'one'] as const;
-export type RepeatMode = typeof REPEAT_MODES[number];
 
-interface AudioState {
-    currentAudio: CurrentAudio;
-    shuffleState: ShuffleState;
-    elapsed: number;
-    duration: number;
-    isPlaying: boolean;
-    repeat: RepeatMode;
-    volume: number;
-    volumeMemory: number | null;
-}
 
 const initialState: AudioState = {
     currentAudio: {
@@ -47,11 +27,27 @@ const initialState: AudioState = {
     volumeMemory: null,
 }
 
+export const updateRemoteState = (state: Partial<AudioState>) => {
+    const auth = Cookies.get('token');
+
+    if (!auth)
+        return;
+
+    return fetch('/api/auth/state', {
+        method: 'PATCH',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': auth
+        },
+        body: JSON.stringify(state)
+    }).then(res => res.json());
+}
+
 export const audioSlice = createSlice({
     name: 'audio',
     initialState,
     reducers: {
-        setCurrentAudio: (state, { payload }: PayloadAction<CurrentAudio>) => {
+        setCurrentAudio: (state, { payload }: PayloadAction<AudioState['currentAudio']>) => {
             if (state.shuffleState.active) {
                 const { idx, tracks, listId } = payload;
                 const indices = [...Array(tracks.length).keys()];
@@ -62,22 +58,32 @@ export const audioSlice = createSlice({
                     idx: 0,
                 }
 
+                updateRemoteState({ currentAudio: state.currentAudio, shuffleState: state.shuffleState });
+
                 return;
             }
 
             state.currentAudio = payload;
+            updateRemoteState({ currentAudio: payload });
         },
         setElapsed: (state, { payload }: PayloadAction<number>) => {
+            if (Math.floor(payload) % 5 === 0 && Math.floor(payload) - Math.floor(state.elapsed) === 1) 
+                updateRemoteState({ elapsed: payload });
+
             state.elapsed = payload;
         },
         setDuration: (state, { payload }: PayloadAction<number>) => {
             state.duration = payload;
+            updateRemoteState({ duration: payload });
         },
         toggleIsPlaying: state => {
             state.isPlaying = !state.isPlaying;
         },
         setIsPlaying: (state, { payload }: PayloadAction<boolean>) => {
             state.isPlaying = payload;
+
+            if (!payload)
+                updateRemoteState({ elapsed: state.elapsed });
         },
         toggleShuffle: state => {
             state.shuffleState.active = !state.shuffleState.active;
@@ -93,9 +99,13 @@ export const audioSlice = createSlice({
                 state.currentAudio.idx = state.shuffleState.map[state.currentAudio.idx];
                 state.shuffleState.map = [];
             }
+
+            updateRemoteState({ currentAudio: state.currentAudio, shuffleState: state.shuffleState });
         },
         toggleRepeat: state => {
-            state.repeat = REPEAT_MODES[(REPEAT_MODES.indexOf(state.repeat) + 1) % 3];
+            const repeat = REPEAT_MODES[(REPEAT_MODES.indexOf(state.repeat) + 1) % 3];
+            state.repeat = repeat;
+            updateRemoteState({ repeat });
         },
         forwardOne: (state, { payload }: PayloadAction<boolean>) => {
             if (!state.currentAudio || (state.repeat === 'one' && !payload))
@@ -109,6 +119,8 @@ export const audioSlice = createSlice({
 
             if (state.repeat === 'one')
                 state.repeat = 'all';
+
+            updateRemoteState({ currentAudio: state.currentAudio, repeat: state.repeat });
         },
         previousOne: state => {
             if (!state.currentAudio)
@@ -122,22 +134,38 @@ export const audioSlice = createSlice({
 
             if (state.repeat === 'one')
                 state.repeat = 'all';
+
+            updateRemoteState({ currentAudio: state.currentAudio, repeat: state.repeat });
         },
         setVolume: (state, { payload }: PayloadAction<number>) => {
             state.volume = payload;
             if (payload > 0 && state.volumeMemory !== null)
                 state.volumeMemory = null;
+
+            updateRemoteState({ volume: payload });
         },
         toggleMute: (state, { payload }: PayloadAction<MutableRefObject<HTMLAudioElement>>) => {
             if (state.volume > 0 && state.volumeMemory === null) {
                 state.volumeMemory = state.volume;
                 payload.current.volume = 0;
+                updateRemoteState({ volume: 0 });
             } else {
-                payload.current.volume = (state.volumeMemory ?? 0) / 100;
+                const newVolume = (state.volumeMemory ?? 0) / 100;
+                payload.current.volume = newVolume;
                 state.volumeMemory = null;
+                updateRemoteState({ volume: newVolume });
             }
         }
     },
+    extraReducers: builder => {
+        builder.addMatcher(backendApi.endpoints.getCurrentUser.matchFulfilled, (state, action) => {
+            if (action.payload?.state && !_.isEqual(initialState, action.payload.state) && _.isEqual(initialState, state))
+                return action.payload.state;
+
+            if (!_.isEqual(initialState, state))
+                updateRemoteState(state);
+        });
+    }
 })
 
 export const { 

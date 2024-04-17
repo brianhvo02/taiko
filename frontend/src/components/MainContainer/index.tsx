@@ -5,6 +5,7 @@ import List from './List';
 import Header from './Header';
 import Footer from './Footer';
 import { useLayout } from '../../store/layout';
+import { AudioProps } from '../../types/props';
 
 const MainContainer = ({ audio }: AudioProps) => {
     const layout = useLayout();

@@ -1,6 +1,11 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import Cookies from 'js-cookie';
 
+interface UserPayload { 
+    info: User; 
+    state: AudioState;
+}
+
 export const backendApi = createApi({
     reducerPath: 'backendApi',
     baseQuery: fetchBaseQuery({ 
@@ -42,17 +47,18 @@ export const backendApi = createApi({
             providesTags: result => result ? [{ type: 'Album', id: result.id }, 'Album'] : ['Album'],
             transformResponse: (res: Query<Album>) => res.success ? res.payload : null
         }),
-        getCurrentUser: builder.query<User | null, void>({
+        getCurrentUser: builder.query<UserPayload | null, void>({
             query: () => '/auth',
             providesTags: ['User'],
-            transformResponse: (res: Query<User>) => res.success ? res.payload : null
+            transformResponse: (res: Query<UserPayload>) =>
+                res.success ? res.payload : null
         }),
     }),
 });
 
 export const { useGetPlaylistsQuery, useGetPlaylistQuery, useGetAlbumsQuery, useGetAlbumQuery, useGetCurrentUserQuery, } = backendApi;
 export const useCurrentUser = () => {
-    const { data, isSuccess } = useGetCurrentUserQuery();
+    const { data, isSuccess } = useGetCurrentUserQuery(undefined, { skip: !Cookies.get('token') });
 
-    return (isSuccess && data) ? data : null;
+    return (isSuccess && data) ? data.info : null;
 }

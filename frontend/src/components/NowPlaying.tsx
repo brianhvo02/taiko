@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { forwardOne, previousOne, setElapsed, setDuration, setIsPlaying, setVolume, toggleRepeat, toggleShuffle, useAudio, toggleMute, useCurrentTrack } from '../store/audio';
+import { forwardOne, previousOne, setElapsed, setDuration, setIsPlaying, setVolume, toggleRepeat, toggleShuffle, useAudio, toggleMute, useCurrentTrack, updateRemoteState } from '../store/audio';
 import './NowPlaying.scss';
 import { Slider } from '@mui/material';
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious';
@@ -14,21 +14,37 @@ import VolumeOffIcon from '@mui/icons-material/VolumeOff';
 import VolumeDownIcon from '@mui/icons-material/VolumeDown';
 import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import FullscreenIcon from '@mui/icons-material/Fullscreen';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { secondsToTime } from '../utils';
 import { useDispatch } from 'react-redux';
 import { toggleRightSidebar } from '../store/layout';
+import { AudioProps } from '../types/props';
 
 const NowPlaying = ({ audio }: AudioProps) => {
     const { currentAudio, shuffleState, elapsed, duration, isPlaying, repeat, volume } = useAudio();
     const dispatch = useDispatch();
     const [seeker, setSeeker] = useState<number>();
+    const firstLoad = useRef(true);
+    const firstElapsed = useRef(0);
+
+    useEffect(() => {
+        firstElapsed.current = elapsed;
+    }, [elapsed]);
 
     useEffect(() => {
         const audioEl = audio.current;
         audioEl.autoplay = true;
 
-        const onPlay = () => dispatch(setIsPlaying(true));
+        const onPlay = () => {
+            if (firstLoad.current && firstElapsed.current) { 
+                audioEl.pause();
+                audioEl.currentTime = firstElapsed.current;
+            } else {
+                dispatch(setIsPlaying(true));
+            }
+
+            firstLoad.current = false;
+        };
         const onPause = () => dispatch(setIsPlaying(false));
         const onVolumeChange = () => dispatch(setVolume(audio.current.volume * 100));
         const onTimeUpdate = () => dispatch(setElapsed(audio.current.currentTime));
@@ -43,6 +59,7 @@ const NowPlaying = ({ audio }: AudioProps) => {
         audioEl.addEventListener('ended', onEnded);
 
         return () => {
+            firstLoad.current = true;
             audioEl.autoplay = false;
             audioEl.removeEventListener('play', onPlay);
             audioEl.removeEventListener('pause', onPause);
@@ -132,6 +149,7 @@ const NowPlaying = ({ audio }: AudioProps) => {
                         onChangeCommitted={(_, val) => { 
                             if (audio.current && !Array.isArray(val)) {
                                 audio.current.currentTime = val;
+                                updateRemoteState({ elapsed: val });
                                 setSeeker(undefined);
                             }
                         }} 

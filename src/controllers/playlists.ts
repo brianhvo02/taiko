@@ -11,7 +11,7 @@ export const createPlaylist = async (req: Request, res: Response, next: NextFunc
     if (!req.body.name) 
         return res.status(422).json({ success: false });
 
-    const payload = await db.createPlaylist(req.body.name, user.id);
+    const payload = await db.createPlaylist(req.body.name, user.info.id);
     res.json({ success: true, payload });
 }
 
@@ -53,7 +53,7 @@ export const addTrack = async (req: Request, res: Response, next: NextFunction) 
     if (!req.params.playlistId || !req.body.trackId)
         return res.status(422).json({ success: false });
 
-    db.addTrackToPlaylist(user.id, req.params.playlistId, req.body.trackId)
+    db.addTrackToPlaylist(user.info.id, req.params.playlistId, req.body.trackId)
         .then(success => res.status(success ? 200 : 403).json({ success }))
         .catch(e => {
             console.error(e);
@@ -70,7 +70,7 @@ export const removeTrack = async (req: Request, res: Response, next: NextFunctio
     if (!req.params.playlistId || !req.body.trackId)
         return res.status(422).json({ success: false });
 
-    db.removeTrackFromPlaylist(user.id, req.params.playlistId, req.body.trackId)
+    db.removeTrackFromPlaylist(user.info.id, req.params.playlistId, req.body.trackId)
         .then(success => res.status(success ? 200 : 403).json({ success }))
         .catch(e => {
             console.error(e);
@@ -87,7 +87,7 @@ export const changeTrackOrder = async (req: Request, res: Response, next: NextFu
     if (!req.params.playlistId || !req.body.trackOrder)
         return res.status(422).json({ success: false });
 
-    db.changeTrackOrder(user.id, req.params.playlistId, req.body.trackOrder)
+    db.changeTrackOrder(user.info.id, req.params.playlistId, req.body.trackOrder)
         .then(success => res.status(success ? 200 : 403).json({ success }))
         .catch(e => {
             console.error(e);

@@ -207,8 +207,15 @@
                 }
             }
 
-            tr:hover .track-title span:last-child {
-                color: var(--mui-palette-text-primary);
+            tr:hover {
+                .track-title span:last-child, .track-album {
+                    color: var(--mui-palette-text-primary);
+                }
+
+                .track-title span:hover, .track-album:hover {
+                    text-decoration: underline;
+                    cursor: pointer;
+                }
             }
         }
     }
