@@ -232,6 +232,14 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
                   <input type="checkbox" checked={snap.levelVolume} onChange={(e) => store.setLevelVolume(e.currentTarget.checked)} /> Level the volume between songs
                 </label>
               )}
+              {!snap.canSetVolume && snap.canMix && (
+                <>
+                  <label className="toggle">
+                    <input type="checkbox" checked={snap.mixing} onChange={(e) => void store.setMixing(e.currentTarget.checked)} /> Level the volume between songs
+                  </label>
+                  <p className="toggle-note">Songs whose files say how loud they are play at about the same loudness. While this is on, AirPlay can't carry the sound.</p>
+                </>
+              )}
               {snap.song && (
                 <label className="toggle" title="When this is off, pressing a line does nothing, so a stray touch can't move the song.">
                   <input type="checkbox" checked={snap.seekOnLine} onChange={(e) => store.setSeekOnLine(e.currentTarget.checked)} /> Press a line to go to it
@@ -249,7 +257,7 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
               )}
               <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Add lyrics or music</button>
               <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); onFindSong(); }}>Find this song in Apple Music</button>
-              {snap.canAirplay && (
+              {snap.canAirplay && !snap.mixing && (
                 <div className="extras-airplay">
                   <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); store.chooseAirplay(); }}>Play on an AirPlay speaker</button>
                 </div>
@@ -258,7 +266,7 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
             </div>
           )}
         </div>
-        {snap.canAirplay && <IconButton icon="airplay" label="AirPlay" className="airplay" onClick={() => store.chooseAirplay()} />}
+        {snap.canAirplay && !snap.mixing && <IconButton icon="airplay" label="AirPlay" className="airplay" onClick={() => store.chooseAirplay()} />}
         <IconButton icon="songs" label="Songs" pressed={snap.songsOpen} onClick={() => (snap.songsOpen ? store.closeSongs() : store.openSongs())} />
         {volume}
       </div>

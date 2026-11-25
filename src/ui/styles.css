@@ -453,6 +453,8 @@ input::placeholder { color: var(--unsung); }
 .extras .plain-button { justify-self: start; }
 .extras-volume { display: none; }
 .extras-airplay { display: none; }
+/* A sentence under a switch, saying what it costs. */
+.toggle-note { margin: -.2rem 0 .3rem; color: var(--quiet); font-size: var(--small); max-width: 18rem; }
 .timing { display: flex; align-items: center; gap: .45rem; }
 .timing output { font-variant-numeric: tabular-nums; min-width: 6.5rem; text-align: center; color: var(--quiet); }
 .toggle { display: flex; align-items: center; gap: .5rem; cursor: pointer; }

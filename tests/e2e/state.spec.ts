@@ -627,3 +627,55 @@ test('volume levelling: a song that says how loud it is plays at the common leve
   await expect.poll(volume).toBeCloseTo(0.5, 2);
   await page.getByRole('button', { name: 'Shuffle' }).click();
 });
+
+test('through the mixer: a song is levelled, heard, seeks and pauses, as on a phone that can\'t set the volume', async ({ page }) => {
+  await mockCatalog(page);
+  await pair(page, 'Mixer test');
+  type Mixer = { context: AudioContext; gain: GainNode; speaker: HTMLAudioElement };
+  type Store = { mixer: Mixer; setMixing(on: boolean): Promise<void>; audio: HTMLAudioElement; position(): number; getSnapshot(): { mixing: boolean } };
+  const store = <T>(read: (store: Store) => T | Promise<T>) => page.evaluate(read as never) as Promise<T>;
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await page.locator('.library .songlist .song', { hasText: '港の灯' }).click();
+  await expect(page.locator('.play')).toHaveText('Pause');
+
+  // Turned on while a song plays, as the switch does on a phone: the song is loaded again and carries on.
+  const before = await store(() => (window as unknown as { taikoStore: Store }).taikoStore.position());
+  await store(async () => { await (window as unknown as { taikoStore: Store }).taikoStore.setMixing(true); });
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await expect.poll(() => store(() => (window as unknown as { taikoStore: Store }).taikoStore.position())).toBeGreaterThan(before);
+
+  // The song's sound comes out of the mixer's speaker, turned down to the album's level (see the levelling test).
+  await store(() => {
+    const { mixer } = (window as unknown as { taikoStore: Store }).taikoStore;
+    const analyser = mixer.context.createAnalyser();
+    analyser.fftSize = 2048;
+    mixer.gain.connect(analyser);
+    (window as unknown as { loudest: () => number }).loudest = () => {
+      const bins = new Float32Array(analyser.frequencyBinCount);
+      analyser.getFloatFrequencyData(bins);
+      return Math.max(...bins);
+    };
+  });
+  await expect.poll(() => store(() => (window as unknown as { taikoStore: Store }).taikoStore.mixer.gain.gain.value)).toBeCloseTo(0.251, 2);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { loudest: () => number }).loudest())).toBeGreaterThan(-70);
+  expect(await store(() => { const { mixer } = (window as unknown as { taikoStore: Store }).taikoStore; return [mixer.context.state, mixer.speaker.paused]; })).toEqual(['running', false]);
+
+  // A seek goes quiet for the jump and comes back; a pause rests the speaker, and Play wakes it.
+  await seekTo(page, 12);
+  await expect.poll(() => shown(page)).toBeGreaterThan(12.2);
+  await expect.poll(() => store(() => (window as unknown as { taikoStore: Store }).taikoStore.mixer.gain.gain.value)).toBeCloseTo(0.251, 2);
+  await page.locator('.play').click();
+  await expect(page.locator('.play')).toHaveText('Play');
+  await expect.poll(() => store(() => (window as unknown as { taikoStore: Store }).taikoStore.mixer.speaker.paused), { timeout: 6000 }).toBe(true);
+  await page.locator('.play').click();
+  await expect.poll(() => store(() => (window as unknown as { taikoStore: Store }).taikoStore.mixer.speaker.paused)).toBe(false);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { loudest: () => number }).loudest())).toBeGreaterThan(-70);
+
+  // The next song comes through it too; and the choice is kept: a new visit starts with the mixer in place.
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect.poll(() => store(() => (window as unknown as { taikoStore: Store }).taikoStore.mixer.gain.gain.value)).toBeCloseTo(1, 2);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { loudest: () => number }).loudest())).toBeGreaterThan(-70);
+  await page.reload();
+  expect(await store(() => (window as unknown as { taikoStore: Store }).taikoStore.getSnapshot().mixing)).toBe(true);
+  await store(async () => { await (window as unknown as { taikoStore: Store }).taikoStore.setMixing(false); });
+});

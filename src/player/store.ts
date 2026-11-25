@@ -26,6 +26,7 @@ import {
 } from './persist';
 import type { Playlist, QueueSource, SavedTrack, Session } from './persist';
 import { levelFactor } from './level';
+import { Mixer, keepMixerWanted, mixerPossible, mixerWanted } from './mixer';
 import { inPlayOrder, makeOrder, nextRepeat, stepFrom, withMovedInQueue, withQueued, withoutQueued, withoutUpcoming } from './queue';
 import type { Repeat } from './queue';
 import { folderOf, parseRoute, routeUrl } from './route';
@@ -164,6 +165,12 @@ export interface Snapshot {
   muted: boolean;
   /** False where only the device's own buttons set the volume (an iPhone): the slider is left out there. */
   canSetVolume: boolean;
+  /**
+   * Whether the song plays through the mixer (mixer.ts), which is how its volume is levelled where a page can't set
+   * an audio element's volume; and whether this browser could.
+   */
+  mixing: boolean;
+  canMix: boolean;
   /** Whether there is an AirPlay speaker or screen to send the sound to (Safari only). */
   canAirplay: boolean;
   /** An invite link waiting for the person to confirm it. */
@@ -187,7 +194,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), canAirplay: false, pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), mixing: false, canMix: mixerPossible(), canAirplay: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -226,6 +233,9 @@ class PlayerStore {
   private seekTimer = 0;
   private seekRun = 0;
   private restarting = false;
+  /** The mixer the song plays through, once the listener has turned it on (mixer.ts). */
+  private mixer: Mixer | null = null;
+  private restTimer = 0;
   /** The song played to its end. The element's own `ended` can't be trusted for a stream cut by an exact seek. */
   private finished = false;
   /** Whether the open song's own stream has been given to the audio element (see `songEnded`). */
@@ -253,14 +263,20 @@ class PlayerStore {
   constructor() {
     this.audio.preload = 'auto';
     this.audio.volume = this.snapshot.volume;
+    // Where the listener turned the mixer on, the element is taken into it before any song is loaded.
+    if (mixerWanted() && this.snapshot.canMix) this.startMixer();
     // The lock screen's buttons are claimed again each time sound starts: iOS only honours them once audio is
     // playing, and goes back to its own skip-10-seconds buttons otherwise.
-    this.audio.addEventListener('play', () => { this.set({ playing: true }); this.wireMediaSession(); this.tellPosition(); });
+    this.audio.addEventListener('play', () => { this.mixer?.wake(); this.set({ playing: true }); this.wireMediaSession(); this.tellPosition(); this.sayPlaying(true); });
     // Loading a restarted stream pauses the element for a moment; that isn't the listener pausing.
     this.audio.addEventListener('pause', () => {
       if (this.restarting) return;
       this.set({ playing: false });
       this.tellPosition();
+      this.sayPlaying(false);
+      // The speaker rests a moment later, unless this was only the pause between two songs.
+      clearTimeout(this.restTimer);
+      this.restTimer = window.setTimeout(() => { if (this.audio.paused && !this.restarting) this.mixer?.rest(); }, 2000);
       // A stream cut by an exact seek can stop at its end without the browser ever saying it ended (Chrome, whose
       // clock for such a stream doesn't line up with its length). Stopping at the song's end is the end.
       if (this.exact && this.position() >= this.exact.total - 0.3) this.songEnded();
@@ -281,7 +297,8 @@ class PlayerStore {
         this.browserClockIsAbsolute = true;
       }
     });
-    this.audio.addEventListener('playing', () => { this.finished = false; });
+    this.audio.addEventListener('playing', () => { this.finished = false; this.mixer?.unduck(); });
+    this.audio.addEventListener('seeked', () => this.mixer?.unduck());
     this.audio.addEventListener('ended', () => this.songEnded());
     this.audio.addEventListener('error', () => {
       const track = this.current();
@@ -719,6 +736,7 @@ class PlayerStore {
 
   /** Opens a track: its audio, then its lyrics. */
   async select(id: string, autoplay = true, history: 'push' | 'replace' | 'none' = 'push'): Promise<void> {
+    if (autoplay) this.mixer?.wake();
     // The queue first: Next, Back and a restored session name a song in it. A song found elsewhere (the first
     // file added on this device) makes that list the queue.
     const lists = [this.snapshot.queue, this.snapshot.tracks, this.snapshot.nasFolder?.tracks ?? []];
@@ -852,6 +870,8 @@ class PlayerStore {
 
   toggle(): void {
     if (!this.snapshot.currentId) return;
+    // In the tap itself: a phone only lets a tap (or the lock screen) start sound.
+    if (this.audio.paused) this.mixer?.wake();
     if (this.finished) {
       this.finished = false;
       // Play again from the start. For a stream cut by an exact seek that means the song's start, not the stream's.
@@ -1543,6 +1563,8 @@ class PlayerStore {
     if (!this.snapshot.currentId) return;
     const target = Math.max(0, Math.min(time, this.snapshot.duration || time));
     this.seekCount++;
+    // Through the mixer the song goes quiet for the jump: some browsers go on sounding the old moment while they look.
+    if (!this.audio.paused) this.mixer?.duck();
     if (!this.exact) {
       this.audio.currentTime = target;
       return;
@@ -1655,6 +1677,62 @@ class PlayerStore {
   setSeekOnLine(seekOnLine: boolean): void { this.set({ seekOnLine }); this.keepSettings(); }
   setLevelVolume(levelVolume: boolean): void { this.set({ levelVolume }); this.keepSettings(); this.applyVolume(); }
 
+  /** Takes the audio element into the mixer. Done once; from then on its sound comes out through the mixer. */
+  private startMixer(): void {
+    if (this.mixer) return;
+    try {
+      this.mixer = new Mixer(this.audio);
+      // The phone pausing the speaker (a call, another app's sound) pauses the song with it.
+      this.mixer.speaker.addEventListener('pause', () => { if (!this.audio.paused && !this.restarting) this.audio.pause(); });
+      this.set({ mixing: true });
+    } catch {
+      this.mixer = null;
+      this.set({ mixing: false, canMix: false });
+    }
+  }
+
+  /**
+   * Turns volume levelling through the mixer on or off, where a page can't set the volume itself (a phone). Turned
+   * on in a tap, it takes effect at once: the open song is loaded again, since the mixer can't hear audio that was
+   * asked for before it was there. Turned off, songs play as they are; the mixer itself stays until the next visit.
+   */
+  async setMixing(on: boolean): Promise<void> {
+    keepMixerWanted(on);
+    if (!on) {
+      this.set({ mixing: false });
+      this.applyVolume();
+      return;
+    }
+    const fresh = !this.mixer;
+    this.startMixer();
+    if (!this.mixer) {
+      this.set({ notice: "This browser can't level the volume." });
+      return;
+    }
+    this.set({ mixing: true });
+    this.mixer.wake();
+    const { currentId } = this.snapshot;
+    if (fresh && currentId && this.audio.src) {
+      const at = this.position();
+      const playing = !this.audio.paused;
+      await this.select(currentId, false, 'replace');
+      if (this.snapshot.currentId !== currentId) return;
+      if (at > 1) {
+        this.resumeAfterSeek = playing;
+        this.seek(at);
+        if (this.exact) return;
+      }
+      if (playing) this.audio.play().catch(() => {});
+    } else {
+      this.applyVolume();
+    }
+  }
+
+  /** Tells the lock screen whether the song is playing: through the mixer, the phone can't tell by itself. */
+  private sayPlaying(playing: boolean): void {
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = playing ? 'playing' : 'paused';
+  }
+
   /**
    * Sets the audio element's volume: the listener's, times what brings the open song to the common loudness. An
    * album played through in order keeps its own quiet and loud songs. The element can only be turned down, and on
@@ -1663,6 +1741,11 @@ class PlayerStore {
   private applyVolume(): void {
     const { volume, levelVolume, currentTrack, source, shuffle } = this.snapshot;
     const album = source.kind === 'folder' && !shuffle;
+    if (this.mixer) {
+      // The mixer can turn a quiet song up as well as a loud one down (never past its peak, and at most double).
+      this.mixer.setLevel(this.snapshot.mixing && currentTrack ? levelFactor(currentTrack, album, 2) : 1);
+      return;
+    }
     this.audio.volume = Math.max(0, Math.min(1, volume * (levelVolume && currentTrack ? levelFactor(currentTrack, album, 1) : 1)));
   }
   dismissNotice(): void { this.set({ notice: '' }); }
