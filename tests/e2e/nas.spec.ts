@@ -1,0 +1,95 @@
+import { expect, test } from '@playwright/test';
+import { expectInTime, invite, listen, mockCatalog, pair, seekTo, shown } from './helpers.ts';
+
+/** The NAS server (started by playwright.config.ts with the library from start-nas.ts), through the player. */
+
+test('pairs from an invite link, browses the folders and plays a song with its lyrics', async ({ page }) => {
+  await mockCatalog(page);
+  await pair(page);
+  await listen(page);
+
+  await page.getByRole('button', { name: 'Open from NAS' }).click();
+  const panel = page.getByRole('complementary', { name: 'Songs' });
+  const folders = panel.locator('.song.folder .song-title');
+  const songs = panel.locator('.song:not(.folder)');
+  const crumbs = panel.getByRole('navigation', { name: 'Folder' });
+
+  await expect(folders).toHaveText(['Music']);
+  await folders.first().click();
+  await expect(folders).toHaveText(['Empty', 'Midori Vale']);
+  await folders.nth(1).click();
+  await expect(folders).toHaveText(['Night Market']);
+  await folders.first().click();
+  await expect(crumbs).toHaveText('All folders / Music / Midori Vale / Night Market');
+
+  // In file-name order ("2" before "10"), named by their tags; a file without tags keeps its file name, and
+  // files that aren't songs are not listed.
+  await expect(songs.locator('.song-title')).toHaveText(['2Paper Lanterns', '10Harbour Lights', 'untagged']);
+  await expect(songs.first()).toContainText('Midori Vale, Night Market');
+  await expect(songs.first()).toContainText('Lyrics, 0:50');
+  await expect(songs.nth(1)).toContainText('0:20');
+
+  await songs.first().click();
+  const lines = page.locator('.lyrics .line');
+  await expect(lines).toHaveCount(3);
+  await expect(page.locator('.lyrics .roman')).toHaveCount(3);
+  await expect(page.locator('.lyrics .translation')).toHaveCount(3);
+  await expect(page.locator('.now-title')).toHaveText('紙の灯籠 (Paper Lanterns)');
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await expect(page.locator('.seek-row output').last()).toHaveText('0:50');
+  await expectInTime(page, 'streamed from the NAS');
+
+  // A seek asks the server for audio that begins at that time.
+  const fromAFrame = page.waitForRequest((request) => /\/audio\?.*[?&]at=\d+/.test(request.url()));
+  await seekTo(page, 31);
+  await fromAFrame;
+  await expect.poll(() => shown(page)).toBeGreaterThan(30.7);
+  await expectInTime(page, 'after seeking the stream to 31');
+  await expect(lines.nth(2)).toHaveAttribute('data-state', 'active');
+  await seekTo(page, 3);
+  await expectInTime(page, 'after seeking the stream back to 3');
+
+  // Next and Back walk the folder the song came from.
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Harbour Lights' })).toBeVisible();
+  await page.locator('.transport button', { hasText: 'Back' }).click();
+  await expect(page.locator('.now-title')).toContainText('紙の灯籠');
+
+  await crumbs.getByRole('button', { name: 'Music' }).click();
+  await folders.first().click();
+  await expect(panel.getByText('This folder has no songs or folders.')).toBeVisible();
+});
+
+test('keeps the pairing and the folder across a reload, and forgets the NAS when asked', async ({ page }) => {
+  await pair(page, 'Reload test');
+  await page.getByRole('button', { name: 'Open from NAS' }).click();
+  const panel = page.getByRole('complementary', { name: 'Songs' });
+  await panel.locator('.song.folder').first().click();
+  await panel.locator('.song.folder', { hasText: 'Midori Vale' }).click();
+  await expect(panel.getByRole('navigation', { name: 'Folder' })).toHaveText('All folders / Music / Midori Vale');
+
+  await page.reload();
+  await expect(page.getByText('Paired with Test NAS as Reload test.')).toBeVisible();
+  await page.getByRole('button', { name: 'Open from NAS' }).click();
+  await expect(panel.getByRole('navigation', { name: 'Folder' })).toHaveText('All folders / Music / Midori Vale');
+  await panel.getByRole('button', { name: 'Close' }).click();
+
+  await page.getByRole('button', { name: 'Forget this NAS' }).click();
+  await expect(page.getByRole('button', { name: 'Pair', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('NAS address')).toBeVisible();
+});
+
+test('refuses a pairing code that was already used', async ({ page, browser }) => {
+  const link = invite();
+  await page.goto(link);
+  await page.getByRole('dialog').getByRole('button', { name: 'Pair', exact: true }).click();
+  await expect(page.getByText(/^Paired with Test NAS as /)).toBeVisible();
+
+  const context = await browser.newContext();
+  const second = await context.newPage();
+  await second.goto(link);
+  await second.getByRole('dialog').getByRole('button', { name: 'Pair', exact: true }).click();
+  await expect(second.getByRole('alert')).toHaveText("That code didn't work. Ask the NAS owner for a new invite.");
+  await context.close();
+});

@@ -43,8 +43,20 @@ export function pickFiles(folder = false): Promise<File[]> {
     input.multiple = true;
     if (folder) input.setAttribute('webkitdirectory', '');
     else input.accept = ACCEPT;
-    input.addEventListener('change', () => resolve(Array.from(input.files ?? [])), { once: true });
-    input.addEventListener('cancel', () => resolve([]), { once: true });
+    // The input sits in the page while the dialog is open: a browser may drop one that isn't attached to anything
+    // before it reports what was picked (Firefox does).
+    input.hidden = true;
+    document.body.append(input);
+    let cancelled = 0;
+    const done = (files: File[]) => {
+      clearTimeout(cancelled);
+      input.remove();
+      resolve(files);
+    };
+    input.addEventListener('change', () => done(Array.from(input.files ?? [])), { once: true });
+    // A cancel is believed only if no files follow it: a browser driven by a test reports the dialog closing
+    // just before it hands over the files.
+    input.addEventListener('cancel', () => { cancelled = window.setTimeout(() => done([]), 500); }, { once: true });
     input.click();
   });
 }

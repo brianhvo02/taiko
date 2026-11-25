@@ -98,6 +98,8 @@ class PlayerStore {
   private seekTimer = 0;
   private seekRun = 0;
   private restarting = false;
+  /** The song played to its end. The element's own `ended` can't be trusted for a stream cut by an exact seek. */
+  private finished = false;
   private resumeAfterSeek = false;
   /** The object URL of the cut stream now playing, for a file on this device. */
   private cutUrl = '';
@@ -108,7 +110,13 @@ class PlayerStore {
     this.audio.preload = 'auto';
     this.audio.addEventListener('play', () => this.set({ playing: true }));
     // Loading a restarted stream pauses the element for a moment; that isn't the listener pausing.
-    this.audio.addEventListener('pause', () => { if (!this.restarting) this.set({ playing: false }); });
+    this.audio.addEventListener('pause', () => {
+      if (this.restarting) return;
+      this.set({ playing: false });
+      // A stream cut by an exact seek can stop at its end without the browser ever saying it ended (Chrome, whose
+      // clock for such a stream doesn't line up with its length). Stopping at the song's end is the end.
+      if (this.exact && this.position() >= this.exact.total - 0.3) this.songEnded();
+    });
     this.audio.addEventListener('durationchange', () => {
       // A restarted stream reports only what remains; an exact-seek track's length comes from its index.
       if (!this.exact && Number.isFinite(this.audio.duration)) this.set({ duration: this.audio.duration });
@@ -123,7 +131,8 @@ class PlayerStore {
         this.browserClockIsAbsolute = true;
       }
     });
-    this.audio.addEventListener('ended', () => this.step(1, true));
+    this.audio.addEventListener('playing', () => { this.finished = false; });
+    this.audio.addEventListener('ended', () => this.songEnded());
     this.audio.addEventListener('error', () => {
       const track = this.current();
       if (track && this.audio.src) this.set({ notice: `This browser can't play ${track.fileName || track.title}.` });
@@ -152,6 +161,15 @@ class PlayerStore {
 
   private current(): Track | null {
     return this.snapshot.currentTrack;
+  }
+
+  /** The song played to its end: go on to the next in the list, or stop after the last. Runs once per ending. */
+  private songEnded(): void {
+    if (this.finished) return;
+    this.finished = true;
+    const { queue, currentId } = this.snapshot;
+    if (queue.findIndex((track) => track.id === currentId) >= queue.length - 1) this.set({ playing: false });
+    else this.step(1, true);
   }
 
   /** Where the song is, in seconds. Read this, not `audio.currentTime`, which restarts with every exact seek. */
@@ -224,6 +242,7 @@ class PlayerStore {
   private resetStream(): void {
     clearTimeout(this.seekTimer);
     this.seekRun++;
+    this.finished = false;
     this.exact = null;
     this.streamStart = 0;
     this.clockIsAbsolute = false;
@@ -328,7 +347,13 @@ class PlayerStore {
 
   toggle(): void {
     if (!this.snapshot.currentId) return;
-    if (this.audio.paused) this.audio.play().catch(() => {});
+    if (this.finished) {
+      this.finished = false;
+      // Play again from the start. For a stream cut by an exact seek that means the song's start, not the stream's.
+      this.resumeAfterSeek = true;
+      this.seek(0);
+      if (!this.exact) this.audio.play().catch(() => {});
+    } else if (this.audio.paused) this.audio.play().catch(() => {});
     else this.audio.pause();
   }
 

@@ -11,6 +11,7 @@ Guidance for Claude Code when working in this repository.
 ```sh
 npm run dev            # the player
 npm test               # vitest: player and server
+npm run test:e2e       # Playwright (tests/e2e): the player in Chromium and Firefox, against the dev server and the built NAS server
 npm run typecheck      # tsc -b over the app, node and server projects
 npm run build          # typecheck, then the static site in dist/
 npm run server:build   # esbuild bundle: server/dist/server.mjs
@@ -18,11 +19,13 @@ npm run server:dev     # build and run the server on :4193 against fixtures/musi
 npm run server:deploy  # the owner's deploy to a NAS over ssh (server/deploy/deploy.sh; settings in .env.local)
 ```
 
-One test file: `npx vitest run src/lyrics/lyrics.test.ts`.
+One test file: `npx vitest run src/lyrics/lyrics.test.ts`. One browser test: `npx playwright test tests/e2e/seek.spec.ts --project=chromium`. The first run needs `npx playwright install chromium firefox`.
+
+The browser tests use made-up songs: `tests/e2e/fixtures.ts` writes a tone whose pitch rises steadily as an uncompressed FLAC, so a test can hear where the audio really is (`expectInTime` in `helpers.ts`) and compare it with the position shown. They read that position through `window.taikoStore`, which only the dev build sets.
 
 ## Deploys
 
-- **The player** is the classic Cloudflare Pages project `taiko-player` (https://taiko-player.pages.dev). `.github/workflows/ci.yml` typechecks and tests every push and pull request, then deploys `main` to the site and `beta` to `beta.taiko-player.pages.dev`. `preview.yml` deploys any other branch by hand. Both need the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+- **The player** is the classic Cloudflare Pages project `taiko-player` (https://taiko-player.pages.dev). `.github/workflows/ci.yml` typechecks, unit-tests and browser-tests every push and pull request, then deploys `main` to the site and `beta` to `beta.taiko-player.pages.dev`. `preview.yml` deploys any other branch by hand. Both need the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 - Create Pages projects with `wrangler pages project create <name> --force`. Without `--force`, current Wrangler deploys a Worker instead and rewrites `package.json` and `vite.config.ts` for Workers.
 - **The NAS server** is deployed by hand with `npm run server:deploy`; CI doesn't touch it. A NAS only answers the production site (its `APP_URL`), so a beta or preview deploy can't use one unless its address is added there.
 

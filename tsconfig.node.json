@@ -2,7 +2,10 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "ES2022",
-    "lib": ["ES2023"],
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
@@ -12,7 +15,14 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "allowImportingTsExtensions": true
   },
-  "include": ["vite.config.ts"]
+  "include": [
+    "vite.config.ts",
+    "playwright.config.ts",
+    "tests"
+  ]
 }

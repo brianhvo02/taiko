@@ -34,9 +34,43 @@ jobs:
       # The server bundle must build too: the image and the NAS deploy are made from it.
       - run: npm run server:build
 
+  # The player in a real browser, against the dev server and the built NAS server (playwright.config.ts): local
+  # playback and lyrics, exact seeking checked by ear, and pairing, browsing and streaming from the NAS.
+  e2e:
+    name: Browser tests (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [chromium, firefox]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install -g npm@11.19.0
+      - run: npm ci
+      - run: npx playwright install --with-deps ${{ matrix.project }}
+      # The tests listen to the audio, which needs an output device.
+      - run: bash scripts/ci-audio.sh
+      - run: npm run test:e2e -- --project ${{ matrix.project }}
+        timeout-minutes: 12
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-results-${{ matrix.project }}
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
   deploy:
     name: Deploy to Cloudflare Pages
-    needs: check
+    needs: [check, e2e]
     if: >-
       (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta') &&
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch')

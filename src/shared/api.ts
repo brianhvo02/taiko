@@ -91,9 +91,9 @@ export interface NasFolder {
 }
 
 /**
- * One folder, read when asked for. Tracks here carry no tags: `title` is the file name without its extension,
- * `artist` and `album` are empty and the numbers are null. Folders come first when shown; both lists are sorted by
- * name, numbers in order ("2" before "10").
+ * One folder, read when asked for. Its tracks carry their tags (FLAC and ID3; a file without a title tag is named
+ * after its file). Folders come first when shown; both lists are sorted by file name, numbers in order ("2"
+ * before "10"), whatever the tags say.
  */
 export interface BrowseResponse {
   serverName: string;

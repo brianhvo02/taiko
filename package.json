@@ -10,6 +10,7 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "server:build": "node server/build.mjs",
     "server:dev": "npm run server:build && node server/dev.mjs",
     "server:deploy": "bash server/deploy/deploy.sh"
@@ -21,6 +22,7 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

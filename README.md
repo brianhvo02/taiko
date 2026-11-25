@@ -32,6 +32,7 @@ The NAS server runs in Docker next to your music, behind your own HTTPS address.
 |---|---|
 | `npm run dev` | The player, with hot reload. |
 | `npm test` | Unit tests (player and server). |
+| `npm run test:e2e` | Browser tests in Chromium and Firefox (run `npx playwright install chromium firefox` once first). |
 | `npm run typecheck` | TypeScript, every part. |
 | `npm run build` | Typecheck, then the static site in `dist/`. |
 | `npm run server:build` | Bundles the server to `server/dist/server.mjs`. |
@@ -44,7 +45,7 @@ The NAS server runs in Docker next to your music, behind your own HTTPS address.
 
 - Tags are read from FLAC and ID3 (MP3) files. Other formats show their file name.
 - No offline install: there is a web app manifest but no service worker.
-- The NAS is browsed by folder, with file names for titles. A library sorted by artist and album from the files' tags exists in the server but is switched off (`LIBRARY_SCAN`) and has no screen in the player yet.
+- The NAS is browsed by folder. Songs are named by their tags, but there is no library sorted by artist and album: the server can scan for one (`LIBRARY_SCAN`), and the player has no screen for it yet.
 - The NAS is reached over HTTPS only. There are no typed pairing codes without the address, no QR codes and no WebRTC route.
 - The player remembers the NAS pairing, but not the files you picked: choose them again after a reload.
 - All rights reserved for now: the project has no licence yet, so the code is public to read but not licensed for reuse.

@@ -10,9 +10,9 @@ The player is a static web app. Your music stays on your machine; the NAS server
 
 ## Library layout
 
-You name the folders to share (the roots). The player browses them folder by folder: the server reads a folder when a device opens it, so there is no scan and nothing to wait for. It lists sub-folders and `flac`, `mp3`, `m4a`, `aac`, `ogg`, `oga`, `opus` and `wav` files, by file name, and skips dot-files and NAS housekeeping folders (`@eaDir`, `#recycle`).
+You name the folders to share (the roots). The player browses them folder by folder: the server reads a folder when a device opens it, so there is no scan and nothing to wait for. It lists sub-folders and `flac`, `mp3`, `m4a`, `aac`, `ogg`, `oga`, `opus` and `wav` files in file-name order, and skips dot-files and NAS housekeeping folders (`@eaDir`, `#recycle`). Songs are named by their tags (FLAC and ID3), which the server reads the first time a folder is opened and remembers while the files don't change; a file without tags shows its file name.
 
-A tag-based library (artist, album and title from FLAC and ID3 tags) is in the server but on hold: `LIBRARY_SCAN=on` turns its scan on, and the player has no screen for it yet.
+A library sorted by artist and album across all folders is in the server but on hold: `LIBRARY_SCAN=on` turns its scan on, and the player has no screen for it yet.
 
 Lyrics are found beside a song, by name: `Song.flac` takes `Song.json`, `Song.ttml`, `Song.lrc`, and versions such as `Song.ja-Latn.json` or `Song_en.json`. The player combines the versions.
 

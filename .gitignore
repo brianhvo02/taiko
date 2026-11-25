@@ -23,3 +23,7 @@ fixtures/music
 
 # The owner deploy's settings (TAIKO_NAS_HOST, TAIKO_CADDY_SITE; read by server/deploy/deploy.sh)
 .env.local
+
+# Browser test output
+test-results
+playwright-report

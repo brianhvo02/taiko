@@ -14,6 +14,7 @@ import { LibraryPaths, encodeTrackId, listFolder, stemOf } from './paths';
 import type { FolderListing, ResolvedTrack } from './paths';
 import { sendAudioFile } from './ranges';
 import { VERSION } from './version';
+import { TagCache } from './tag-cache';
 
 export const MAX_JSON_BODY_BYTES = 16 * 1024;
 export const PAIR_ATTEMPTS = 10;
@@ -96,6 +97,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   const log = deps.log ?? (() => {});
   const pairLimit = new RateLimiter(PAIR_ATTEMPTS, PAIR_WINDOW_MS);
   const paths = new LibraryPaths(config.roots);
+  const tags = new TagCache();
 
   function requireDevice(req: IncomingMessage): Device {
     const match = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '');
@@ -130,15 +132,18 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       throw new HttpError(404, 'not-found');
     }
     const here = [folder.root.name, ...folder.parts];
-    // No tags are read: a folder of any size costs one directory listing.
-    const tracks: NasTrack[] = [...listing.audio].sort(byNameNumeric).map((file) => ({
+    // The songs stay in file-name order; their tags name them. Tags are read the first time a folder is opened
+    // and remembered while the files don't change (tag-cache.ts).
+    const files = [...listing.audio].sort(byNameNumeric);
+    const read = await tags.readAll(files.map((file) => file.path));
+    const tracks: NasTrack[] = files.map((file, i) => ({
       id: encodeTrackId(folder.root.name, [...folder.parts, file.name]),
-      title: stemOf(file.name),
-      artist: '',
-      album: '',
-      trackNumber: null,
-      discNumber: null,
-      durationSeconds: null,
+      title: read[i].title || stemOf(file.name),
+      artist: read[i].artist,
+      album: read[i].album,
+      trackNumber: read[i].trackNumber,
+      discNumber: read[i].discNumber,
+      durationSeconds: read[i].durationSeconds,
       lyrics: lyricsList(file.lyrics),
     }));
     return {

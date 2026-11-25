@@ -322,6 +322,7 @@ input::placeholder { color: var(--unsung); }
 .crumbs .text-button { color: var(--sung); }
 .crumbs .text-button:disabled { color: var(--quiet); text-decoration: none; cursor: default; }
 .song.folder .song-title { font-weight: 500; }
+.song-number { display: inline-block; min-width: 1.6em; margin-right: .4em; color: var(--quiet); font-variant-numeric: tabular-nums; }
 .songs ul.busy { opacity: .5; }
 
 /* On a wide screen the open Songs panel sits beside the player, not over its controls. */

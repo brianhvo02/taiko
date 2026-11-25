@@ -358,7 +358,7 @@ describe('another mount point and the pairing limit', () => {
 describe('the folder browser, with the library scan off', () => {
   let off: Running;
   let token: string;
-  const song = fakeFlac(['TITLE=A Tag Nobody Reads', 'ARTIST=Tin Harbor'], 4000);
+  const song = fakeFlac(['TITLE=Slack Water', 'ARTIST=Tin Harbor'], 4000);
   const browse = (browsePath?: string, auth: string | undefined = token): Promise<Reply> =>
     off.call('GET', browsePath === undefined ? 'browse' : `browse?path=${encodeURIComponent(browsePath)}`, { token: auth });
 
@@ -406,7 +406,7 @@ describe('the folder browser, with the library scan off', () => {
     const album = (await browse('Shelf/Tin Harbor/Low Tide')).json<BrowseResponse>();
     expect(album.path).toBe('Shelf/Tin Harbor/Low Tide');
     expect(album.parent).toBe('Shelf/Tin Harbor');
-    // Numbers in order, and nothing the server never lists.
+    // Numbers in order by file name, named by their tags, and nothing the server never lists.
     expect(album.folders).toEqual([
       { name: 'disc 1', path: 'Shelf/Tin Harbor/Low Tide/disc 1' },
       { name: 'Disc 2', path: 'Shelf/Tin Harbor/Low Tide/Disc 2' },
@@ -414,9 +414,9 @@ describe('the folder browser, with the library scan off', () => {
     ]);
     expect(album.tracks).toEqual([
       { id: id('Shelf/Tin Harbor/Low Tide/1 - c.MP3'), title: '1 - c', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null, lyrics: [] },
-      { id: id('Shelf/Tin Harbor/Low Tide/2 - b.flac'), title: '2 - b', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null, lyrics: [] },
+      { id: id('Shelf/Tin Harbor/Low Tide/2 - b.flac'), title: 'Slack Water', artist: 'Tin Harbor', album: '', trackNumber: null, discNumber: null, durationSeconds: 10, lyrics: [] },
       {
-        id: id('Shelf/Tin Harbor/Low Tide/10 - a.flac'), title: '10 - a', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null,
+        id: id('Shelf/Tin Harbor/Low Tide/10 - a.flac'), title: 'Slack Water', artist: 'Tin Harbor', album: '', trackNumber: null, discNumber: null, durationSeconds: 10,
         lyrics: [{ index: 0, name: '10 - a.ja.ttml', format: 'ttml' }, { index: 1, name: '10 - a.lrc', format: 'lrc' }],
       },
     ]);

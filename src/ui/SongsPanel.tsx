@@ -10,7 +10,7 @@ function SongRow({ track, current, onChosen }: { track: Track; current: boolean;
   return (
     <li>
       <button type="button" className={current ? 'song current' : 'song'} aria-current={current || undefined} onClick={() => { void store.select(track.id); onChosen(); }}>
-        <span className="song-title">{track.title}</span>
+        <span className="song-title">{track.trackNumber !== null && <span className="song-number">{track.trackNumber}</span>}{track.title}</span>
         <span className="song-detail">{detail || (track.origin === 'device' ? track.fileName : '')}</span>
         <span className="song-meta">
           {hasLyrics ? 'Lyrics' : ''}

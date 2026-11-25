@@ -4,9 +4,10 @@
  *
  * The scan only lists. Serving a track never consults it: a track id names its file, and `paths.ts` resolves it.
  */
-import { open, realpath, stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import type { LyricsFormat, NasTrack } from '../../src/shared/api';
-import { TAG_HEAD_BYTES, readTags } from '../../src/shared/tags';
+import { readTags } from '../../src/shared/tags';
+import { readHead } from './tag-cache';
 import type { LibraryRoot } from './config';
 import { encodeTrackId, extensionOf, listFolder, stemOf } from './paths';
 import type { AudioEntry, FolderEntry, FolderListing } from './paths';
@@ -40,21 +41,6 @@ export function compareTracks(a: NasTrack, b: NasTrack): number {
   );
 }
 
-async function readHead(file: string, size: number): Promise<Uint8Array> {
-  const handle = await open(file, 'r');
-  try {
-    const buffer = Buffer.alloc(Math.min(size, TAG_HEAD_BYTES));
-    let read = 0;
-    while (read < buffer.length) {
-      const { bytesRead } = await handle.read(buffer, read, buffer.length - read, read);
-      if (!bytesRead) break;
-      read += bytesRead;
-    }
-    return buffer.subarray(0, read);
-  } finally {
-    await handle.close();
-  }
-}
 
 export class Library {
   /** Sorted by artist, album, disc, track number, title. */
