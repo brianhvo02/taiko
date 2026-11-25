@@ -183,7 +183,9 @@ class PlayerStore {
   constructor() {
     this.audio.preload = 'auto';
     this.audio.volume = this.snapshot.volume;
-    this.audio.addEventListener('play', () => { this.set({ playing: true }); this.tellPosition(); });
+    // The lock screen's buttons are claimed again each time sound starts: iOS only honours them once audio is
+    // playing, and goes back to its own skip-10-seconds buttons otherwise.
+    this.audio.addEventListener('play', () => { this.set({ playing: true }); this.wireMediaSession(); this.tellPosition(); });
     // Loading a restarted stream pauses the element for a moment; that isn't the listener pausing.
     this.audio.addEventListener('pause', () => {
       if (this.restarting) return;
@@ -1124,7 +1126,10 @@ class PlayerStore {
 
   private wireMediaSession(): void {
     if (!('mediaSession' in navigator)) return;
-    const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+    // Previous and Next, not skipping by seconds: iOS shows one pair or the other, and the skip pair wins if claimed.
+    const handlers: [MediaSessionAction, MediaSessionActionHandler | null][] = [
+      ['seekbackward', null],
+      ['seekforward', null],
       ['play', () => this.toggle()],
       ['pause', () => this.toggle()],
       ['previoustrack', () => this.step(-1)],
