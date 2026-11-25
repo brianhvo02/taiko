@@ -1,5 +1,5 @@
 import { open, stat } from 'node:fs/promises';
-import { TAG_HEAD_BYTES, readTags } from '../../src/shared/tags';
+import { TAG_HEAD_BYTES, readTagsFrom } from '../../src/shared/tags';
 import type { Tags } from '../../src/shared/tags';
 
 const NO_TAGS: Tags = { title: '', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null };
@@ -43,7 +43,18 @@ export class TagCache {
       const stats = await stat(file);
       const known = this.entries.get(file);
       if (known && known.mtimeMs === stats.mtimeMs && known.size === stats.size) return known.tags;
-      const tags = readTags(await readHead(file, stats.size));
+      // Through a reader, so a FLAC file's tags are found even behind a large cover picture.
+      const handle = await open(file, 'r');
+      let tags: Tags;
+      try {
+        tags = await readTagsFrom(async (offset, length) => {
+          const buffer = Buffer.alloc(Math.max(0, Math.min(length, stats.size - offset)));
+          const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+          return new Uint8Array(buffer.buffer, buffer.byteOffset, bytesRead);
+        }, stats.size);
+      } finally {
+        await handle.close();
+      }
       this.entries.delete(file);
       this.entries.set(file, { mtimeMs: stats.mtimeMs, size: stats.size, tags });
       // The oldest entries go first once the cache is full (a Map keeps the order things were added in).

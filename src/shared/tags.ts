@@ -141,6 +141,54 @@ function readId3(tag: Uint8Array, tags: Tags): void {
   }
 }
 
+/** Reads `length` bytes of a file at `offset`; fewer at its end. */
+export type TagReader = (offset: number, length: number) => Promise<Uint8Array>;
+
+const NO_TAGS = (): Tags => ({ title: '', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null });
+
+/**
+ * Reads a file's tags through a reader. A FLAC file is walked block by block, so its tags are found wherever they
+ * sit: some taggers put a cover picture of several megabytes ahead of them, far past `TAG_HEAD_BYTES`. Only the
+ * block headers, the stream details and the comments are read, never the picture. Any other format is read from
+ * its first `TAG_HEAD_BYTES`. Never throws.
+ */
+export async function readTagsFrom(read: TagReader, size: number): Promise<Tags> {
+  const tags = NO_TAGS();
+  try {
+    let at = 0;
+    const start = await read(0, 10);
+    if (start.length >= 10 && ascii(start, 0, 3) === 'ID3') {
+      const end = 10 + syncsafe(start, 6);
+      readId3(await read(0, Math.min(end, TAG_HEAD_BYTES)), tags);
+      at = end;
+    }
+    if (ascii(await read(at, 4), 0, 4) !== 'fLaC') return at ? tags : readTags(await read(0, Math.min(size, TAG_HEAD_BYTES)));
+    at += 4;
+    for (let blocks = 0; blocks < 1024 && at + 4 <= size; blocks++) {
+      const header = await read(at, 4);
+      if (header.length < 4) break;
+      const type = header[0] & 0x7f;
+      const length = (header[1] << 16) | (header[2] << 8) | header[3];
+      const body = at + 4;
+      if (type === 0 && length >= 18) {
+        const info = await read(body, 18);
+        if (info.length >= 18) {
+          const rate = (info[10] << 12) | (info[11] << 4) | (info[12] >> 4);
+          const samples = (info[13] & 0x0f) * 2 ** 32 + be32(info, 14);
+          if (rate > 0 && samples > 0) tags.durationSeconds = samples / rate;
+        }
+      } else if (type === 4 && length <= 4 * 1024 * 1024) {
+        readVorbisComments(await read(body, length), tags);
+      }
+      if (header[0] & 0x80) break;
+      at = body + length;
+    }
+  } catch {
+    // A damaged or unreadable file gives whatever was read before the damage.
+  }
+  return tags;
+}
+
 /** Reads what tags it can from the start of an audio file. Unknown formats give empty tags, never an error. */
 export function readTags(head: Uint8Array): Tags {
   const tags: Tags = { title: '', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { lyricsBelongTo } from './api';
-import { readTags } from './tags';
+import { readTags, readTagsFrom } from './tags';
 
 const bytes = (...parts: (number[] | Uint8Array | string)[]): Uint8Array => {
   const chunks = parts.map((part) => (typeof part === 'string' ? new TextEncoder().encode(part) : Uint8Array.from(part)));
@@ -49,6 +49,39 @@ describe('readTags', () => {
     expect(readTags(bytes('OggS', [0, 0, 0]))).toEqual(none);
     expect(readTags(flac(['TITLE=x']).subarray(0, 20))).toEqual(none);
     expect(readTags(new Uint8Array(0))).toEqual(none);
+  });
+});
+
+describe('readTagsFrom', () => {
+  const reader = (file: Uint8Array, reads: number[] = []) => async (offset: number, length: number) => {
+    reads.push(length);
+    return file.subarray(offset, offset + length);
+  };
+
+  it('finds FLAC tags behind a cover picture of any size, without reading the picture', async () => {
+    const plain = flac(['TITLE=紙の灯籠', 'ARTIST=Midori Vale', 'TRACKNUMBER=2']);
+    // The same file with a 3 MB picture block between the stream details and the comments.
+    const picture = new Uint8Array(3 * 1024 * 1024).fill(0x55);
+    const withCover = bytes(plain.subarray(0, 42), [6, ...be24(picture.length)], picture, plain.subarray(42));
+    expect(readTags(withCover.subarray(0, 256 * 1024)).title).toBe(''); // the old way misses them
+
+    const reads: number[] = [];
+    expect(await readTagsFrom(reader(withCover, reads), withCover.length)).toEqual({
+      title: '紙の灯籠', artist: 'Midori Vale', album: '', trackNumber: 2, discNumber: null, durationSeconds: 10,
+    });
+    expect(reads.reduce((sum, n) => sum + n, 0)).toBeLessThan(1024);
+  });
+
+  it('reads other formats from their start, and gives empty tags for anything unreadable', async () => {
+    const utf16 = (text: string) => [0x01, 0xff, 0xfe, ...[...text].flatMap((ch) => [ch.charCodeAt(0) & 0xff, ch.charCodeAt(0) >> 8])];
+    const frame = bytes('TIT2', [0, 0, 0, utf16('灯籠').length, 0, 0], utf16('灯籠'));
+    const mp3 = bytes('ID3', [3, 0, 0, 0, 0, 0, frame.length], frame, [0xff, 0xfb, 0x90, 0x00]);
+    expect((await readTagsFrom(reader(mp3), mp3.length)).title).toBe('灯籠');
+
+    const none = { title: '', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null };
+    expect(await readTagsFrom(reader(bytes('OggS', [0, 0, 0])), 7)).toEqual(none);
+    expect(await readTagsFrom(reader(new Uint8Array(0)), 0)).toEqual(none);
+    expect(await readTagsFrom(async () => { throw new Error('gone'); }, 100)).toEqual(none);
   });
 });
 

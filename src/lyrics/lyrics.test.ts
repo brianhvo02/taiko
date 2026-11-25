@@ -54,6 +54,19 @@ describe('openLyrics', () => {
     expect(song.parts[0].lines[1].translation).toBe('Crossing the night');
   });
 
+  it("reads Apple's line-timed response, where the TTML sits under ttml and lines have no word spans", () => {
+    const lineTimed = '<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" itunes:timing="Line" xml:lang="ja"><head><metadata><iTunesMetadata xmlns="http://music.apple.com/lyric-ttml-internal"><songwriters><songwriter>Midori Vale</songwriter></songwriters></iTunesMetadata></metadata></head><body dur="0:20.000"><div begin="1.000" end="9.000" itunes:songPart="Verse"><p begin="1.000" end="5.000" itunes:key="L1">紙の灯籠</p><p begin="5.000" end="9.000" itunes:key="L2">夜を渡る</p></div></body></tt>';
+    const source = openLyrics(JSON.stringify({ data: [{ id: '777', type: 'lyrics', attributes: { ttml: lineTimed, playParams: { id: 'AP_777', kind: 'lyric', catalogId: '777', displayType: 2 } } }] }), 'song.json');
+    expect(source.catalogId).toBe('777');
+    const song = songFromDoc(source.doc);
+    expect(song.hasRoman || song.hasTranslation).toBe(false);
+    expect(song.writers).toEqual(['Midori Vale']);
+    expect(song.parts[0].lines.map((line) => line.original)).toEqual([
+      [{ kind: 'word', text: '紙の灯籠', begin: 1, end: 5 }],
+      [{ kind: 'word', text: '夜を渡る', begin: 5, end: 9 }],
+    ]);
+  });
+
   it('refuses files without timed lyrics', () => {
     expect(() => openLyrics('{"data":[]}', 'empty.json')).toThrow();
     expect(() => openLyrics('<tt xmlns="http://www.w3.org/ns/ttml"><body/></tt>', 'empty.ttml')).toThrow();

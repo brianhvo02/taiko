@@ -4,7 +4,7 @@
  */
 import { AUDIO_EXTENSIONS, LYRICS_EXTENSIONS, lyricsBelongTo } from '../shared/api';
 import type { NasTrack } from '../shared/api';
-import { TAG_HEAD_BYTES, readTags } from '../shared/tags';
+import { readTagsFrom } from '../shared/tags';
 
 export interface Track {
   id: string;
@@ -38,7 +38,7 @@ let nextDeviceId = 1;
 async function trackFromFile(file: File): Promise<Track> {
   let tags = { title: '', artist: '', album: '', trackNumber: null as number | null, discNumber: null as number | null, durationSeconds: null as number | null };
   try {
-    tags = readTags(new Uint8Array(await file.slice(0, TAG_HEAD_BYTES).arrayBuffer()));
+    tags = await readTagsFrom(async (offset, length) => new Uint8Array(await file.slice(offset, offset + length).arrayBuffer()), file.size);
   } catch {
     // An unreadable start of file leaves the name as the title.
   }
