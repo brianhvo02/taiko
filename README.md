@@ -47,4 +47,4 @@ The NAS server runs in Docker next to your music, behind your own HTTPS address.
 - The NAS is browsed by folder, with file names for titles. A library sorted by artist and album from the files' tags exists in the server but is switched off (`LIBRARY_SCAN`) and has no screen in the player yet.
 - The NAS is reached over HTTPS only. There are no typed pairing codes without the address, no QR codes and no WebRTC route.
 - The player remembers the NAS pairing, but not the files you picked: choose them again after a reload.
-- No licence has been chosen for the project yet.
+- All rights reserved for now: the project has no licence yet, so the code is public to read but not licensed for reuse.
