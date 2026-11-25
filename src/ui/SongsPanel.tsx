@@ -4,13 +4,18 @@ import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
 import { canPickFolder, formatTime, pickFiles } from './format';
 
+// What a row leads with when it has no track number, and for a folder.
+const NOTE = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4.5a1 1 0 0 1 .76-.97l8-2A1 1 0 0 1 20 2.5V15.5a3.5 3.5 0 1 1-2-3.16V7.28l-6 1.5V17.5a3.5 3.5 0 1 1-2-3.16V4.5Z" transform="translate(-1 2) scale(.92)" /></svg>;
+const FOLDER = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h3.38a2.5 2.5 0 0 1 1.77.730L11.91 6H18.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11Z" /></svg>;
+
 function SongRow({ track, current, onChosen }: { track: Track; current: boolean; onChosen: () => void }) {
   const hasLyrics = track.lyricFiles.length > 0 || (track.nas?.lyrics.length ?? 0) > 0;
   const detail = [track.artist, track.album].filter(Boolean).join(', ');
   return (
     <li>
       <button type="button" className={current ? 'song current' : 'song'} aria-current={current || undefined} onClick={() => { void store.select(track.id); onChosen(); }}>
-        <span className="song-title">{track.trackNumber !== null && <span className="song-number">{track.trackNumber}</span>}{track.title}</span>
+        <span className="song-lead">{track.trackNumber ?? NOTE}</span>
+        <span className="song-title">{track.title}</span>
         <span className="song-detail">{detail || (track.origin === 'device' ? track.fileName : '')}</span>
         <span className="song-meta">
           {hasLyrics ? 'Lyrics' : ''}
@@ -50,8 +55,8 @@ function NasBrowser({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string
         {folders.map((entry) => (
           <li key={entry.path}>
             <button type="button" className="song folder" onClick={() => void store.browse(entry.path)}>
+              <span className="song-lead">{FOLDER}<span className="sr-only">Folder</span></span>
               <span className="song-title">{entry.name}</span>
-              <span className="song-meta">Folder</span>
             </button>
           </li>
         ))}

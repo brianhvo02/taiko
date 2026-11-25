@@ -1,18 +1,88 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { defaultDeviceName, normalizeBase } from '../nas/client';
 import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
 import { canPickFolder, pickFiles } from './format';
 
-function NasSection({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void }) {
+/**
+ * The first screen opens with what the player does: a line being sung, filling word by word, with its
+ * romanization and its translation under it. The line is made up for this screen; it is nobody's lyric.
+ */
+const HERO = {
+  // Two phrases; on a narrow screen the line breaks between them, never inside one.
+  words: [
+    { text: '音が', roman: 'oto ga', seconds: 0.7, phrase: 0 },
+    { text: '鳴れば', roman: 'nareba', seconds: 0.9, phrase: 0 },
+    { text: '言葉が', roman: 'kotoba ga', seconds: 0.9, phrase: 1 },
+    { text: '灯る', roman: 'tomoru', seconds: 1.1, phrase: 1 },
+  ],
+  translation: 'When the music plays, the words light up',
+  leadIn: 0.8,
+  hold: 2.6,
+};
+
+function HeroLine() {
+  const ref = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const sung = HERO.words.reduce((sum, word) => sum + word.seconds, 0);
+    const loop = HERO.leadIn + sung + HERO.hold;
+    const rows = [Array.from(root.querySelectorAll<HTMLElement>('.original .w')), Array.from(root.querySelectorAll<HTMLElement>('.roman .w'))];
+    const line = root.querySelector<HTMLElement>('.line');
+    const show = (t: number) => {
+      let begin = HERO.leadIn;
+      HERO.words.forEach((word, i) => {
+        const p = Math.max(0, Math.min(1, (t - begin) / word.seconds));
+        for (const row of rows) row[i]?.style.setProperty('--p', p.toFixed(3));
+        begin += word.seconds;
+      });
+      if (line) line.dataset.state = t >= HERO.leadIn ? 'active' : 'future';
+    };
+    // Someone who asked for less motion sees the line half sung, and still.
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      show(HERO.leadIn + sung / 2);
+      return;
+    }
+    let frame = 0;
+    const started = performance.now();
+    const tick = () => {
+      show(((performance.now() - started) / 1000) % loop);
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, []);
+
+  return (
+    <h1 className="hero" ref={ref}>
+      <span className="line" data-state="future">
+        <span className="original" lang="ja">
+          {[0, 1].map((phrase) => (
+            <span className="phrase" key={phrase}>
+              {HERO.words.filter((word) => word.phrase === phrase).map((word) => <span className="w" key={word.text}>{word.text}</span>)}
+            </span>
+          ))}
+        </span>
+        <span className="roman" aria-hidden="true">
+          {HERO.words.map((word, i) => <span key={word.roman}>{i > 0 && ' '}<span className="w">{word.roman}</span></span>)}
+        </span>
+        <span className="translation">{HERO.translation}</span>
+      </span>
+    </h1>
+  );
+}
+
+function NasWay({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void }) {
   const [address, setAddress] = useState('');
   const [code, setCode] = useState('');
   const [problem, setProblem] = useState('');
 
   if (snap.pairing) {
     return (
-      <section className="nas">
-        <h2>Your NAS</h2>
+      <section className="way nas">
+        <h2>Music on your NAS</h2>
         <p>Paired with {snap.pairing.serverName} as {snap.pairing.deviceName}.</p>
         <div className="actions">
           <button className="plain-button primary-button" type="button" onClick={onShowSongs}>Open from NAS</button>
@@ -32,9 +102,9 @@ function NasSection({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => 
   }
 
   return (
-    <section className="nas">
-      <h2>Play from a NAS</h2>
-      <p>If you or a friend run a Taiko server, open its invite link on this device, or enter its address and a pairing code.</p>
+    <section className="way nas">
+      <h2>Music on a NAS</h2>
+      <p>If you or a friend run a Taiko server, open its invite link on this device. Or enter its address and a pairing code.</p>
       <form className="pair-form" onSubmit={submit}>
         <label>NAS address<input type="url" value={address} onChange={(e) => setAddress(e.currentTarget.value)} placeholder="https://nas.example.com/taiko/api/" autoComplete="off" /></label>
         <label>Pairing code<input type="text" value={code} onChange={(e) => setCode(e.currentTarget.value)} placeholder="XXXX-XXXX-XXXX" autoComplete="off" autoCapitalize="characters" /></label>
@@ -48,19 +118,28 @@ function NasSection({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => 
 export function StartScreen({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void }) {
   return (
     <main className="start">
-      <h1>Play your music with its lyrics in time</h1>
-      <p>Choose audio files and, if you have them, their timed lyrics. They are read on this device and never uploaded. Only a song's Apple Music ID and what you type in the search are sent to Apple.</p>
-      <ul className="slots">
-        <li><span className="kind">Audio</span><span>FLAC, MP3, or any format this browser plays</span></li>
-        <li><span className="kind">Lyrics</span><span>Apple Music lyrics JSON, TTML or LRC, named like the song (Song.flac with Song.json). Several versions of one song are combined.</span></li>
-      </ul>
-      <div className="actions">
-        <button className="plain-button primary-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Choose files</button>
-        {canPickFolder() && <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles(true), true)}>Choose a folder</button>}
-        <span className="hint-text">or drop them anywhere on this page</span>
+      <HeroLine />
+      <p className="lede">Taiko plays your music and fills in each word of the lyrics as it is sung.</p>
+      <div className="ways">
+        <section className="way">
+          <h2>Music on this device</h2>
+          <p>Choose audio files, and their timed lyrics if you have them. They are read here and never uploaded.</p>
+          <div className="actions">
+            <button className="plain-button primary-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Choose files</button>
+            {canPickFolder() && <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles(true), true)}>Choose a folder</button>}
+            <span className="hint-text">or drop them anywhere on this page</span>
+          </div>
+          {snap.notice && <p className="notice" role="status">{snap.notice}</p>}
+          <dl className="formats">
+            <dt>Audio</dt>
+            <dd>FLAC, MP3, or any format this browser plays</dd>
+            <dt>Lyrics</dt>
+            <dd>Apple Music lyrics JSON, TTML or LRC, named like the song: Song.flac with Song.json. Versions of one song are combined.</dd>
+          </dl>
+        </section>
+        <NasWay snap={snap} onShowSongs={onShowSongs} />
       </div>
-      {snap.notice && <p className="notice" role="status">{snap.notice}</p>}
-      <NasSection snap={snap} onShowSongs={onShowSongs} />
+      <p className="fine-print">A song's Apple Music ID and what you type in the search go to Apple, to name the song. Nothing else leaves this device.</p>
     </main>
   );
 }

@@ -69,7 +69,8 @@ test('lists the songs, walks them, and pairs lyrics with songs by name', async (
   // In album order, with the tags' names; the first one opens.
   await page.getByRole('button', { name: 'Songs' }).first().click();
   const rows = page.locator('.songs .song');
-  await expect(rows.locator('.song-title')).toHaveText(['1Tagged Lanterns', '2Harbour Lights']);
+  await expect(rows.locator('.song-title')).toHaveText(['Tagged Lanterns', 'Harbour Lights']);
+  await expect(rows.locator('.song-lead')).toHaveText(['1', '2']);
   await expect(rows.first()).toContainText('Lyrics, 0:50');
   await expect(rows.nth(1)).toContainText('0:20');
   await expect(rows.first()).toHaveAttribute('aria-current', 'true');

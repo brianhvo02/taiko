@@ -4,7 +4,7 @@
   "description": "Plays your music with its lyrics in time.",
   "start_url": "./",
   "display": "standalone",
-  "background_color": "#17162b",
-  "theme_color": "#17162b",
+  "background_color": "#111a35",
+  "theme_color": "#111a35",
   "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
 }

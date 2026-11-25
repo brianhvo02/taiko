@@ -26,7 +26,8 @@ test('pairs from an invite link, browses the folders and plays a song with its l
 
   // In file-name order ("2" before "10"), named by their tags; a file without tags keeps its file name, and
   // files that aren't songs are not listed.
-  await expect(songs.locator('.song-title')).toHaveText(['2Paper Lanterns', '10Harbour Lights', 'untagged']);
+  await expect(songs.locator('.song-title')).toHaveText(['Paper Lanterns', 'Harbour Lights', 'untagged']);
+  await expect(songs.locator('.song-lead')).toHaveText(['2', '10', '']);
   await expect(songs.first()).toContainText('Midori Vale, Night Market');
   await expect(songs.first()).toContainText('Lyrics, 0:50');
   await expect(songs.nth(1)).toContainText('0:20');
