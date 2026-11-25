@@ -151,7 +151,7 @@ input::placeholder { color: var(--unsung); }
   max-width: 68rem;
   font-family: var(--lyric-face);
   font-weight: 700;
-  font-size: clamp(1.45rem, 1rem + 2.5vw, 2.75rem);
+  font-size: clamp(1.75rem, 1rem + 2.5vw, 2.75rem);
   line-height: 1.5;
 }
 .part { display: grid; grid-template-columns: 7rem minmax(0, 1fr); margin-bottom: 1.6em; }
@@ -174,7 +174,8 @@ input::placeholder { color: var(--unsung); }
 .line[data-state="past"] { opacity: .38; }
 @media (hover: hover) { .line:hover { opacity: 1; } }
 .line > span { display: block; }
-.roman, .translation { font-family: var(--ui-face); font-weight: 500; font-size: .4em; line-height: 1.5; margin-top: .25em; }
+/* The lines under the lyric are 40% of its size on a wide screen, and never smaller than 15px (a phone). */
+.roman, .translation { font-family: var(--ui-face); font-weight: 500; font-size: max(.4em, .9375rem); line-height: 1.5; margin-top: .25em; }
 /* A translation has no word timings, so the whole sentence lights up with its line. */
 .translation { font-weight: 400; color: var(--unsung); transition: color .35s; }
 .line[data-state="active"] .translation, .line[data-state="past"] .translation { color: var(--sung); }
