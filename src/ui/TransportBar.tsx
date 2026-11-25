@@ -209,6 +209,11 @@ export function TransportBar({ snap }: { snap: Snapshot }) {
               {snap.song?.hasTranslation && (
                 <label className="toggle"><input type="checkbox" checked={snap.showTranslation} onChange={(e) => store.setShowTranslation(e.currentTarget.checked)} /> Translation</label>
               )}
+              {snap.song && !snap.song.wordTimed && (
+                <label className="toggle" title="These lyrics only say when each line is sung. Sweeping fills a line evenly over its length.">
+                  <input type="checkbox" checked={snap.sweepLines} onChange={(e) => store.setSweepLines(e.currentTarget.checked)} /> Sweep across each line
+                </label>
+              )}
               {snap.song && (
                 <div className="timing" role="group" aria-label="Lyric timing">
                   <button className="plain-button" type="button" onClick={() => store.nudge(-0.05)}>Earlier</button>

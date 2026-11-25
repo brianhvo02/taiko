@@ -97,7 +97,10 @@ export function LyricsView({ song }: { song: Song }) {
     addEventListener('keydown', onKey);
 
     const tick = () => {
-      const t = store.position() - store.getSnapshot().offset;
+      const settings = store.getSnapshot();
+      const t = store.position() - settings.offset;
+      // Word by word when the words are timed, or when the listener asked for line-timed lyrics to be swept too.
+      const sweep = song.wordTimed || settings.sweepLines;
       // A seek means the listener wants to be where the song is: follow it again.
       if (store.seekCount !== seeks) { seeks = store.seekCount; holdUntil = 0; }
       let current = -1;
@@ -107,8 +110,8 @@ export function LyricsView({ song }: { song: Song }) {
         if (state !== line.state) { line.state = state; line.el.dataset.state = state; }
         if (t >= line.begin && (current < 0 || line.begin >= lines[current].begin)) current = i;
         for (const word of line.words) {
-          // Without word timings a line lights up whole as it starts; sweeping across it would show timing the file doesn't have.
-          const p = !song.wordTimed ? (t >= word.begin ? 1 : 0)
+          // Without word timings a line lights up whole as it starts; sweeping across it shows timing the file doesn't have.
+          const p = !sweep ? (t >= word.begin ? 1 : 0)
             : t <= word.begin ? 0 : t >= word.end ? 1 : (t - word.begin) / (word.end - word.begin);
           if (p !== word.p) { word.p = p; word.el.style.setProperty('--p', p.toFixed(3)); }
         }

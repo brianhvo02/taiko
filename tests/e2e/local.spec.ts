@@ -24,8 +24,12 @@ test('plays a song with lyrics combined from three versions and named by the cat
   await expect(page.locator('.lyrics .roman')).toHaveCount(3);
   await expect(page.locator('.lyrics .translation')).toHaveCount(3);
   await expect(page.locator('.part-name')).toHaveText(['Verse', 'Chorus']);
-  // These lyrics time each word, so there is nothing to say about their timing.
+  // These lyrics time each word, so there is nothing to say about their timing, and nothing to switch.
   await expect(page.getByText('These lyrics are timed by line, not by word')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Options' }).click();
+  await expect(page.getByLabel('Romanization')).toBeVisible();
+  await expect(page.getByLabel('Sweep across each line')).toHaveCount(0);
+  await page.keyboard.press('Escape');
   // The catalog's names, home storefront first, replace the file's tags.
   await expect(page.locator('.now-title')).toHaveText('紙の灯籠 (Paper Lanterns)');
   await expect(page.locator('.credit')).toHaveText('Midori Vale, written by Midori Vale');
@@ -95,6 +99,14 @@ test('lists the songs, walks them, and pairs lyrics with songs by name', async (
   expect(await fill()).toBe(0);
   await seekTo(page, 2.5);
   await expect.poll(fill).toBe(1);
+  // The listener can ask for such lines to be swept across anyway; the choice is kept.
+  await page.getByRole('button', { name: 'Options' }).click();
+  await expect(page.getByLabel('Sweep across each line')).not.toBeChecked();
+  await page.getByLabel('Sweep across each line').check();
+  await seekTo(page, 3.5);
+  await expect.poll(fill).toBeGreaterThan(0.2);
+  expect(await fill()).toBeLessThan(0.9);
+  await page.keyboard.press('Escape');
 
   // Lyrics with other words are not mixed into a song's lyrics.
   await rows.first().click();

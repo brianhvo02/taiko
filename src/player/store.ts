@@ -71,6 +71,8 @@ export interface Snapshot {
   source: QueueSource;
   repeat: Repeat;
   shuffle: boolean;
+  /** Whether lyrics timed only by line are swept across like word-timed ones (see `Settings`). */
+  sweepLines: boolean;
   /** This NAS's playlists, kept in the browser. */
   playlists: Playlist[];
   /** The playlist open in the panel, or null for the list of them. */
@@ -593,8 +595,8 @@ class PlayerStore {
   }
 
   private keepSettings(): void {
-    const { showRoman, showTranslation, repeat, shuffle } = this.snapshot;
-    saveSettings({ showRoman, showTranslation, repeat, shuffle });
+    const { showRoman, showTranslation, repeat, shuffle, sweepLines } = this.snapshot;
+    saveSettings({ showRoman, showTranslation, repeat, shuffle, sweepLines });
   }
 
   /* ---------- Picking up where the listener left off ---------- */
@@ -813,6 +815,7 @@ class PlayerStore {
 
   setShowRoman(showRoman: boolean): void { this.set({ showRoman }); this.keepSettings(); }
   setShowTranslation(showTranslation: boolean): void { this.set({ showTranslation }); this.keepSettings(); }
+  setSweepLines(sweepLines: boolean): void { this.set({ sweepLines }); this.keepSettings(); }
   dismissNotice(): void { this.set({ notice: '' }); }
 
   /* ---------- Naming the song ---------- */

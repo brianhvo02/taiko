@@ -94,9 +94,17 @@ test('keeps repeat, shuffle, the lyric lines shown and the volume between visits
   await repeat(page).click();
   await shuffle(page).click();
   await page.getByLabel('Volume').fill('0.4');
+  // A song with line-timed lyrics, to reach the switch for sweeping them.
+  const lined = [short(1), { name: 'Song 1.lrc', content: '[00:01.00]one\n[00:03.00]two\n' }];
+  await pick(page, 'Add a lyrics file', [lined[1]]);
+  await page.getByRole('button', { name: 'Options' }).click();
+  await page.getByLabel('Sweep across each line').check();
 
   await page.reload();
-  await pick(page, 'Choose files', [short(1), short(2)]);
+  await pick(page, 'Choose files', [...lined, short(2)]);
+  await page.getByRole('button', { name: 'Options' }).click();
+  await expect(page.getByLabel('Sweep across each line')).toBeChecked();
+  await page.keyboard.press('Escape');
   await expect(repeat(page)).toHaveAccessibleName('Repeat: this song');
   await expect(shuffle(page)).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByLabel('Volume')).toHaveValue('0.4');

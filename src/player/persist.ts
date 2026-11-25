@@ -26,6 +26,11 @@ export interface Settings {
   showTranslation: boolean;
   repeat: Repeat;
   shuffle: boolean;
+  /**
+   * For lyrics timed only by line: sweep across each line over its length, as if it were word-timed, instead of
+   * lighting the line whole as it starts. Off unless the listener asks for it.
+   */
+  sweepLines: boolean;
 }
 
 /** Where the listener was: the queue, the song open in it and how far in. */
@@ -48,7 +53,7 @@ export const KEYS = {
   session: 'taiko:session',
 } as const;
 
-export const DEFAULT_SETTINGS: Settings = { showRoman: true, showTranslation: true, repeat: 'off', shuffle: false };
+export const DEFAULT_SETTINGS: Settings = { showRoman: true, showTranslation: true, repeat: 'off', shuffle: false, sweepLines: false };
 
 /** The most songs' timings kept; the oldest go first. */
 const MAX_OFFSETS = 2000;
@@ -120,6 +125,7 @@ export function loadSettings(store: Store | null = browserStore()): Settings {
     showTranslation: typeof saved.showTranslation === 'boolean' ? saved.showTranslation : DEFAULT_SETTINGS.showTranslation,
     repeat: saved.repeat === 'all' || saved.repeat === 'one' ? saved.repeat : 'off',
     shuffle: saved.shuffle === true,
+    sweepLines: saved.sweepLines === true,
   };
 }
 
