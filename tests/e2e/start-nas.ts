@@ -34,6 +34,11 @@ mkdirSync(tide, { recursive: true });
 writeFileSync(path.join(tide, '1 - shoals.flac'), toneFlac({
   seconds: 8, title: 'Shoals', artist: 'Tin Harbor', album: '引き潮', track: 1, tags: ['ALBUMSORT=Hikishio', 'ALBUM_EN=Low Tide', 'DATE=2024'],
 }));
+// The record of an album that was replaced: a song that used to be in a folder that is gone now is this one.
+mkdirSync(path.join(NAS.library, '.ringobushi'), { recursive: true });
+writeFileSync(path.join(NAS.library, '.ringobushi', 'replaced.jsonl'), `${JSON.stringify({
+  event: 'replaced', oldRoot: 'Music', oldPath: 'Old Shelf/Night Market/02 lanterns.flac', newPath: 'Midori Vale/Night Market/2 - lanterns.flac',
+})}\n`);
 
 Object.assign(process.env, {
   PORT: String(NAS.port),

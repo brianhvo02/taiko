@@ -13,7 +13,7 @@ import { mergeInto, sameSong, serialize } from '../lyrics/merge';
 import { openLyrics, songFromDoc } from '../lyrics/ttml';
 import type { LyricsSource, Song } from '../lyrics/ttml';
 import {
-  NasError, clearPairing, fetchFolder, fetchLibrary, fetchLyrics, fetchPlaylists, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath, searchLibrary, sendPlaylists, startScan,
+  NasError, clearPairing, fetchFolder, fetchLibrary, fetchLyrics, fetchMoved, fetchPlaylists, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath, searchLibrary, sendPlaylists, startScan,
 } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
@@ -247,7 +247,7 @@ class PlayerStore {
     if (saved && route.kind !== 'play') void this.restoreSession(saved, false);
     if (this.snapshot.pairing) void this.loadLibrary();
     void this.restoreKept();
-    void this.syncPlaylists();
+    void this.syncPlaylists().then(() => this.repointStored());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void this.syncPlaylists(); });
     addEventListener('online', () => void this.syncPlaylists());
     // Where the listener is gets saved as they go, and when the page is put away.
@@ -370,6 +370,15 @@ class PlayerStore {
     const found = await this.openFolder(folderOf(route.path), true);
     const track = found ? this.snapshot.nasFolder?.tracks.find((candidate) => candidate.id === id) : undefined;
     if (!track) {
+      // A link made before the song's album was replaced leads to the fresh copy.
+      const pairing = this.snapshot.pairing;
+      const fresh = (await fetchMoved(pairing, [trackIdOf(route.path)]).catch(() => null))?.[trackIdOf(route.path)];
+      const freshPath = fresh ? pathOfTrackId(fresh) : null;
+      if (freshPath && freshPath !== route.path) {
+        await this.applyRoute({ kind: 'play', path: freshPath, at: route.at });
+        if (this.snapshot.currentId === `nas:${fresh}`) this.writeRoute(this.playRoute(), 'replace');
+        return;
+      }
       if (!found) await this.openFolder('');
       this.set({ songsOpen: true, notice: "The NAS doesn't have that song any more." });
       this.writeRoute({ kind: 'folders', path: this.snapshot.nasFolder?.path ?? '' }, 'replace');
@@ -649,7 +658,7 @@ class PlayerStore {
     this.updateMediaSession();
     try {
       // A song from a playlist or a saved session is looked up again first: its lyrics files and cover may have changed.
-      if (track.stale && !(await this.freshen(track))) {
+      if (track.stale && !(await this.freshen(track)) && !(await this.followMove(track))) {
         if (run === this.loadRun) this.set({ lyricsLoading: false, notice: `The NAS doesn't have "${track.title}" any more.` });
         return;
       }
@@ -875,6 +884,77 @@ class PlayerStore {
     }
   }
 
+  /**
+   * For a stored song the NAS no longer has where it was: finds the fresh copy that replaced it (the NAS keeps a
+   * record of albums that were replaced), makes the track that copy, and points the playlists at it too. False
+   * when the song didn't move, or went with nothing in its place.
+   */
+  private async followMove(track: Track): Promise<boolean> {
+    const pairing = this.snapshot.pairing;
+    const old = track.nas?.id;
+    if (!pairing || !track.nas || !old) return false;
+    let fresh: string | null | undefined;
+    try {
+      fresh = (await fetchMoved(pairing, [old]))[old];
+    } catch {
+      return false;
+    }
+    if (!fresh) return false;
+    const wasOpen = this.snapshot.currentId === track.id;
+    track.nas = { ...track.nas, id: fresh };
+    track.id = `nas:${fresh}`;
+    if (!(await this.freshen(track))) return false;
+    if (wasOpen && this.snapshot.currentTrack === track) {
+      this.set({ currentId: track.id });
+      if (this.snapshot.view === 'lyrics') this.writeRoute(this.playRoute(), 'replace');
+      this.saveSessionNow();
+    }
+    this.repointPlaylists(new Map([[old, savedOf(track)]]));
+    return true;
+  }
+
+  /** Replaces songs in the playlists by the copies they moved to. A playlist that already has the copy just loses the old one. */
+  private repointPlaylists(moved: Map<string, SavedTrack>): void {
+    let changed = false;
+    const playlists = this.snapshot.playlists.map((playlist) => {
+      if (!playlist.tracks.some((track) => moved.has(track.id))) return playlist;
+      changed = true;
+      const seen = new Set<string>();
+      const tracks = playlist.tracks.map((track) => moved.get(track.id) ?? track).filter((track) => !seen.has(track.id) && seen.add(track.id));
+      return { ...playlist, tracks };
+    });
+    if (changed) this.setPlaylists(playlists);
+  }
+
+  /**
+   * Looks through the playlists for songs that have moved and points them at their fresh copies, so a playlist
+   * made before an album was replaced lists and plays what is there now. Each album the songs moved to is read
+   * once, for the songs' names as they are tagged now.
+   */
+  private async repointStored(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    try {
+      const ids = [...new Set(this.snapshot.playlists.flatMap((playlist) => playlist.tracks.map((track) => track.id)))];
+      const answers = new Map<string, string>();
+      for (let at = 0; at < ids.length; at += 5000) {
+        for (const [old, fresh] of Object.entries(await fetchMoved(pairing, ids.slice(at, at + 5000)))) if (fresh) answers.set(fresh, old);
+      }
+      const folders = new Set([...answers.keys()].map((fresh) => folderOf(pathOfTrackId(fresh) ?? '')).filter(Boolean));
+      const moved = new Map<string, SavedTrack>();
+      for (const folder of folders) {
+        const listing = await fetchFolder(pairing, folder).catch(() => null);
+        for (const track of listing?.tracks ?? []) {
+          const old = answers.get(track.id);
+          if (old) moved.set(old, savedOf(trackFromNas(track)));
+        }
+      }
+      if (this.snapshot.pairing === pairing && moved.size) this.repointPlaylists(moved);
+    } catch {
+      // The NAS can't be reached just now; the playlists are looked through again on the next visit.
+    }
+  }
+
   /** Looks a NAS song up again in its folder. False when the NAS no longer has it. */
   private async freshen(track: Track): Promise<boolean> {
     const pairing = this.snapshot.pairing;
@@ -1047,7 +1127,8 @@ class PlayerStore {
       return;
     }
 
-    const resume = this.resumeAfterSeek;
+    // Play pressed while the new stream was being asked for counts too: the listener wants sound when it arrives.
+    const resume = this.resumeAfterSeek || !this.audio.paused;
     this.resumeAfterSeek = false;
     const old = this.cutUrl;
     this.restarting = resume;
@@ -1211,7 +1292,7 @@ class PlayerStore {
     try {
       const pairing = await pair(link, deviceName);
       this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null, playlists: loadPlaylists(pairing.base), openPlaylist: null, songsTab: 'folders' });
-      void this.syncPlaylists();
+      void this.syncPlaylists().then(() => this.repointStored());
       void this.loadLibrary();
       await this.openFolder('');
     } catch (error) {

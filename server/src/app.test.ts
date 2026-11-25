@@ -541,3 +541,45 @@ describe('playlists shared by the paired devices', () => {
     expect((await shared.call('GET', 'playlists', { token })).json()).toMatchObject({ version: 1 });
   });
 });
+
+describe('songs that moved when an album was replaced', () => {
+  it('says where a song that is gone went, from the record in the new root, and nothing about a song still there', async () => {
+    const old = path.join(dir, 'moved-old');
+    const fresh = path.join(dir, 'moved-new');
+    writeFile(path.join(old, 'Tin Harbor', 'Low Tide', '01 still here.flac'), flac);
+    writeFile(path.join(fresh, 'Tin Harbor', '[2024] Low Tide', '01. Still Here.flac'), flac);
+    writeFile(path.join(fresh, 'Tin Harbor', '[2024] Low Tide', '02. Shoals.flac'), flac);
+    const line = (oldPath: string, newPath: string, event = 'replaced') => JSON.stringify({ event, oldRoot: 'Old', oldPath, newPath, appleSongId: '1', date: '2026-11-25' });
+    writeFile(path.join(fresh, '.ringobushi', 'replaced.jsonl'), [
+      line('Tin Harbor/Low Tide/01 still here.flac', 'Tin Harbor/[2024] Low Tide/01. Still Here.flac'),
+      line('Tin Harbor/Low Tide/02 shoals.flac', 'Tin Harbor/[2024] Low Tide/nowhere.flac'),
+      'not json',
+      line('Tin Harbor/Low Tide/02 shoals.flac', 'Tin Harbor/[2024] Low Tide/02. Shoals.flac'),
+      line('Tin Harbor/Low Tide/03 bonus.flac', ''),
+      line('Tin Harbor/Low Tide/04 lost.flac', 'Tin Harbor/[2024] Low Tide/04. Lost.flac'),
+      line('Tin Harbor/Low Tide/02 shoals.flac', '', 'deleted'),
+      '',
+    ].join('\n'));
+    const running = await start('/api/', { scan: false, roots: [{ name: 'Old', dir: old }, { name: 'New', dir: fresh }] });
+    const token = await pair(running);
+    const of = (file: string) => Buffer.from(file, 'utf8').toString('base64url');
+    const ids = ['01 still here', '02 shoals', '03 bonus', '04 lost', '05 unknown'].map((name) => of(`Old/Tin Harbor/Low Tide/${name}.flac`));
+
+    const reply = await running.call('POST', 'moved', { token, body: { ids: [...ids, 'not an id', ids[1]] } });
+    expect(reply.status).toBe(200);
+    expect(reply.json()).toEqual({
+      moved: {
+        // The later line for a song wins, and the note of its deletion doesn't undo it.
+        [ids[1]]: of('New/Tin Harbor/[2024] Low Tide/02. Shoals.flac'),
+        // The fresh album has no such song.
+        [ids[2]]: null,
+      },
+    });
+    // The record itself can't be browsed to or asked for.
+    expect((await running.call('GET', 'browse?path=New', { token })).json<BrowseResponse>().folders.map((folder) => folder.name)).toEqual(['Tin Harbor']);
+
+    expect((await running.call('POST', 'moved', { body: { ids } })).status).toBe(401);
+    expect((await running.call('POST', 'moved', { token, body: { ids: 'all' } })).status).toBe(400);
+    expect((await running.call('GET', 'moved', { token })).status).toBe(405);
+  });
+});

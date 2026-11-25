@@ -3,7 +3,7 @@
  * from the owner's invite link; the token it gets back is kept in this browser's storage.
  */
 import { toPlaylists } from '../shared/playlists';
-import type { ApiError, BrowseResponse, LibraryResponse, PairRequest, PairResponse, PlaylistsResponse, PlaylistsUpdate, ScanResponse, SearchResponse, TicketRequest, TicketResponse } from '../shared/api';
+import type { ApiError, BrowseResponse, LibraryResponse, MovedRequest, MovedResponse, PairRequest, PairResponse, PlaylistsResponse, PlaylistsUpdate, ScanResponse, SearchResponse, TicketRequest, TicketResponse } from '../shared/api';
 
 export interface Pairing {
   /** The server's API base, ending in `/api/`. */
@@ -154,6 +154,22 @@ export async function sendPlaylists(pairing: Pairing, update: PlaylistsUpdate): 
     return (await (await request(pairing.base, 'playlists', init, pairing.token)).json()) as PlaylistsResponse;
   } catch (error) {
     if (error instanceof NasError && error.status === 409) return null;
+    throw error;
+  }
+}
+
+/**
+ * Asks where songs went whose album was replaced by a fresh copy: for each id that has moved, the new id, or null
+ * when the fresh album has no such song. Empty from a server that keeps no such record.
+ */
+export async function fetchMoved(pairing: Pairing, ids: string[]): Promise<MovedResponse['moved']> {
+  if (!ids.length) return {};
+  try {
+    const init = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids } satisfies MovedRequest) };
+    const reply = (await (await request(pairing.base, 'moved', init, pairing.token)).json()) as Partial<MovedResponse>;
+    return typeof reply.moved === 'object' && reply.moved !== null ? reply.moved : {};
+  } catch (error) {
+    if (error instanceof NasError && (error.status === 404 || error.status === 405)) return {};
     throw error;
   }
 }

@@ -1,3 +1,4 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { toneFlac } from './fixtures.ts';
@@ -6,6 +7,8 @@ import { expectInTime, listen, mockCatalog, pair, pick, seekTo, shown } from './
 /** Repeat and shuffle, playlists, and what the browser keeps between visits. */
 
 const short = (n: number) => ({ name: `Song ${n}.flac`, content: toneFlac({ seconds: 6, title: `Song ${n}`, artist: 'Midori Vale', album: 'Short Songs', track: n }) });
+// One pairing is handed from a test to a later one through a file, which outlives a restarted test worker.
+const KEPT_PAIRING = '.cache/e2e/pairing.txt';
 const title = (page: Page) => page.locator('.now-title');
 const play = (page: Page) => page.locator('.play');
 const repeat = (page: Page) => page.getByRole('button', { name: /^Repeat: / });
@@ -188,6 +191,7 @@ test('playlists are shared through the NAS: what one device makes, changes and d
   // A second browser with the same pairing: the NAS allows only so many pairings in ten minutes, and the playlists
   // are one set for the whole NAS whichever device asks.
   const pairing = await page.evaluate(() => localStorage.getItem('taiko:nas') ?? '');
+  writeFileSync(KEPT_PAIRING, pairing);
   const other = await (await browser.newContext()).newPage();
   await other.addInitScript((saved) => localStorage.setItem('taiko:nas', saved), pairing);
   const open = async (on: Page) => {
@@ -299,4 +303,49 @@ test('comes back to where the listener left off, with the queue, the moment and 
   await expect(page.getByRole('heading', { name: '港の灯' })).toBeVisible();
   await page.getByRole('button', { name: 'Options' }).click();
   await expect(page.getByText('Lyrics in sync')).toHaveCount(0); // no lyrics, so no timing control
+});
+
+test('a playlist and a link made before an album was replaced lead to the fresh copy', async ({ page }) => {
+  await mockCatalog(page);
+  // The pairing of the test before, when it ran: the NAS allows only so many pairings in ten minutes.
+  const keptPairing = existsSync(KEPT_PAIRING) ? readFileSync(KEPT_PAIRING, 'utf8') : '';
+  if (keptPairing) {
+    await page.addInitScript((saved) => { if (!localStorage.getItem('taiko:nas')) localStorage.setItem('taiko:nas', saved); }, keptPairing);
+    await page.goto('/');
+  } else {
+    await pair(page, 'Moved test');
+  }
+  // A playlist from an earlier visit, naming the song where it used to be.
+  await page.evaluate(() => {
+    const base = (JSON.parse(localStorage.getItem('taiko:nas') ?? '{}') as { base: string }).base;
+    const bytes = new TextEncoder().encode('Music/Old Shelf/Night Market/02 lanterns.flac');
+    const id = btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const old = { id, title: 'Lanterns (old copy)', artist: 'Midori Vale', album: 'Night Market', trackNumber: 2, discNumber: null, durationSeconds: 50 };
+    localStorage.setItem('taiko:playlists', JSON.stringify({ [base]: [{ id: 'made-before', name: 'Made before', tracks: [old] }] }));
+    localStorage.removeItem('taiko:playlist-sync');
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Playlists' }).click();
+  const panel = page.getByRole('complementary', { name: 'Songs' });
+  await panel.locator('.song.list', { hasText: 'Made before' }).click();
+  // The song is listed as it is tagged now, and plays with its lyrics.
+  const rows = panel.locator('.song:not(.list)');
+  await expect(rows.locator('.song-title')).toHaveText(['Paper Lanterns']);
+  await rows.first().click();
+  await expect(page.locator('.lyrics .line')).toHaveCount(3);
+  await expect(page).toHaveURL('/nas/play/Music/Midori%20Vale/Night%20Market/2%20-%20lanterns.flac');
+
+  // A link to where the song used to be opens it where it is.
+  await page.goto('/nas/play/Music/Old%20Shelf/Night%20Market/02%20lanterns.flac?t=20');
+  await expect(title(page)).toHaveText('紙の灯籠 (Paper Lanterns)');
+  await expect(page).toHaveURL(/\/nas\/play\/Music\/Midori%20Vale\/Night%20Market\/2%20-%20lanterns\.flac/);
+  await expect.poll(() => shown(page)).toBeGreaterThan(19.5);
+  // A song that is simply gone still says so.
+  await page.goto('/nas/play/Music/Old%20Shelf/Night%20Market/09%20nothing.flac');
+  await expect(page.getByText("The NAS doesn't have that song any more.")).toBeVisible();
+
+  // The playlist is the NAS's now; it goes again so no other test finds it.
+  await page.evaluate(() => (window as unknown as { taikoStore: { deletePlaylist(id: string): void } }).taikoStore.deletePlaylist('made-before'));
+  await page.waitForTimeout(700);
+  await page.evaluate(() => (window as unknown as { taikoStore: { syncPlaylists(): Promise<void> } }).taikoStore.syncPlaylists());
 });

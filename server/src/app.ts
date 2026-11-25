@@ -3,8 +3,9 @@ import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, PairResponse, ScanResponse, SearchResponse,
-  PlaylistsResponse, TicketRequest, TicketResponse,
+  MovedResponse, PlaylistsResponse, TicketRequest, TicketResponse,
 } from '../../src/shared/api';
+import { MAX_MOVED_IDS } from '../../src/shared/api';
 import { acceptPlaylists } from '../../src/shared/playlists';
 import { MAX_DEVICE_NAME_LENGTH, RateLimiter, TICKET_LIFETIME_SECONDS, signTicket, verifyTicket } from './auth';
 import type { Device, PairingStore } from './auth';
@@ -13,7 +14,8 @@ import { flacSeek } from './flac-file';
 import { nasTrack } from './library';
 import type { Library } from './library';
 import type { PlaylistStore } from './playlists';
-import { LibraryPaths, byNameNumeric, listFolder } from './paths';
+import { MovedRecord } from './moved';
+import { LibraryPaths, byNameNumeric, decodeTrackId, encodeTrackId, listFolder } from './paths';
 import type { FolderListing, ResolvedTrack } from './paths';
 import { sendAudioFile } from './ranges';
 import { VERSION } from './version';
@@ -23,6 +25,7 @@ import { findCover, sendCover } from './cover';
 export const MAX_JSON_BODY_BYTES = 16 * 1024;
 /** The playlists arrive whole, so their body may be far larger than any other. */
 export const MAX_PLAYLISTS_BODY_BYTES = 8 * 1024 * 1024;
+export const MAX_MOVED_BODY_BYTES = 4 * 1024 * 1024;
 export const PAIR_ATTEMPTS = 10;
 export const PAIR_WINDOW_MS = 10 * 60 * 1000;
 /** A device may ask for a rescan this often; sooner, it is told none was started. */
@@ -108,6 +111,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   const log = deps.log ?? (() => {});
   const pairLimit = new RateLimiter(PAIR_ATTEMPTS, PAIR_WINDOW_MS);
   const paths = new LibraryPaths(config.roots);
+  const moved = new MovedRecord(config.roots);
   const tags = deps.tags ?? new TagCache();
   /** When each device last asked for a rescan. */
   const scanAsked = new Map<string, number>();
@@ -269,6 +273,32 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
         started = library.scan();
       }
       sendJson(req, res, 200, { started } satisfies ScanResponse);
+      return;
+    }
+
+    if (parts.length === 1 && parts[0] === 'moved') {
+      allow(req, 'POST');
+      requireDevice(req);
+      const { ids } = await readJsonBody(req, false, MAX_MOVED_BODY_BYTES);
+      if (!Array.isArray(ids) || ids.length > MAX_MOVED_IDS || !ids.every((id) => typeof id === 'string')) throw new HttpError(400, 'bad-request');
+      const found: Record<string, string | null> = {};
+      // A song has moved when its file is gone and a record says where its fresh copy is, and that copy is there.
+      const look = async (id: string): Promise<void> => {
+        const old = decodeTrackId(id);
+        if (old === null || (await paths.resolveTrack(id))) return;
+        const where = await moved.lookup(old);
+        if (where === undefined) return;
+        if (!where) {
+          found[id] = null;
+          return;
+        }
+        const [root, ...rest] = where.split('/');
+        const fresh = encodeTrackId(root, rest);
+        if (await paths.resolveTrack(fresh)) found[id] = fresh;
+      };
+      const asked = [...new Set(ids as string[])];
+      for (let at = 0; at < asked.length; at += 16) await Promise.all(asked.slice(at, at + 16).map(look));
+      sendJson(req, res, 200, { moved: found } satisfies MovedResponse);
       return;
     }
 

@@ -20,6 +20,8 @@
  *   GET    playlists           paired  -> PlaylistsResponse     (the playlists every paired device shares)
  *   PUT    playlists           paired  PlaylistsUpdate -> PlaylistsResponse  (409 `conflict` when they changed
  *          since `base`: read them again, bring the two together and send again; 400 when they are too many or long)
+ *   POST   moved               paired  MovedRequest -> MovedResponse  (where songs that are gone from their old
+ *          place went, for playlists and links made before an album was replaced)
  *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
  *   GET    tracks/:id/lyrics/:index  paired -> the lyrics file's text, as stored
  *   GET    tracks/:id/audio?exp=&sig=  -> the audio file's bytes, with Range support
@@ -49,6 +51,22 @@ export interface PlaylistsUpdate {
   base: number;
   playlists: Playlist[];
 }
+
+/** Track ids to look up: songs a device has stored that may have moved. */
+export interface MovedRequest {
+  ids: string[];
+}
+
+/**
+ * For each id asked about whose file is gone and which the NAS has a record of: the id of the song's new copy, or
+ * null when the fresh album has no such song. An id whose file is still there, or that no record names, is left out.
+ */
+export interface MovedResponse {
+  moved: Record<string, string | null>;
+}
+
+/** The most ids one `POST moved` may ask about. */
+export const MAX_MOVED_IDS = 5000;
 
 export interface HealthResponse {
   ok: true;
