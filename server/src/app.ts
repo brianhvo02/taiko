@@ -2,11 +2,12 @@
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
-  ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, NasTrack, PairResponse, TicketResponse,
+  ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, NasTrack, PairResponse, TicketRequest, TicketResponse,
 } from '../../src/shared/api';
 import { MAX_DEVICE_NAME_LENGTH, RateLimiter, TICKET_LIFETIME_SECONDS, signTicket, verifyTicket } from './auth';
 import type { Device, PairingStore } from './auth';
 import type { Config } from './config';
+import { flacSeek } from './flac-file';
 import { lyricsList } from './library';
 import type { Library } from './library';
 import { LibraryPaths, encodeTrackId, listFolder, stemOf } from './paths';
@@ -60,7 +61,8 @@ function sendError(req: IncomingMessage, res: ServerResponse, status: number, co
   sendJson(req, res, status, { error: code } satisfies ApiError);
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+/** The request's JSON object. `optional` takes no body at all (or only white space) as `{}`. */
+async function readJsonBody(req: IncomingMessage, optional = false): Promise<Record<string, unknown>> {
   if (Number(req.headers['content-length'] ?? 0) > MAX_JSON_BODY_BYTES) throw new HttpError(413, 'too-large');
   const chunks: Buffer[] = [];
   let size = 0;
@@ -69,9 +71,11 @@ async function readJsonBody(req: IncomingMessage): Promise<Record<string, unknow
     if (size > MAX_JSON_BODY_BYTES) throw new HttpError(413, 'too-large');
     chunks.push(chunk);
   }
+  const text = Buffer.concat(chunks).toString('utf8');
+  if (optional && !text.trim()) return {};
   let parsed: unknown;
   try {
-    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    parsed = JSON.parse(text);
   } catch {
     throw new HttpError(400, 'bad-request');
   }
@@ -209,12 +213,21 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
     if (parts.length === 3 && parts[0] === 'tracks' && parts[2] === 'ticket') {
       allow(req, 'POST');
       requireDevice(req);
-      await requireTrack(parts[1]);
+      const { fromSeconds = 0 }: TicketRequest = await readJsonBody(req, true);
+      if (typeof fromSeconds !== 'number' || !Number.isFinite(fromSeconds) || fromSeconds < 0) throw new HttpError(400, 'bad-request');
+      const track = await requireTrack(parts[1]);
+      // For a FLAC file, the frame holding `fromSeconds`; any other file (or a damaged one) is played whole.
+      const seek = await flacSeek(track.audioPath, fromSeconds);
       const exp = Math.floor(now() / 1000) + TICKET_LIFETIME_SECONDS;
       const sig = signTicket(secret, parts[1], exp);
+      // `at` isn't signed: it only chooses where in an already permitted file to start, and the audio route checks it.
+      const at = seek.at === null ? '' : `&at=${seek.at}`;
       sendJson(req, res, 200, {
-        url: `${config.publicBase}tracks/${parts[1]}/audio?exp=${exp}&sig=${sig}`,
+        url: `${config.publicBase}tracks/${parts[1]}/audio?exp=${exp}&sig=${sig}${at}`,
         expiresAt: new Date(exp * 1000).toISOString(),
+        exactSeek: seek.exactSeek,
+        startSeconds: seek.startSeconds,
+        totalSeconds: seek.totalSeconds,
       } satisfies TicketResponse);
       return;
     }
@@ -242,8 +255,12 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       // No token here: the signed ticket in the query string is the permission.
       const check = verifyTicket(secret, parts[1], url.searchParams.get('exp') ?? '', url.searchParams.get('sig') ?? '', Math.floor(now() / 1000));
       if (check !== 'ok') throw new HttpError(403, check === 'expired' ? 'expired-ticket' : 'bad-ticket');
+      const atText = url.searchParams.get('at');
+      if (atText !== null && !/^\d{1,15}$/.test(atText)) throw new HttpError(400, 'bad-request');
       const track = await requireTrack(parts[1]);
-      if (!(await sendAudioFile(req, res, track.audioPath))) throw new HttpError(404, 'not-found');
+      const sent = await sendAudioFile(req, res, track.audioPath, atText === null ? undefined : Number(atText));
+      if (sent === 'missing') throw new HttpError(404, 'not-found');
+      if (sent === 'bad-start') throw new HttpError(400, 'bad-request');
       return;
     }
 

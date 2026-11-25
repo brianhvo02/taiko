@@ -2,6 +2,7 @@
 import { open } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream';
+import { flacStreamHeader, isFlacName } from './flac-file';
 
 export type RangeResult =
   | { kind: 'full' }
@@ -49,22 +50,41 @@ export function audioContentType(fileName: string): string {
   return AUDIO_TYPES[extension] ?? 'application/octet-stream';
 }
 
+export type SendResult = 'sent' | 'missing' | 'bad-start';
+
 /**
- * Answers a GET or HEAD with the file, honouring `Range`. Resolves to false, with nothing sent, when the file can't
- * be opened (the caller answers 404). `filePath` must be one `LibraryPaths` resolved, never text from the request.
+ * Answers a GET or HEAD with an audio file, honouring `Range`. `filePath` must be one `LibraryPaths` resolved,
+ * never text from the request.
+ *
+ * With `at` (a byte offset from the request) the answer is a FLAC stream that begins at the frame there: a 42-byte
+ * header, then the file from `at` to its end, with ranges counted over that whole stream.
+ *
+ * Nothing is sent unless the result is `sent`: `missing` when the file can't be opened (the caller answers 404),
+ * `bad-start` when no FLAC frame starts at `at` (the caller answers 400).
  */
-export async function sendAudioFile(req: IncomingMessage, res: ServerResponse, filePath: string): Promise<boolean> {
+export async function sendAudioFile(req: IncomingMessage, res: ServerResponse, filePath: string, at?: number): Promise<SendResult> {
   let handle;
   try {
     handle = await open(filePath, 'r');
   } catch {
-    return false;
+    return 'missing';
   }
   let handedOver = false;
   try {
     const stats = await handle.stat();
-    if (!stats.isFile()) return false;
-    const size = stats.size;
+    if (!stats.isFile()) return 'missing';
+
+    // What is served: `prefix`, then the file's bytes from `bodyStart` on.
+    let prefix: Uint8Array = new Uint8Array(0);
+    let bodyStart = 0;
+    if (at !== undefined) {
+      const header = isFlacName(filePath) ? await flacStreamHeader(handle, stats.size, at) : null;
+      if (!header) return 'bad-start';
+      prefix = header;
+      bodyStart = at;
+    }
+    const size = prefix.length + (stats.size - bodyStart);
+
     const range = parseRange(req.headers.range, size);
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'private, max-age=3600');
@@ -77,7 +97,7 @@ export async function sendAudioFile(req: IncomingMessage, res: ServerResponse, f
         'Content-Length': Buffer.byteLength(body),
       });
       res.end(req.method === 'HEAD' ? undefined : body);
-      return true;
+      return 'sent';
     }
 
     const start = range.kind === 'partial' ? range.start : 0;
@@ -90,12 +110,22 @@ export async function sendAudioFile(req: IncomingMessage, res: ServerResponse, f
 
     if (req.method === 'HEAD' || length === 0) {
       res.end();
-      return true;
+      return 'sent';
     }
-    // The stream closes the handle when it ends or fails; a listener hanging up mid-song ends it too.
+    // The range may lie in the prefix, in the file, or across both.
+    const head = prefix.subarray(Math.min(start, prefix.length), Math.min(end + 1, prefix.length));
+    if (end < prefix.length) {
+      res.end(head);
+      return 'sent';
+    }
+    if (head.length) res.write(head);
+    const from = bodyStart + Math.max(start, prefix.length) - prefix.length;
+    const to = bodyStart + end - prefix.length;
+    // Streamed, never held in memory. The stream closes the handle when it ends or fails; a listener hanging up
+    // mid-song ends it too.
     handedOver = true;
-    pipeline(handle.createReadStream({ start, end }), res, () => {});
-    return true;
+    pipeline(handle.createReadStream({ start: from, end: to }), res, () => {});
+    return 'sent';
   } finally {
     if (!handedOver) await handle.close().catch(() => {});
   }

@@ -91,14 +91,15 @@ export function LyricsView({ song }: { song: Song }) {
     const onKey = (e: KeyboardEvent) => {
       if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown'].includes(e.key)) hold();
     };
-    const resume = () => { holdUntil = 0; };
+    let seeks = store.seekCount;
     addEventListener('wheel', hold, { passive: true });
     addEventListener('touchmove', hold, { passive: true });
     addEventListener('keydown', onKey);
-    store.audio.addEventListener('seeking', resume);
 
     const tick = () => {
-      const t = store.audio.currentTime - store.getSnapshot().offset;
+      const t = store.position() - store.getSnapshot().offset;
+      // A seek means the listener wants to be where the song is: follow it again.
+      if (store.seekCount !== seeks) { seeks = store.seekCount; holdUntil = 0; }
       let current = -1;
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -126,7 +127,6 @@ export function LyricsView({ song }: { song: Song }) {
       removeEventListener('wheel', hold);
       removeEventListener('touchmove', hold);
       removeEventListener('keydown', onKey);
-      store.audio.removeEventListener('seeking', resume);
     };
   }, [song]);
 

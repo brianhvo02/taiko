@@ -28,7 +28,7 @@ One test file: `npx vitest run src/lyrics/lyrics.test.ts`.
 
 ## Architecture
 
-- `src/shared/` is used by both the player and the server, so it touches neither the DOM nor Node. `api.ts` is the HTTP contract (routes, types, the lyrics-naming rule); change it first when a feature crosses the boundary. `tags.ts` reads FLAC and ID3 tags from a file's first bytes.
+- `src/shared/` is used by both the player and the server, so it touches neither the DOM nor Node. `api.ts` is the HTTP contract (routes, types, the lyrics-naming rule); change it first when a feature crosses the boundary. `tags.ts` reads FLAC and ID3 tags from a file's first bytes. `flac.ts` is exact seeking: it finds the FLAC frame at a time and builds the header of a stream that begins there.
 - `src/lyrics/`: everything is TTML as Apple Music writes it. `ttml.ts` opens a file (Apple JSON wrapper, TTML, or LRC converted by `lrc.ts`) into a `LyricsSource` (the XML document plus its wrapper) and builds the `Song` model from it. `merge.ts` combines versions of one song (same timed lines, different head extras) and serializes the result. Tests need a DOM and ask for jsdom with a `@vitest-environment jsdom` comment.
 - `src/apple/catalog.ts`: Apple's public iTunes Search API, for names, art and IDs. It tries `fetch` and falls back to JSONP, because Apple's CORS header comes and goes.
 - `src/library/tracks.ts`: the `Track` type (a device file or a NAS track) and sorting a batch of picked files into tracks and lyrics.
@@ -39,6 +39,7 @@ One test file: `npx vitest run src/lyrics/lyrics.test.ts`.
 ## Constraints
 
 - **The NAS's tag-based library is on hold** until the owner decides how metadata should work: the player uses the folder browser only. Don't build on `GET library` without asking.
+- **The browser is never asked to seek a FLAC file.** Safari seeks FLAC roughly and then reports the time asked for, which puts the lyrics out of time. `PlayerStore.seek` instead plays a new stream that begins at the frame (a cut `Blob` for a device file, a ticket with `fromSeconds` for the NAS), and everything reads the time from `store.position()`, never `audio.currentTime`. Other formats still seek natively.
 - **Taiko never fetches lyrics.** People bring their own files, and the NAS serves only files that sit beside the audio. Apple's catalog is used for names, art and IDs only.
 - **Nothing the person picks is uploaded.** Local files are read in the browser.
 - **The server has no runtime dependencies** and never writes to the library; it writes only `DATA_DIR`. Every path from a request (a track id, a browse path) goes through the resolver in `paths.ts`, which refuses `..`, skipped names and anything whose real path is outside its root.

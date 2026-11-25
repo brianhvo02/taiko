@@ -46,7 +46,7 @@ export function App() {
       if (e.key === ' ' && !typing && tag !== 'BUTTON') { e.preventDefault(); store.toggle(); }
       if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !typing) {
         e.preventDefault();
-        store.seek(store.audio.currentTime + (e.key === 'ArrowLeft' ? -5 : 5));
+        store.seek(store.position() + (e.key === 'ArrowLeft' ? -5 : 5));
       }
     };
     addEventListener('keydown', onKey);

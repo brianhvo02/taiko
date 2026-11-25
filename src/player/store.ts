@@ -13,6 +13,8 @@ import type { LyricsSource, Song } from '../lyrics/ttml';
 import { NasError, clearPairing, fetchFolder, fetchLyrics, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo } from '../shared/api';
+import { flacStartAt, readFlacIndex, streamHeader } from '../shared/flac';
+import type { FlacIndex, Reader } from '../shared/flac';
 import type { NasFolder } from '../shared/api';
 
 /** One folder of the paired NAS, as the browser shows it. */
@@ -76,12 +78,50 @@ class PlayerStore {
   private loadRun = 0;
   private browseRun = 0;
 
+  // Exact seeking (src/shared/flac.ts). A FLAC track is never seeked by the browser: each seek plays a new stream
+  // that begins at a frame, so the position is the stream's start plus how long it has played.
+  /** Set when the open track can restart at an exact time: a FLAC file here (with its index) or on the NAS. */
+  private exact: { index: FlacIndex | null; total: number } | null = null;
+  /** The time the stream now playing begins at. */
+  private streamStart = 0;
+  /**
+   * Whether the stream now playing reports the song's time instead of its own. A stream cut from the middle keeps
+   * the song's frame numbers, and some browsers (Chrome) read their clock from those: a stream that begins at 60 s
+   * then says 60, where others say 0.
+   */
+  private clockIsAbsolute = false;
+  private clockChecked = false;
+  /** What this browser did the last time it was clear, for a stream that begins too near 0 to tell. */
+  private browserClockIsAbsolute: boolean | null = null;
+  /** The time asked for, shown until the stream that starts there is ready. */
+  private pendingSeek: number | null = null;
+  private seekTimer = 0;
+  private seekRun = 0;
+  private restarting = false;
+  private resumeAfterSeek = false;
+  /** The object URL of the cut stream now playing, for a file on this device. */
+  private cutUrl = '';
+  /** Goes up on every seek, so the lyrics know to follow the song again. */
+  seekCount = 0;
+
   constructor() {
     this.audio.preload = 'auto';
     this.audio.addEventListener('play', () => this.set({ playing: true }));
-    this.audio.addEventListener('pause', () => this.set({ playing: false }));
+    // Loading a restarted stream pauses the element for a moment; that isn't the listener pausing.
+    this.audio.addEventListener('pause', () => { if (!this.restarting) this.set({ playing: false }); });
     this.audio.addEventListener('durationchange', () => {
-      if (Number.isFinite(this.audio.duration)) this.set({ duration: this.audio.duration });
+      // A restarted stream reports only what remains; an exact-seek track's length comes from its index.
+      if (!this.exact && Number.isFinite(this.audio.duration)) this.set({ duration: this.audio.duration });
+    });
+    this.audio.addEventListener('timeupdate', () => {
+      // A second look at the clock, at the first time reported while playing, in case the browser only shows the
+      // song's time once it plays. Only where a stream's own time couldn't have got that far yet.
+      if (this.clockChecked || this.audio.currentTime <= 0) return;
+      this.clockChecked = true;
+      if (!this.clockIsAbsolute && this.streamStart > 1 && this.audio.currentTime >= this.streamStart - 0.25) {
+        this.clockIsAbsolute = true;
+        this.browserClockIsAbsolute = true;
+      }
     });
     this.audio.addEventListener('ended', () => this.step(1, true));
     this.audio.addEventListener('error', () => {
@@ -112,6 +152,12 @@ class PlayerStore {
 
   private current(): Track | null {
     return this.snapshot.currentTrack;
+  }
+
+  /** Where the song is, in seconds. Read this, not `audio.currentTime`, which restarts with every exact seek. */
+  position(): number {
+    if (this.pendingSeek !== null) return this.pendingSeek;
+    return this.clockIsAbsolute ? this.audio.currentTime : this.streamStart + this.audio.currentTime;
   }
 
   /* ---------- Adding files ---------- */
@@ -167,8 +213,26 @@ class PlayerStore {
       }
       return url;
     }
-    if (track.nas && this.snapshot.pairing) return (await fetchTicket(this.snapshot.pairing, track.nas.id)).url;
+    if (track.nas && this.snapshot.pairing) {
+      const ticket = await fetchTicket(this.snapshot.pairing, track.nas.id);
+      if (ticket.exactSeek && ticket.totalSeconds) this.exact = { index: null, total: ticket.totalSeconds };
+      return ticket.url;
+    }
     throw new Error('no audio');
+  }
+
+  private resetStream(): void {
+    clearTimeout(this.seekTimer);
+    this.seekRun++;
+    this.exact = null;
+    this.streamStart = 0;
+    this.clockIsAbsolute = false;
+    this.clockChecked = false;
+    this.pendingSeek = null;
+    this.restarting = false;
+    this.resumeAfterSeek = false;
+    if (this.cutUrl) URL.revokeObjectURL(this.cutUrl);
+    this.cutUrl = '';
   }
 
   /** Opens a track: its audio, then its lyrics. */
@@ -181,6 +245,7 @@ class PlayerStore {
     const known = this.identified.get(id);
     this.source = null;
     this.audio.pause();
+    this.resetStream();
     this.set({
       currentId: id, currentTrack: track, queue, song: null, lyricsLoading: true, lyricsNames: [], songInfo: known?.song ?? null, usInfo: known?.us ?? null,
       duration: track.durationSeconds ?? 0, notice: '',
@@ -189,6 +254,13 @@ class PlayerStore {
     try {
       const url = await this.urlFor(track);
       if (run !== this.loadRun) return;
+      if (track.file) {
+        // A FLAC file on the device gets its index read first (a few small reads), so that every seek is exact.
+        const index = await readFlacIndex(fileReader(track.file), track.file.size).catch(() => null);
+        if (run !== this.loadRun) return;
+        if (index) this.exact = { index, total: index.totalSamples / index.sampleRate };
+      }
+      if (this.exact) this.set({ duration: this.exact.total });
       this.audio.src = url;
       if (autoplay) this.audio.play().catch(() => {});
     } catch (error) {
@@ -265,13 +337,87 @@ class PlayerStore {
     const { queue, currentId } = this.snapshot;
     const at = queue.findIndex((track) => track.id === currentId);
     const next = queue[at + direction];
-    if (direction === -1 && (this.audio.currentTime > 3 || !next)) this.seek(0);
+    if (direction === -1 && (this.position() > 3 || !next)) this.seek(0);
     else if (next) void this.select(next.id, autoplay);
   }
 
   seek(time: number): void {
     if (!this.snapshot.currentId) return;
-    this.audio.currentTime = Math.max(0, Math.min(time, this.snapshot.duration || time));
+    const target = Math.max(0, Math.min(time, this.snapshot.duration || time));
+    this.seekCount++;
+    if (!this.exact) {
+      this.audio.currentTime = target;
+      return;
+    }
+    // Show the time asked for at once, and restart the stream a moment later: dragging the seek bar asks many times.
+    this.pendingSeek = target;
+    clearTimeout(this.seekTimer);
+    this.seekTimer = window.setTimeout(() => void this.restartAt(target), 120);
+  }
+
+  /** Plays a new stream that begins at the frame holding `target`. */
+  private async restartAt(target: number): Promise<void> {
+    const track = this.current();
+    const exact = this.exact;
+    if (!track || !exact) return;
+    const run = ++this.seekRun;
+    this.resumeAfterSeek ||= !this.audio.paused;
+    let url = '';
+    let cut = false;
+    let start = 0;
+    try {
+      if (track.file && exact.index) {
+        const found = await flacStartAt(fileReader(track.file), exact.index, target);
+        if (found.startSample > 0) {
+          url = URL.createObjectURL(new Blob([streamHeader(exact.index, found.startSample), track.file.slice(found.offset)], { type: 'audio/flac' }));
+          cut = true;
+          start = found.startSeconds;
+        } else {
+          url = await this.urlFor(track);
+        }
+      } else if (track.nas && this.snapshot.pairing) {
+        const ticket = await fetchTicket(this.snapshot.pairing, track.nas.id, target);
+        url = ticket.url;
+        start = ticket.startSeconds;
+      } else {
+        return;
+      }
+    } catch (error) {
+      if (run !== this.seekRun) return;
+      this.pendingSeek = null;
+      this.nasFailed(error, "Can't move to that part of the song. Try again in a moment.");
+      return;
+    }
+    if (run !== this.seekRun) {
+      if (cut) URL.revokeObjectURL(url);
+      return;
+    }
+
+    const resume = this.resumeAfterSeek;
+    this.resumeAfterSeek = false;
+    const old = this.cutUrl;
+    this.restarting = resume;
+    this.audio.src = url;
+    this.cutUrl = cut ? url : '';
+    if (old) URL.revokeObjectURL(old);
+    this.streamStart = start;
+    this.clockIsAbsolute = false;
+    this.clockChecked = false;
+    const ready = () => {
+      if (run !== this.seekRun) return;
+      // Before it has played, the new stream's time is 0 or the time it begins at; which one says how to read it.
+      if (start > 0.5) {
+        this.clockIsAbsolute = this.audio.currentTime >= start - 0.25;
+        this.browserClockIsAbsolute = this.clockIsAbsolute;
+      } else {
+        this.clockIsAbsolute = start > 0 && (this.browserClockIsAbsolute ?? false);
+      }
+      this.pendingSeek = null;
+      this.restarting = false;
+    };
+    this.audio.addEventListener('canplay', ready, { once: true });
+    this.audio.addEventListener('error', ready, { once: true });
+    if (resume) this.audio.play().catch(() => { this.restarting = false; this.set({ playing: false }); });
   }
 
   nudge(seconds: number): void {
@@ -382,6 +528,7 @@ class PlayerStore {
     if (playingFromNas) {
       this.loadRun++;
       this.source = null;
+      this.resetStream();
       this.audio.pause();
       this.audio.removeAttribute('src');
       this.audio.load();
@@ -426,6 +573,11 @@ class PlayerStore {
         })
       : null;
   }
+}
+
+/** Reads parts of a file picked on this device. */
+function fileReader(file: File): Reader {
+  return async (offset, length) => new Uint8Array(await file.slice(offset, offset + length).arrayBuffer());
 }
 
 export const store = new PlayerStore();

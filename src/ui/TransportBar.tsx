@@ -16,7 +16,7 @@ export function TransportBar({ snap, onShowSongs }: { snap: Snapshot; onShowSong
     let frame = 0;
     let shownSecond = -1;
     const tick = () => {
-      const time = store.audio.currentTime;
+      const time = store.position();
       if (seekRef.current && !dragging.current) seekRef.current.value = String(time);
       const second = Math.floor(time);
       if (second !== shownSecond && elapsedRef.current) {

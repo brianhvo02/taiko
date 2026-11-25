@@ -14,9 +14,12 @@
  *   DELETE me                  paired  -> 204                   (forgets this device)
  *   GET    browse?path=        paired  -> BrowseResponse        (a folder's contents; an empty path lists the roots)
  *   GET    library             paired  -> LibraryResponse       (the tag-based library; empty while LIBRARY_SCAN is off)
- *   POST   tracks/:id/ticket   paired  -> TicketResponse
+ *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
  *   GET    tracks/:id/lyrics/:index  paired -> the lyrics file's text, as stored
  *   GET    tracks/:id/audio?exp=&sig=  -> the audio file's bytes, with Range support
+ *   GET    tracks/:id/audio?exp=&sig=&at=<byte offset>  -> for a FLAC file, a stream that begins at the frame at that
+ *          offset: the 42-byte header from `streamHeader` (src/shared/flac.ts), then the file from there on, with
+ *          Range support over that whole stream. 400 `bad-request` when no frame starts at the offset.
  *
  * An `<audio>` element can't send an Authorization header, so audio is fetched with a ticket: a URL signed by the
  * server that works without the token until it expires.
@@ -109,11 +112,26 @@ export interface LibraryResponse {
   tracks: NasTrack[];
 }
 
+/**
+ * Browsers seek FLAC files only roughly (Safari most of all), so the player never asks them to: to play from a
+ * time, it asks for a ticket whose audio begins there. See src/shared/flac.ts.
+ */
+export interface TicketRequest {
+  /** Start the audio at this time. Left out or 0: the whole file. Ignored for a file the server can't start mid-way. */
+  fromSeconds?: number;
+}
+
 export interface TicketResponse {
   /** An absolute URL for the track's audio that needs no token. */
   url: string;
   /** ISO time after which the URL stops working. */
   expiresAt: string;
+  /** Whether this track's audio can start at an exact time: it is a FLAC file the server could index. */
+  exactSeek: boolean;
+  /** The time the audio at `url` starts at: 0 for the whole file, else the start of the frame holding `fromSeconds`. */
+  startSeconds: number;
+  /** The track's full length, known when `exactSeek` is true; null otherwise. */
+  totalSeconds: number | null;
 }
 
 /** The file extensions the server lists and the player accepts as audio. */

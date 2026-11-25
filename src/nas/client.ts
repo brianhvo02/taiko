@@ -2,7 +2,7 @@
  * The player's side of the NAS server (see `src/shared/api.ts` for the contract). A device pairs once with a code
  * from the owner's invite link; the token it gets back is kept in this browser's storage.
  */
-import type { ApiError, BrowseResponse, PairRequest, PairResponse, TicketResponse } from '../shared/api';
+import type { ApiError, BrowseResponse, PairRequest, PairResponse, TicketRequest, TicketResponse } from '../shared/api';
 
 export interface Pairing {
   /** The server's API base, ending in `/api/`. */
@@ -133,8 +133,13 @@ export function saveLastPath(path: string): void {
   }
 }
 
-export async function fetchTicket(pairing: Pairing, trackId: string): Promise<TicketResponse> {
-  return (await request(pairing.base, `tracks/${encodeURIComponent(trackId)}/ticket`, { method: 'POST' }, pairing.token)).json() as Promise<TicketResponse>;
+/** A link to a track's audio. With `fromSeconds`, a FLAC track's audio begins at that time (see src/shared/flac.ts). */
+export async function fetchTicket(pairing: Pairing, trackId: string, fromSeconds = 0): Promise<TicketResponse> {
+  const body: TicketRequest = { fromSeconds };
+  const init: RequestInit = fromSeconds > 0
+    ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+    : { method: 'POST' };
+  return (await request(pairing.base, `tracks/${encodeURIComponent(trackId)}/ticket`, init, pairing.token)).json() as Promise<TicketResponse>;
 }
 
 export async function fetchLyrics(pairing: Pairing, trackId: string, index: number): Promise<string> {
