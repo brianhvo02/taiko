@@ -18,6 +18,7 @@ describe('loadConfig', () => {
       appOrigins: ['https://taiko-player.pages.dev'],
       scanRoots: [],
       scanIntervalMinutes: 360,
+      pairAttempts: 10,
     });
   });
 

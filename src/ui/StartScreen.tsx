@@ -1,3 +1,4 @@
+import type { InviteResponse } from '../shared/api';
 import { useEffect, useRef, useState } from 'react';
 import { defaultDeviceName, normalizeBase } from '../nas/client';
 import type { Snapshot } from '../player/store';
@@ -75,6 +76,30 @@ function HeroLine() {
   );
 }
 
+/** An invite for another device of the same person: a link to open there, or a code to type in. */
+function DeviceInvite({ invite, name }: { invite: InviteResponse; name: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(invite.link);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="invite" role="group" aria-label="Invite for another device">
+      <p>Open this link on the other device and it will be {name}'s too. It works once, until {new Date(invite.expiresAt).toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' })}.</p>
+      <input className="invite-link" type="text" readOnly value={invite.link} aria-label="Invite link" onFocus={(e) => e.currentTarget.select()} />
+      <p className="invite-code">Or enter this code there, with this NAS's address: <span>{invite.code}</span></p>
+      <div className="actions">
+        <button className="plain-button primary-button" type="button" onClick={() => void copy()}>{copied ? 'Link copied' : 'Copy link'}</button>
+        <button className="plain-button" type="button" onClick={() => store.closeDeviceInvite()}>Done</button>
+      </div>
+    </div>
+  );
+}
+
 function NasWay({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void }) {
   const [address, setAddress] = useState('');
   const [code, setCode] = useState('');
@@ -85,11 +110,14 @@ function NasWay({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void
       <section className="way nas">
         <h2>Music on your NAS</h2>
         <p>Paired with {snap.pairing.serverName} as {snap.pairing.deviceName}.</p>
+        {snap.user && <p className="whose">You are listening as <strong>{snap.user.name}</strong>. Your playlists follow you to every device you add.</p>}
         <div className="actions">
           <button className="plain-button primary-button" type="button" onClick={onShowSongs}>Open from NAS</button>
           <button className="plain-button" type="button" onClick={() => store.openSongs('playlists')}>Playlists</button>
+          {snap.user && !snap.deviceInvite && <button className="plain-button" type="button" onClick={() => void store.makeDeviceInvite()}>Add another device</button>}
           <button className="plain-button" type="button" onClick={() => void store.forgetNas()}>Forget this NAS</button>
         </div>
+        {snap.user && snap.deviceInvite && <DeviceInvite invite={snap.deviceInvite} name={snap.user.name} />}
       </section>
     );
   }

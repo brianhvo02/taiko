@@ -13,11 +13,13 @@ import { mergeInto, sameSong, serialize } from '../lyrics/merge';
 import { openLyrics, songFromDoc } from '../lyrics/ttml';
 import type { LyricsSource, Song } from '../lyrics/ttml';
 import {
-  NasError, clearPairing, fetchFolder, fetchLibrary, fetchLyrics, fetchMoved, fetchPlaylists, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath, searchLibrary, sendPlaylists, startScan,
+  NasError, clearPairing, fetchFolder, fetchLibrary, fetchLyrics, fetchMoved, fetchPlaylists, fetchSharedPlaylists, fetchTicket, fetchUser, forget, loadLastPath, loadPairing, makeInvite, pair, parsePairLink, saveLastPath, savePairing, searchLibrary, sendPlaylists, sendSharedTracks, startScan,
 } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
 import { noteChanges, reconcile } from '../shared/playlists';
+import type { PlaylistAccess, SharedPlaylist } from '../shared/playlists';
+import type { InviteResponse, NasUser } from '../shared/api';
 import {
   cleanName, loadOffsets, loadPlaylistSync, loadPlaylists, loadSession, loadSettings, saveOffset, savePlaylistSync, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
 } from './persist';
@@ -110,8 +112,15 @@ export interface Snapshot {
   playlists: Playlist[];
   /** The playlist open in the panel, or null for the list of them. */
   openPlaylist: string | null;
-  /** Whether the playlists are shared through the NAS with every device paired with it. */
+  /** Whether the playlists are kept on the NAS, for all of this user's devices. */
   playlistsShared: boolean;
+  /** Whose device this is, on a NAS that has users. */
+  user: NasUser | null;
+  /** The playlists other users let this one see, and the one of them that is open (`<owner id>/<playlist id>`). */
+  sharedPlaylists: SharedPlaylist[];
+  openShared: string | null;
+  /** An invite just made for another device of this user, while it is shown. */
+  deviceInvite: InviteResponse | null;
   /** Where the listener was last time, offered on the first screen. */
   /** From 0 to 1. */
   volume: number;
@@ -141,7 +150,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), canAirplay: false, pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), canAirplay: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -257,7 +266,13 @@ class PlayerStore {
     });
     void this.restoreKept();
     void this.syncPlaylists().then(() => this.repointStored());
-    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void this.syncPlaylists(); });
+    void this.refreshUser();
+    void this.loadShared();
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible') return;
+      void this.syncPlaylists();
+      void this.loadShared();
+    });
     addEventListener('online', () => void this.syncPlaylists());
     // Where the listener is gets saved as they go, and when the page is put away.
     setInterval(() => { if (!this.audio.paused) this.saveSessionNow(); }, 5000);
@@ -1082,7 +1097,105 @@ class PlayerStore {
     if (this.snapshot.openPlaylist === id) this.set({ openPlaylist: null });
   }
 
-  showPlaylist(id: string | null): void { this.set({ openPlaylist: id }); }
+  showPlaylist(id: string | null): void { this.set({ openPlaylist: id, openShared: null }); }
+
+  /** Says who but the owner may use a playlist: nobody, everyone to play it, or everyone to change it too. */
+  setPlaylistAccess(id: string, access: PlaylistAccess): void {
+    this.changePlaylist(id, ({ access: _was, ...playlist }) => (access === 'private' ? playlist : { ...playlist, access }));
+  }
+
+  /* ---------- Users, and the playlists they share ---------- */
+
+  /** Asks the NAS whose device this is; the name may have changed since pairing. */
+  private async refreshUser(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    try {
+      const user = await fetchUser(pairing);
+      if (this.snapshot.pairing !== pairing || !user) return;
+      if (user.id === pairing.user?.id && user.name === pairing.user.name) return;
+      const next = { ...pairing, user };
+      savePairing(next);
+      this.set({ pairing: next, user });
+    } catch (error) {
+      if (error instanceof NasError && error.status === 401) this.nasFailed(error, '');
+    }
+  }
+
+  /** Reads the playlists other users share. Left as they were when the NAS can't be reached. */
+  async loadShared(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    try {
+      const sharedPlaylists = await fetchSharedPlaylists(pairing);
+      if (this.snapshot.pairing !== pairing) return;
+      const open = this.snapshot.openShared;
+      this.set({ sharedPlaylists, ...(open && !sharedPlaylists.some((playlist) => sharedKey(playlist) === open) ? { openShared: null } : {}) });
+    } catch {
+      // Shown again the next time the page comes into view.
+    }
+  }
+
+  showShared(key: string | null): void { this.set({ openShared: key, openPlaylist: null }); }
+
+  private shared(key: string): SharedPlaylist | undefined {
+    return this.snapshot.sharedPlaylists.find((playlist) => sharedKey(playlist) === key);
+  }
+
+  async playShared(key: string, index?: number): Promise<void> {
+    const playlist = this.shared(key);
+    if (!playlist?.tracks.length) return;
+    const list = playlist.tracks.map(fromSaved);
+    await this.playFrom(list, { kind: 'playlist', id: key }, index === undefined ? undefined : list[index]?.id);
+  }
+
+  /** Changes the songs of someone's collaborative playlist: shown at once, sent to the NAS, and put back if it refuses. */
+  private async changeShared(key: string, change: (playlist: Playlist) => Playlist): Promise<boolean> {
+    const pairing = this.snapshot.pairing;
+    const playlist = this.shared(key);
+    if (!pairing || !playlist || playlist.access !== 'collaborative') return false;
+    const tracks = change(playlist).tracks;
+    if (tracks === playlist.tracks) return true;
+    const put = (next: SharedPlaylist) => this.set({ sharedPlaylists: this.snapshot.sharedPlaylists.map((candidate) => (sharedKey(candidate) === key ? next : candidate)) });
+    put({ ...playlist, tracks });
+    try {
+      put(await sendSharedTracks(pairing, playlist.owner.id, playlist.id, tracks));
+      return true;
+    } catch (error) {
+      put(playlist);
+      void this.loadShared();
+      this.set({ notice: error instanceof NasError && (error.status === 403 || error.status === 404) ? `${playlist.owner.name} no longer lets others change ${playlist.name}.` : `Can't change ${playlist.name} just now. Try again in a moment.` });
+      return false;
+    }
+  }
+
+  async addToShared(key: string, tracks: Track[]): Promise<void> {
+    const playlist = this.shared(key);
+    if (!playlist) return;
+    const next = withTracks(playlist, tracks.filter((track) => track.nas).map(savedOf));
+    const added = next.tracks.length - playlist.tracks.length;
+    if (!added) {
+      this.set({ notice: `${tracks.length === 1 ? 'That song is' : 'Those songs are'} already in ${playlist.name}.` });
+      return;
+    }
+    if (await this.changeShared(key, () => next)) this.set({ notice: `Added ${added} ${added === 1 ? 'song' : 'songs'} to ${playlist.name}.` });
+  }
+
+  removeFromShared(key: string, index: number): void { void this.changeShared(key, (playlist) => withoutTrack(playlist, index)); }
+  moveInShared(key: string, index: number, direction: 1 | -1): void { void this.changeShared(key, (playlist) => withMoved(playlist, index, direction)); }
+
+  /** Makes an invite for another device of this user, to show as a link. */
+  async makeDeviceInvite(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    try {
+      this.set({ deviceInvite: await makeInvite(pairing) });
+    } catch (error) {
+      this.set({ notice: error instanceof NasError && error.status === 429 ? 'That is enough invites for now. Try again in ten minutes.' : "Can't make an invite just now. Try again in a moment." });
+    }
+  }
+
+  closeDeviceInvite(): void { this.set({ deviceInvite: null }); }
 
   /** Plays a playlist from the song at `index`, or from its start. */
   async playPlaylist(id: string, index?: number): Promise<void> {
@@ -1250,7 +1363,7 @@ class PlayerStore {
     if (error instanceof NasError && error.status === 401) {
       clearPairing();
       this.set({
-        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, songsTab: 'device',
+        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, songsTab: 'device',
         library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [],
         notice: 'This device is no longer paired with the NAS. Ask its owner for a new invite.',
       });
@@ -1309,8 +1422,9 @@ class PlayerStore {
     if (!link) return;
     try {
       const pairing = await pair(link, deviceName);
-      this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null, playlists: loadPlaylists(pairing.base), openPlaylist: null, songsTab: 'folders' });
+      this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null, playlists: loadPlaylists(pairing.base), openPlaylist: null, user: pairing.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, songsTab: 'folders' });
       void this.syncPlaylists().then(() => this.repointStored());
+      void this.loadShared();
       void this.loadLibrary();
       await this.openFolder('');
     } catch (error) {
@@ -1331,7 +1445,7 @@ class PlayerStore {
       this.audio.load();
     }
     this.set({
-      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, songsTab: 'device',
+      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, songsTab: 'device',
       library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [], view: 'library',
       ...(playingFromNas ? { currentId: null, currentTrack: null, queue: [], song: null, lyricsNames: [], songInfo: null, usInfo: null } : {}),
     });
@@ -1418,6 +1532,9 @@ function volumeCanBeSet(): boolean {
 const offsetKey = (track: Track): string => (track.nas ? `nas:${track.nas.id}` : `file:${track.fileName}`);
 
 /** A NAS song as it is stored in a playlist or a session. */
+/** What names a shared playlist: whose it is, and which of theirs. */
+export const sharedKey = (playlist: SharedPlaylist): string => `${playlist.owner.id}/${playlist.id}`;
+
 function savedOf(track: Track): SavedTrack {
   const { lyrics: _lyrics, ...saved } = track.nas!;
   return saved;

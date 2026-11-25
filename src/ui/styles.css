@@ -480,8 +480,9 @@ input::placeholder { color: var(--unsung); }
   top: 100%;
   z-index: 8;
   display: grid;
-  min-width: 13rem;
-  max-width: min(18rem, calc(100vw - 2rem));
+  width: max-content;
+  min-width: min(16rem, calc(100vw - 2rem));
+  max-width: min(20rem, calc(100vw - 2rem));
   padding: .4rem;
   background: var(--night);
   border: 1px solid var(--rule);
@@ -492,6 +493,20 @@ input::placeholder { color: var(--unsung); }
 .menu-item:hover { background: rgb(246 239 224 / .07); }
 .menu-item:disabled { color: var(--unsung); cursor: default; background: none; }
 .menu-form { display: flex; gap: .4rem; padding: .4rem .5rem .3rem; }
+/* A playlist to pick: what it is, its name, and a quiet word about it at the far side. */
+.menu-pick { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; align-items: center; gap: .6rem; }
+.menu-pick-lead { display: grid; place-items: center; color: var(--unsung); }
+.menu-pick-lead svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
+.menu-pick-name { overflow: hidden; text-overflow: ellipsis; }
+.menu-pick-detail { color: var(--quiet); font-size: var(--small); font-variant-numeric: tabular-nums; }
+/* Naming a new one is a line in the list, not a form bolted under it: the name is written where the name will be. */
+.menu-new { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; align-items: center; gap: .6rem; margin-top: .3rem; padding: .55rem .5rem .35rem; border-top: 1px solid var(--rule); }
+.menu-new input { min-width: 0; width: 100%; padding: .1rem 0 .2rem; background: none; border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; color: var(--hide); font: inherit; }
+.menu-new input::placeholder { color: var(--quiet); }
+.menu-new input:focus { outline: none; border-bottom-color: var(--brass); }
+.menu-new:focus-within .menu-pick-lead { color: var(--brass); }
+.menu-new .text-button { text-decoration: none; font-weight: 500; }
+.menu-new .text-button:disabled { color: var(--unsung); cursor: default; }
 .menu-form input { flex: 1; min-width: 0; }
 .new-playlist { padding: 1rem; }
 /* A row leads with what it is: a folder, or a song's place on its album. */
@@ -519,6 +534,18 @@ input::placeholder { color: var(--unsung); }
 .song.folder .song-lead { color: var(--quiet); }
 /* The song that is open is marked in brass, the colour of "now". */
 .song.current .song-title, .song.current .song-lead { color: var(--brass); }
+/* Who a device or a playlist belongs to: a plain sentence, the name in the drumhead's colour. */
+.whose { color: var(--quiet); }
+.whose strong { color: var(--hide); font-weight: 500; }
+.album-text .whose { font-size: var(--small); margin: .2rem 0 .6rem; }
+/* Who but its owner may use a playlist. */
+.access { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .7rem; margin-top: .75rem; color: var(--quiet); font-size: var(--small); }
+.access select { font-size: var(--small); }
+/* An invite for another device. Marked in brass, as what is "now" is; the code is set like a lyric, to be read aloud. */
+.invite { display: grid; gap: .7rem; max-width: 34rem; margin-top: 1.25rem; padding: 1rem 1.25rem; border-left: 3px solid var(--brass); background: var(--night-raised); border-radius: 0 var(--corner) var(--corner) 0; }
+.invite p { color: var(--quiet); }
+.invite-link { width: 100%; min-width: 0; font-size: var(--small); color: var(--hide); background: var(--night); }
+.invite-code span { display: block; margin-top: .2rem; font-family: var(--lyric-face); font-weight: 700; font-size: 1.5rem; letter-spacing: .08em; color: var(--hide); }
 .songs-forget { flex-basis: 100%; color: var(--quiet); font-size: var(--small); }
 .songs-foot { display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; border-top: 1px solid var(--rule); }
 .crumbs { padding: 0 1rem .4rem; color: var(--unsung); font-size: .85rem; overflow-wrap: anywhere; }

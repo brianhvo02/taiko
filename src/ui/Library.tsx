@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Track } from '../library/tracks';
 import type { Snapshot } from '../player/store';
-import { store } from '../player/store';
+import { sharedKey, store } from '../player/store';
 import type { NasAlbum } from '../shared/api';
 import { otherForms, qualityOf } from './format';
 import { AddToPlaylist, ForgetSongs, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
@@ -379,7 +379,7 @@ function Home({ snap }: { snap: Snapshot }) {
           {shelf === 'artists' && <ArtistList artists={artists} />}
           {shelf === 'playlists' && (
             <>
-              {snap.playlists.length === 0 && <p className="library-note">No playlists yet. Add a song or an album to a new one from the button at the end of its row. {playlistsKept(snap)}</p>}
+              {snap.playlists.length === 0 && snap.sharedPlaylists.length === 0 && <p className="library-note">No playlists yet. Add a song or an album to a new one from the button at the end of its row. {playlistsKept(snap)}</p>}
               <ul className="names">
                 {snap.playlists.map((playlist) => (
                   <li key={playlist.id}>
@@ -387,6 +387,15 @@ function Home({ snap }: { snap: Snapshot }) {
                       <span className="name-row-lead">{LIST}</span>
                       <span className="name-row-title">{playlist.name}</span>
                       <span className="name-row-detail">{count(playlist.tracks.length, 'song')}</span>
+                    </button>
+                  </li>
+                ))}
+                {snap.sharedPlaylists.map((playlist) => (
+                  <li key={sharedKey(playlist)}>
+                    <button type="button" className="name-row with-lead" onClick={() => { store.showShared(sharedKey(playlist)); store.openSongs('playlists'); }}>
+                      <span className="name-row-lead">{LIST}</span>
+                      <span className="name-row-title">{playlist.name}</span>
+                      <span className="name-row-detail">{playlist.owner.name}'s, {count(playlist.tracks.length, 'song')}</span>
                     </button>
                   </li>
                 ))}

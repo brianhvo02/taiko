@@ -10,6 +10,7 @@ import { acceptPlaylists, acceptTracks } from '../../src/shared/playlists';
 import type { SharedPlaylist } from '../../src/shared/playlists';
 import { MAX_DEVICE_NAME_LENGTH, RateLimiter, TICKET_LIFETIME_SECONDS, signTicket, verifyTicket } from './auth';
 import type { Device, PairingStore, User } from './auth';
+import { DEFAULT_PAIR_ATTEMPTS } from './config';
 import type { Config } from './config';
 import { flacSeek } from './flac-file';
 import { nasTrack } from './library';
@@ -27,7 +28,7 @@ export const MAX_JSON_BODY_BYTES = 16 * 1024;
 /** The playlists arrive whole, so their body may be far larger than any other. */
 export const MAX_PLAYLISTS_BODY_BYTES = 8 * 1024 * 1024;
 export const MAX_MOVED_BODY_BYTES = 4 * 1024 * 1024;
-export const PAIR_ATTEMPTS = 10;
+export { DEFAULT_PAIR_ATTEMPTS as PAIR_ATTEMPTS } from './config';
 export const PAIR_WINDOW_MS = 10 * 60 * 1000;
 /** Invites a device may make for its own user in that window, and how long each lasts. */
 export const DEVICE_INVITES = 5;
@@ -37,7 +38,7 @@ export const SCAN_REQUEST_GAP_MS = 10_000;
 export const MAX_SEARCH_CHARS = 200;
 
 export interface AppDeps {
-  config: Pick<Config, 'publicBase' | 'basePath' | 'serverName' | 'appOrigins' | 'roots'>;
+  config: Pick<Config, 'publicBase' | 'basePath' | 'serverName' | 'appOrigins' | 'roots'> & Partial<Pick<Config, 'pairAttempts'>>;
   /** The albums and songs of the scanned roots; off and empty when `LIBRARY_SCAN` names none. */
   library: Pick<Library, 'enabled' | 'scanning' | 'scannedAt' | 'albums' | 'search' | 'scan'>;
   /** The cache the library scan reads tags through, so the browser shares it. Left out: one of the app's own. */
@@ -115,7 +116,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   const { config, library, pairing, secret } = deps;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
-  const pairLimit = new RateLimiter(PAIR_ATTEMPTS, PAIR_WINDOW_MS);
+  const pairLimit = new RateLimiter(config.pairAttempts ?? DEFAULT_PAIR_ATTEMPTS, PAIR_WINDOW_MS);
   const inviteLimit = new RateLimiter(DEVICE_INVITES, PAIR_WINDOW_MS);
   const paths = new LibraryPaths(config.roots);
   const moved = new MovedRecord(config.roots);

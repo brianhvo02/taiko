@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { smallCover } from '../library/tracks';
 import type { Snapshot, SongsTab } from '../player/store';
-import { store } from '../player/store';
+import { sharedKey, store } from '../player/store';
+import type { PlaylistAccess } from '../shared/playlists';
 import { canPickFolder, pickFiles } from './format';
-import { AddToPlaylist, FOLDER, ForgetSongs, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { ACCESS, AddToPlaylist, FOLDER, ForgetSongs, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /** The paired NAS, folder by folder. A folder of songs plays through as an album. */
 function Folders({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
@@ -65,6 +66,51 @@ function Folders({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; o
   );
 }
 
+/** Someone else's playlist: to play, and to change when its owner lets everyone. */
+function SharedView({ snap, at, wanted, onChosen }: { snap: Snapshot; at: string; wanted: string; onChosen: () => void }) {
+  const playlist = snap.sharedPlaylists.find((candidate) => sharedKey(candidate) === at);
+  if (!playlist) return null;
+  const count = playlist.tracks.length;
+  const open = playlist.access === 'collaborative';
+  return (
+    <>
+      <nav className="crumbs" aria-label="Playlist">
+        <button className="text-button" type="button" onClick={() => store.showShared(null)}>All playlists</button>
+        <span aria-hidden="true"> / </span>{playlist.name}
+      </nav>
+      <div className="album no-cover">
+        <div className="album-text">
+          <div className="album-name">{playlist.name}</div>
+          <p className="whose">{playlist.owner.name}'s playlist. {open ? 'You can add songs to it, reorder them and remove them.' : 'You can play it; only they can change it.'}</p>
+          <div className="actions">
+            <button className="plain-button primary-button" type="button" disabled={!count} onClick={() => { void store.playShared(at); onChosen(); }}>Play</button>
+          </div>
+        </div>
+      </div>
+      {count === 0 && <p className="songs-note">This playlist is empty.{open ? " Add songs to it from their folders, with the button at the end of a song's row." : ''}</p>}
+      <ul>
+        {playlist.tracks.map((song, index) => (!wanted || song.title.toLowerCase().includes(wanted)) && (
+          <SongRow
+            key={song.id}
+            text={{ ...rowText(song), lead: index + 1 }}
+            current={`nas:${song.id}` === snap.currentId}
+            onPlay={() => { void store.playShared(at, index); onChosen(); }}
+            menu={open && (
+              <RowMenu label={`More for ${song.title}`}>{(close) => (
+                <>
+                  <button type="button" className="menu-item" disabled={index === 0} onClick={() => { store.moveInShared(at, index, -1); close(); }}>Move up</button>
+                  <button type="button" className="menu-item" disabled={index === count - 1} onClick={() => { store.moveInShared(at, index, 1); close(); }}>Move down</button>
+                  <button type="button" className="menu-item" onClick={() => { store.removeFromShared(at, index); close(); }}>Remove from playlist</button>
+                </>
+              )}</RowMenu>
+            )}
+          />
+        ))}
+      </ul>
+    </>
+  );
+}
+
 /** One playlist: its songs in order, to play, reorder and remove, and the playlist itself to rename or delete. */
 function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: string; wanted: string; onChosen: () => void }) {
   const playlist = snap.playlists.find((candidate) => candidate.id === id);
@@ -100,6 +146,14 @@ function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: stri
               <button className="plain-button" type="button" onClick={() => setDeleting(true)}>Delete</button>
             </div>
           )}
+          {snap.user && snap.playlistsShared && (
+            <label className="access">
+              Who can use it
+              <select value={playlist.access ?? 'private'} onChange={(e) => store.setPlaylistAccess(id, e.currentTarget.value as PlaylistAccess)}>
+                {(Object.keys(ACCESS) as PlaylistAccess[]).map((access) => <option key={access} value={access}>{ACCESS[access].choice}</option>)}
+              </select>
+            </label>
+          )}
         </div>
       </div>
       {count === 0 && <p className="songs-note">This playlist is empty. Add songs to it from their folders, with the button at the end of a song's row.</p>}
@@ -132,6 +186,10 @@ function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string;
   if (snap.openPlaylist && snap.playlists.some((playlist) => playlist.id === snap.openPlaylist)) {
     return <PlaylistView key={snap.openPlaylist} snap={snap} id={snap.openPlaylist} wanted={wanted} onChosen={onChosen} />;
   }
+  if (snap.openShared && snap.sharedPlaylists.some((playlist) => sharedKey(playlist) === snap.openShared)) {
+    return <SharedView key={snap.openShared} snap={snap} at={snap.openShared} wanted={wanted} onChosen={onChosen} />;
+  }
+  const others = snap.sharedPlaylists.filter((playlist) => !wanted || playlist.name.toLowerCase().includes(wanted) || playlist.owner.name.toLowerCase().includes(wanted));
   const shown = snap.playlists.filter((playlist) => !wanted || playlist.name.toLowerCase().includes(wanted));
   return (
     <>
@@ -142,6 +200,7 @@ function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string;
             <button type="button" className="song list" onClick={() => store.showPlaylist(playlist.id)}>
               <span className="song-lead">{LIST}<span className="sr-only">Playlist</span></span>
               <span className="song-title">{playlist.name}</span>
+              <span className="song-detail">{ACCESS[playlist.access ?? 'private'].said}</span>
               <span className="song-meta">{playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'}</span>
             </button>
           </li>
@@ -152,6 +211,23 @@ function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string;
         <button className="plain-button" type="submit">Create playlist</button>
       </form>
       {snap.playlists.length > 0 && <p className="songs-note">{playlistsKept(snap)}</p>}
+      {others.length > 0 && (
+        <>
+          <h3>From other people</h3>
+          <ul>
+            {others.map((playlist) => (
+              <li className="song-row" key={sharedKey(playlist)}>
+                <button type="button" className="song list" onClick={() => store.showShared(sharedKey(playlist))}>
+                  <span className="song-lead">{LIST}<span className="sr-only">Playlist</span></span>
+                  <span className="song-title">{playlist.name}</span>
+                  <span className="song-detail">{playlist.owner.name}'s{playlist.access === 'collaborative' ? ', and yours to change' : ''}</span>
+                  <span className="song-meta">{playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </>
   );
 }

@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { toneFlac } from './fixtures.ts';
-import { clearSharedPlaylists, expectInTime, listen, mockCatalog, pair, pick, seekTo, shown } from './helpers.ts';
+import { clearSharedPlaylists, expectInTime, listen, mockCatalog, nasCommand, pair, pick, seekTo, shown } from './helpers.ts';
 
 test.beforeEach(() => clearSharedPlaylists());
 
@@ -185,7 +185,7 @@ test('playlists: make one from a song, add to it, reorder, play through, and fin
   await page.reload();
   await page.getByRole('button', { name: 'Playlists' }).click();
   // The NAS has been told too, so no other device is left with it.
-  await expect(panel.getByText('No playlists yet.')).toContainText('Playlists are shared with every device paired with Test NAS.');
+  await expect(panel.getByText('No playlists yet.')).toContainText('Your playlists are kept on Test NAS, for all of your devices.');
 });
 
 test('playlists are shared through the NAS: what one device makes, changes and deletes reaches another', async ({ page, browser }) => {
@@ -210,7 +210,7 @@ test('playlists are shared through the NAS: what one device makes, changes and d
   await first.getByLabel('Name for a new playlist').fill('Shared walk');
   await first.getByRole('button', { name: 'Create playlist' }).click();
   await first.getByRole('button', { name: 'All playlists' }).click().catch(() => undefined);
-  await expect(first.getByText('Playlists are shared with every device paired with Test NAS.')).toBeVisible();
+  await expect(first.getByText('Your playlists are kept on Test NAS, for all of your devices.')).toBeVisible();
   // The change is sent a moment after it is made; the test waits for that instead of the moment.
   await page.waitForTimeout(700);
   await sync(page);
@@ -379,4 +379,85 @@ test('a song played to its end goes on to the next one once, not twice', async (
   await expect.poll(playing, { timeout: 15_000 }).toBe('港の灯');
   await page.waitForTimeout(2000);
   expect(await playing()).toBe('港の灯');
+});
+
+test('each person has their own playlists, shares the ones they choose, and adds their own devices', async ({ page, browser }) => {
+  // The owner adds a friend on the NAS and pairs a device for each of them.
+  const friendName = `Aki ${Date.now() % 100000}`;
+  nasCommand('user', 'add', friendName);
+  await pair(page, 'Owner laptop');
+  await expect(page.getByText('You are listening as Owner.')).toBeVisible();
+  const friend = await (await browser.newContext()).newPage();
+  await pair(friend, 'Friend phone', friendName);
+  await expect(friend.getByText(`You are listening as ${friendName}.`)).toBeVisible();
+
+  type Store = { getSnapshot(): { album: { tracks: { title: string }[] } | null; playlists: { id: string; name: string; tracks: unknown[] }[]; sharedPlaylists: { name: string }[] }; createPlaylist(name: string, tracks: unknown[], show: boolean): void; syncPlaylists(): Promise<void>; loadShared(): Promise<void> };
+  const sync = async (on: Page) => {
+    await on.waitForTimeout(700);
+    await on.evaluate(async () => { const store = (window as unknown as { taikoStore: Store }).taikoStore; await store.syncPlaylists(); await store.loadShared(); });
+  };
+
+  // The owner makes three playlists and says who else may use two of them.
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await expect(page.locator('.library .songlist .song')).toHaveCount(3);
+  await page.evaluate(() => {
+    const store = (window as unknown as { taikoStore: Store }).taikoStore;
+    const tracks = store.getSnapshot().album!.tracks;
+    store.createPlaylist('Just mine', tracks.slice(0, 1), false);
+    store.createPlaylist('For the house', tracks.slice(0, 2), false);
+    store.createPlaylist('Road trip', tracks.slice(0, 1), false);
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Playlists' }).click();
+  const panel = page.getByRole('complementary', { name: 'Songs' });
+  for (const [name, choice] of [['For the house', 'Everyone can play it'], ['Road trip', 'Everyone can change it']]) {
+    await panel.locator('.song.list', { hasText: name }).click();
+    await panel.getByLabel('Who can use it').selectOption({ label: choice });
+    await panel.getByRole('button', { name: 'All playlists' }).click();
+  }
+  await expect(panel.locator('.song.list', { hasText: 'Road trip' })).toContainText('Everyone can change it');
+  await sync(page);
+
+  // The friend has no playlists of their own, and is shown the two, not the private one.
+  await sync(friend);
+  await friend.getByRole('button', { name: 'Playlists' }).click();
+  const theirs = friend.getByRole('complementary', { name: 'Songs' });
+  await expect(theirs.getByText('No playlists yet.')).toBeVisible();
+  await expect(theirs.getByRole('heading', { name: 'From other people' })).toBeVisible();
+  await expect(theirs.locator('.song.list .song-title')).toHaveText(['For the house', 'Road trip']);
+  await expect(theirs.locator('.song.list', { hasText: 'Road trip' })).toContainText("Owner's, and yours to change");
+
+  // A public playlist plays but can't be changed; a collaborative one takes a song from the friend.
+  await theirs.locator('.song.list', { hasText: 'For the house' }).click();
+  await expect(theirs.getByText("Owner's playlist. You can play it; only they can change it.")).toBeVisible();
+  await expect(theirs.getByRole('button', { name: /^More for / })).toHaveCount(0);
+  await theirs.getByRole('button', { name: 'All playlists' }).click();
+  await friend.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await friend.getByRole('button', { name: 'More for 港の灯' }).click();
+  const menu = friend.getByRole('group', { name: 'More for 港の灯' });
+  await expect(menu.locator('.menu-pick')).toHaveText(["Road tripOwner's"]);
+  await expect(menu.getByRole('button', { name: 'Create' })).toBeDisabled();
+  await menu.locator('.menu-pick').click();
+  await expect(friend.getByRole('status')).toContainText('Added 1 song to Road trip.');
+  // The owner's device takes the change up.
+  await sync(page);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { taikoStore: Store }).taikoStore.getSnapshot().playlists.find((playlist) => playlist.name === 'Road trip')?.tracks.length)).toBe(2);
+
+  // The friend adds a device of their own, with no help from the owner.
+  await friend.goto('/');
+  await friend.getByRole('button', { name: 'Add another device' }).click();
+  const link = await friend.getByLabel('Invite link').inputValue();
+  await friend.getByRole('button', { name: 'Done' }).click();
+  const tablet = await (await browser.newContext()).newPage();
+  await tablet.goto(link);
+  await tablet.getByRole('dialog').getByRole('textbox').fill('Friend tablet');
+  await tablet.getByRole('dialog').getByRole('button', { name: 'Pair', exact: true }).click();
+  await expect(tablet.getByText(`You are listening as ${friendName}.`)).toBeVisible();
+
+  // Removing the friend unpairs their devices; what they could see was the owner's all along.
+  expect(nasCommand('user', 'remove', friendName)).toContain('2 devices unpaired');
+  await friend.reload();
+  await expect(friend.getByText('This device is no longer paired with the NAS.')).toBeVisible();
+  await friend.context().close();
+  await tablet.context().close();
 });

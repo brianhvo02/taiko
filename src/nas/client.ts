@@ -3,6 +3,8 @@
  * from the owner's invite link; the token it gets back is kept in this browser's storage.
  */
 import { toPlaylists } from '../shared/playlists';
+import type { InviteResponse, MeResponse, NasUser, SharedPlaylistsResponse } from '../shared/api';
+import type { SavedTrack, SharedPlaylist } from '../shared/playlists';
 import type { ApiError, BrowseResponse, LibraryResponse, MovedRequest, MovedResponse, PairRequest, PairResponse, PlaylistsResponse, PlaylistsUpdate, ScanResponse, SearchResponse, TicketRequest, TicketResponse } from '../shared/api';
 
 export interface Pairing {
@@ -11,6 +13,8 @@ export interface Pairing {
   token: string;
   serverName: string;
   deviceName: string;
+  /** Whose device this is, on a NAS that has users. */
+  user?: NasUser;
 }
 
 export interface PairLink {
@@ -35,7 +39,7 @@ export function loadPairing(): Pairing | null {
   }
 }
 
-function savePairing(pairing: Pairing | null): void {
+export function savePairing(pairing: Pairing | null): void {
   try {
     if (pairing) localStorage.setItem(STORAGE_KEY, JSON.stringify(pairing));
     else localStorage.removeItem(STORAGE_KEY);
@@ -105,7 +109,7 @@ export async function pair(link: PairLink, deviceName: string): Promise<Pairing>
   const body: PairRequest = { code: link.code, deviceName: deviceName.trim() || defaultDeviceName() };
   const response = await request(link.base, 'pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const paired = (await response.json()) as PairResponse;
-  const pairing: Pairing = { base: link.base, token: paired.token, serverName: paired.serverName, deviceName: paired.deviceName };
+  const pairing: Pairing = { base: link.base, token: paired.token, serverName: paired.serverName, deviceName: paired.deviceName, ...(paired.user ? { user: paired.user } : {}) };
   savePairing(pairing);
   return pairing;
 }
@@ -156,6 +160,34 @@ export async function sendPlaylists(pairing: Pairing, update: PlaylistsUpdate): 
     if (error instanceof NasError && error.status === 409) return null;
     throw error;
   }
+}
+
+/** Who this device belongs to, as the NAS has it now (a user can be renamed). Null from a server without users. */
+export async function fetchUser(pairing: Pairing): Promise<NasUser | null> {
+  const me = (await (await request(pairing.base, 'me', {}, pairing.token)).json()) as MeResponse;
+  return me.user ?? null;
+}
+
+/** Makes an invite for another device of this device's user. */
+export async function makeInvite(pairing: Pairing): Promise<InviteResponse> {
+  return (await request(pairing.base, 'invite', { method: 'POST' }, pairing.token)).json() as Promise<InviteResponse>;
+}
+
+/** The playlists other users let this one see. None from a server without users. */
+export async function fetchSharedPlaylists(pairing: Pairing): Promise<SharedPlaylist[]> {
+  try {
+    const reply = (await (await request(pairing.base, 'playlists/shared', {}, pairing.token)).json()) as Partial<SharedPlaylistsResponse>;
+    return Array.isArray(reply.playlists) ? reply.playlists.filter((playlist) => playlist && typeof playlist.id === 'string' && playlist.owner && Array.isArray(playlist.tracks)) : [];
+  } catch (error) {
+    if (error instanceof NasError && (error.status === 404 || error.status === 405)) return [];
+    throw error;
+  }
+}
+
+/** Replaces the songs of someone else's collaborative playlist. */
+export async function sendSharedTracks(pairing: Pairing, ownerId: string, playlistId: string, tracks: SavedTrack[]): Promise<SharedPlaylist> {
+  const init = { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tracks }) };
+  return (await request(pairing.base, `playlists/shared/${encodeURIComponent(ownerId)}/${encodeURIComponent(playlistId)}`, init, pairing.token)).json() as Promise<SharedPlaylist>;
 }
 
 /**

@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import type { Track } from '../library/tracks';
 import type { SavedTrack } from '../player/persist';
 import type { Snapshot } from '../player/store';
-import { store } from '../player/store';
+import { sharedKey, store } from '../player/store';
+import type { PlaylistAccess } from '../shared/playlists';
 import { formatTime, otherForms } from './format';
 
 /** A song's row, its "more" menu and adding to a playlist: used by the Songs panel and by the library. */
@@ -57,18 +58,38 @@ export function RowMenu({ label, children }: { label: string; children: (close: 
   );
 }
 
-/** A menu's contents for putting songs in a playlist: the playlists there are, and a place to name a new one. */
+const PLUS = icon(<path d="M12 4.5a1 1 0 0 1 1 1V11h5.5a1 1 0 1 1 0 2H13v5.5a1 1 0 1 1-2 0V13H5.500a1 1 0 1 1 0-2H11V5.500a1 1 0 0 1 1-1Z" />);
+
+const songs = (n: number) => `${n} ${n === 1 ? 'song' : 'songs'}`;
+
+/**
+ * A menu's contents for putting songs in a playlist: the listener's own playlists, the ones other people let
+ * everyone add to, and a line to name a new one.
+ */
 export function AddToPlaylist({ snap, tracks, close }: { snap: Snapshot; tracks: Track[]; close: () => void }) {
   const [name, setName] = useState('');
+  const open = snap.sharedPlaylists.filter((playlist) => playlist.access === 'collaborative');
   return (
     <>
       <div className="menu-heading">Add to a playlist</div>
       {snap.playlists.map((playlist) => (
-        <button type="button" className="menu-item" key={playlist.id} onClick={() => { store.addToPlaylist(playlist.id, tracks); close(); }}>{playlist.name}</button>
+        <button type="button" className="menu-item menu-pick" key={playlist.id} onClick={() => { store.addToPlaylist(playlist.id, tracks); close(); }}>
+          <span className="menu-pick-lead">{LIST}</span>
+          <span className="menu-pick-name">{playlist.name}</span>
+          <span className="menu-pick-detail">{songs(playlist.tracks.length)}</span>
+        </button>
       ))}
-      <form className="menu-form" onSubmit={(e) => { e.preventDefault(); store.createPlaylist(name, tracks, false); close(); }}>
+      {open.map((playlist) => (
+        <button type="button" className="menu-item menu-pick" key={sharedKey(playlist)} onClick={() => { void store.addToShared(sharedKey(playlist), tracks); close(); }}>
+          <span className="menu-pick-lead">{LIST}</span>
+          <span className="menu-pick-name">{playlist.name}</span>
+          <span className="menu-pick-detail">{playlist.owner.name}'s</span>
+        </button>
+      ))}
+      <form className="menu-new" onSubmit={(e) => { e.preventDefault(); if (!name.trim()) return; store.createPlaylist(name, tracks, false); close(); }}>
+        <span className="menu-pick-lead">{PLUS}</span>
         <input type="text" value={name} onChange={(e) => setName(e.currentTarget.value)} placeholder="New playlist" aria-label="Name for a new playlist" maxLength={80} />
-        <button className="plain-button" type="submit">Create</button>
+        <button className="text-button" type="submit" disabled={!name.trim()}>Create</button>
       </form>
     </>
   );
@@ -89,7 +110,14 @@ export function ForgetSongs({ className = 'actions' }: { className?: string }) {
 
 /** Where the playlists live: on the NAS for every paired device when it keeps them, else in this browser alone. */
 export const playlistsKept = (snap: Snapshot): string =>
-  snap.playlistsShared ? `Playlists are shared with every device paired with ${snap.pairing?.serverName ?? 'the NAS'}.` : 'Playlists are kept in this browser.';
+  snap.playlistsShared ? `Your playlists are kept on ${snap.pairing?.serverName ?? 'the NAS'}, for all of your devices.` : 'Playlists are kept in this browser.';
+
+/** Who but its owner may use a playlist, as the owner chooses it and as a row says it. */
+export const ACCESS: Record<PlaylistAccess, { choice: string; said: string }> = {
+  private: { choice: 'Only you', said: '' },
+  public: { choice: 'Everyone can play it', said: 'Everyone can play it' },
+  collaborative: { choice: 'Everyone can change it', said: 'Everyone can change it' },
+};
 
 export function SongRow({ text, current, onPlay, menu }: { text: RowText; current: boolean; onPlay: () => void; menu?: ReactNode }) {
   return (

@@ -46,6 +46,8 @@ Object.assign(process.env, {
   APP_URL: NAS.app,
   LIBRARY_ROOTS: `Music=${NAS.library}`,
   LIBRARY_SCAN: 'Music',
+  // Every test pairs from the same address; the suite makes more pairings in ten minutes than a household would.
+  PAIR_ATTEMPTS: '200',
   DATA_DIR: NAS.data,
   SERVER_NAME: 'Test NAS',
 });

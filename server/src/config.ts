@@ -32,12 +32,16 @@ export interface Config {
   scanRoots: string[];
   /** Minutes between library scans while any root is scanned; 0 scans only at start. */
   scanIntervalMinutes: number;
+  /** `PAIR_ATTEMPTS`: how many pairing attempts one address may make in ten minutes. */
+  pairAttempts: number;
 }
 
 export class ConfigError extends Error {}
 
 export type Env = Record<string, string | undefined>;
 
+/** Pairing attempts one address may make in ten minutes, unless `PAIR_ATTEMPTS` says otherwise. */
+export const DEFAULT_PAIR_ATTEMPTS = 10;
 export const DEFAULT_APP_URL = 'https://taiko-player.pages.dev/';
 export const DEFAULT_PORT = 8080;
 export const DEFAULT_SERVER_NAME = 'Taiko NAS';
@@ -163,5 +167,6 @@ export function loadConfig(env: Env, options: { library: boolean } = { library: 
     // The subcommands have no roots to check the names against, and no use for them.
     scanRoots: options.library ? parseScanRoots(value(env, 'LIBRARY_SCAN'), roots) : [],
     scanIntervalMinutes: parseWholeNumber(env, 'SCAN_INTERVAL_MINUTES', DEFAULT_SCAN_INTERVAL_MINUTES, 0, 525600),
+    pairAttempts: parseWholeNumber(env, 'PAIR_ATTEMPTS', DEFAULT_PAIR_ATTEMPTS, 1, 10000),
   };
 }

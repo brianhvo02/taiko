@@ -81,11 +81,17 @@ export async function expectInTime(page: Page, label: string): Promise<void> {
 }
 
 /** A pairing link from the test NAS, made the way its owner would. */
-export function invite(): string {
-  const out = execFileSync(process.execPath, ['server/dist/server.mjs', 'invite'], {
+/** Runs one of the test NAS's own commands (`invite`, `user add Aki`), as its owner would, and gives what it printed. */
+export function nasCommand(...args: string[]): string {
+  return execFileSync(process.execPath, ['server/dist/server.mjs', ...args], {
     env: { ...process.env, PUBLIC_BASE: NAS.base, APP_URL: NAS.app, DATA_DIR: NAS.data },
     encoding: 'utf8',
   });
+}
+
+/** A pairing link: for one of the owner's devices, or for a device of the user named. */
+export function invite(user = ''): string {
+  const out = nasCommand('invite', ...(user ? ['--user', user] : []));
   const link = /http:\/\/localhost:\d+\/#pair=\S+/.exec(out);
   if (!link) throw new Error(`no pairing link in: ${out}`);
   return link[0];
@@ -100,8 +106,8 @@ export function clearSharedPlaylists(): void {
   rmSync(`${NAS.data}/playlists.json`, { force: true });
 }
 
-export async function pair(page: Page, deviceName = 'Test browser'): Promise<void> {
-  await page.goto(invite());
+export async function pair(page: Page, deviceName = 'Test browser', user = ''): Promise<void> {
+  await page.goto(invite(user));
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText(`localhost:${NAS.port}`);
   await dialog.getByRole('textbox').fill(deviceName);
