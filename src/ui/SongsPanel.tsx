@@ -3,7 +3,7 @@ import { smallCover } from '../library/tracks';
 import type { Snapshot, SongsTab } from '../player/store';
 import { store } from '../player/store';
 import { canPickFolder, pickFiles } from './format';
-import { AddToPlaylist, FOLDER, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { AddToPlaylist, FOLDER, ForgetSongs, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /** The paired NAS, folder by folder. A folder of songs plays through as an album. */
 function Folders({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
@@ -210,6 +210,7 @@ export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => v
         <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Add files</button>
         {canPickFolder() && <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles(true), true)}>Add a folder</button>}
         {tab === 'folders' && <button className="plain-button" type="button" onClick={() => void store.refreshNas()}>Refresh</button>}
+        {tab === 'device' && snap.tracks.length > 0 && <ForgetSongs className="actions songs-forget" />}
       </div>
     </aside>
   );

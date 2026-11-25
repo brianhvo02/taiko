@@ -5,7 +5,7 @@ import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
 import type { NasAlbum } from '../shared/api';
 import { otherForms } from './format';
-import { AddToPlaylist, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { AddToPlaylist, ForgetSongs, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /**
  * The library: the albums the NAS has read from its tagged music, their artists, the playlists, and the songs
@@ -394,6 +394,10 @@ function Home({ snap }: { snap: Snapshot }) {
               <Tile key={album.name} cover={album.tracks[0].cover} title={album.name} detail={count(album.tracks.length, 'song')} onOpen={() => store.showDeviceAlbum(album.name)} />
             ))}
           </ul>
+          <div className="library-foot">
+            <p>These songs are copies kept in this browser. They were never uploaded.</p>
+            <ForgetSongs />
+          </div>
         </section>
       )}
     </>

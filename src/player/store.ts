@@ -5,6 +5,8 @@
  */
 import { counterpart, identify } from '../apple/catalog';
 import type { AppleSong, Identified } from '../apple/catalog';
+import { forgetKept, keepFiles, loadKept } from '../library/kept';
+import type { KeptFile } from '../library/kept';
 import { smallCover, sortFiles, trackFromNas } from '../library/tracks';
 import type { Track } from '../library/tracks';
 import { mergeInto, sameSong, serialize } from '../lyrics/merge';
@@ -237,6 +239,7 @@ class PlayerStore {
     else if (this.snapshot.pairing) void this.openFolder(loadLastPath());
     if (saved && route.kind !== 'play') void this.restoreSession(saved, false);
     if (this.snapshot.pairing) void this.loadLibrary();
+    void this.restoreKept();
     // Where the listener is gets saved as they go, and when the page is put away.
     setInterval(() => { if (!this.audio.paused) this.saveSessionNow(); }, 5000);
     this.audio.addEventListener('pause', () => this.saveSessionNow());
@@ -516,25 +519,36 @@ class PlayerStore {
   /* ---------- Adding files ---------- */
 
   /** Adds picked or dropped files. `quiet` leaves out the notice about files that are neither audio nor lyrics (a whole folder was picked). */
-  async addFiles(files: File[], quiet = false): Promise<void> {
+  /**
+   * Takes in files picked on this device and keeps copies of them for the next visit. `restored` is given when the
+   * files are those copies coming back: they are listed quietly, without opening a song or being kept again.
+   */
+  async addFiles(files: File[], quiet = false, restored: KeptFile[] | null = null): Promise<void> {
     if (!files.length) return;
     const { tracks: added, looseLyrics, skipped } = await sortFiles(files);
-    const current = this.current();
+    // Copies coming back don't touch the song that is open: it may be one restored from the NAS.
+    const current = restored ? null : this.current();
     let currentGotLyrics = false;
+    const keep: KeptFile[] = added.flatMap((track) => [...(track.file ? [{ file: track.file }] : []), ...track.lyricFiles.map((file) => ({ file }))]);
 
     // Lyrics that match no audio in this batch go to a track already here with that name, else to the song that
     // is open, else to the first new track, else they wait for the next audio file.
     const unplaced: File[] = [];
     for (const file of looseLyrics) {
-      const owner = this.snapshot.tracks.find((track) => track.fileName && lyricsBelongTo(file.name, track.fileName));
+      // A kept lyrics file goes back to the song it was given to, whatever its name.
+      const given = restored?.find((kept) => kept.file === file)?.owner;
+      const owner = (given && [...added, ...this.snapshot.tracks].find((track) => track.fileName === given))
+        || this.snapshot.tracks.find((track) => track.fileName && lyricsBelongTo(file.name, track.fileName));
       if (owner) {
         owner.lyricFiles.push(file);
         currentGotLyrics ||= owner === current;
+        keep.push({ file });
       } else {
         unplaced.push(file);
       }
     }
     const target = current ?? added[0] ?? null;
+    keep.push(...unplaced.map((file) => (target ? { file, owner: target.fileName } : { file })));
     if (target) {
       target.lyricFiles.push(...this.waitingLyrics, ...unplaced);
       currentGotLyrics ||= target === current && (unplaced.length > 0 || this.waitingLyrics.length > 0);
@@ -553,6 +567,10 @@ class PlayerStore {
     const grows = this.snapshot.queue === this.snapshot.tracks && this.snapshot.source.kind === 'device';
     this.set({ tracks, queue: grows ? tracks : this.snapshot.queue, notice });
     if (grows && current) this.order = makeOrder(tracks.length, this.snapshot.shuffle, tracks.indexOf(current));
+    if (restored) return;
+    void keepFiles(keep).then((kept) => {
+      if (!kept && added.length) this.set({ notice: "This browser has no room to keep those songs, so they are here for this visit only." });
+    });
     if (!current && added.length) await this.select(added[0].id, false);
     else if (current && currentGotLyrics) await this.loadLyrics(current, ++this.loadRun);
   }
@@ -775,6 +793,35 @@ class PlayerStore {
   private keepSettings(): void {
     const { showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine } = this.snapshot;
     saveSettings({ showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine });
+  }
+
+  /** Brings back the songs kept in this browser from earlier visits. */
+  private async restoreKept(): Promise<void> {
+    const kept = await loadKept();
+    if (kept.length) await this.addFiles(kept.map((entry) => entry.file), true, kept);
+  }
+
+  /** Forgets the songs picked on this device: the list, and the copies kept in the browser. The files themselves are untouched. */
+  async forgetDeviceSongs(): Promise<void> {
+    await forgetKept();
+    this.waitingLyrics = [];
+    if (this.snapshot.currentTrack && !this.snapshot.currentTrack.nas) {
+      this.loadRun++;
+      this.source = null;
+      this.audio.pause();
+      this.resetStream();
+      this.audio.removeAttribute('src');
+      this.audio.load();
+      this.set({
+        tracks: [], queue: [], currentId: null, currentTrack: null, song: null, lyricsLoading: false, lyricsNames: [], songInfo: null, usInfo: null,
+        duration: 0, view: 'library', page: { kind: 'home' },
+      });
+      this.order = [];
+      this.writeRoute({ kind: 'home' }, 'replace');
+      this.updateMediaSession();
+    } else {
+      this.set({ tracks: [], ...(this.snapshot.page.kind === 'deviceAlbum' ? { page: { kind: 'home' } as const } : {}) });
+    }
   }
 
   /* ---------- Picking up where the listener left off ---------- */

@@ -74,6 +74,19 @@ export function AddToPlaylist({ snap, tracks, close }: { snap: Snapshot; tracks:
   );
 }
 
+/** Forgets the songs picked on this device, after asking. They are copies in the browser; the files themselves stay. */
+export function ForgetSongs({ className = 'actions' }: { className?: string }) {
+  const [asking, setAsking] = useState(false);
+  if (!asking) return <button className="plain-button" type="button" onClick={() => setAsking(true)}>Forget these songs</button>;
+  return (
+    <div className={className} role="alert">
+      <span>Forget these songs? The copies kept in this browser go; your files stay where they are.</span>
+      <button className="plain-button" type="button" onClick={() => { setAsking(false); void store.forgetDeviceSongs(); }}>Forget them</button>
+      <button className="plain-button" type="button" onClick={() => setAsking(false)}>Keep them</button>
+    </div>
+  );
+}
+
 export function SongRow({ text, current, onPlay, menu }: { text: RowText; current: boolean; onPlay: () => void; menu?: ReactNode }) {
   return (
     <li className="song-row">

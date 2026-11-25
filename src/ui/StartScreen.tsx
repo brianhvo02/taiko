@@ -140,7 +140,7 @@ function Ways({ snap, stocked, quietNotice, onShowSongs }: { snap: Snapshot; sto
       <div className="ways">
         <section className="way">
           <h2>Music on this device</h2>
-          <p>Choose audio files, and their timed lyrics if you have them. They are read here and never uploaded.</p>
+          <p>Choose audio files, and their timed lyrics if you have them. They are read here and never uploaded. This browser keeps a copy, so they are here next time.</p>
           <div className="actions">
             <button className="plain-button primary-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Choose files</button>
             {canPickFolder() && <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles(true), true)}>Choose a folder</button>}

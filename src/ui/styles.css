@@ -512,6 +512,7 @@ input::placeholder { color: var(--unsung); }
 .song.folder .song-lead { color: var(--quiet); }
 /* The song that is open is marked in brass, the colour of "now". */
 .song.current .song-title, .song.current .song-lead { color: var(--brass); }
+.songs-forget { flex-basis: 100%; color: var(--quiet); font-size: var(--small); }
 .songs-foot { display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; border-top: 1px solid var(--rule); }
 .crumbs { padding: 0 1rem .4rem; color: var(--unsung); font-size: .85rem; overflow-wrap: anywhere; }
 .crumbs .text-button { color: var(--hide); text-decoration-color: var(--unsung); }

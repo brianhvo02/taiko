@@ -227,3 +227,38 @@ test('pressing a line moves the song there unless the listener turns that off', 
   await lines.nth(2).click();
   await expect.poll(() => shown(page)).toBeGreaterThan(29.8);
 });
+
+test('keeps the songs picked here for the next visit, with their lyrics, until they are forgotten', async ({ page }) => {
+  // The lyrics file is named for no song, so it goes to the one that is open.
+  await pick(page, 'Choose files', [harbour()]);
+  await expect(page.locator('.now-title')).toHaveText('Harbour Lights');
+  await pick(page, 'Add a lyrics file', [{ name: 'words.lrc', content: lyrics.lrc }]);
+  await expect(page.locator('.lyrics .line')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Options' }).click();
+  await pick(page, 'Add lyrics or music', [lanterns(), ...versions]);
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Songs' }).first().click();
+  await expect(page.locator('.songs .song')).toHaveCount(2);
+
+  await page.reload();
+  // Nothing is open, but the songs are in the library, and play with the lyrics they had.
+  await expect(page.locator('.now-title')).toHaveCount(0);
+  await page.locator('.library .tile').filter({ hasText: 'Night Market' }).click();
+  const rows = page.locator('.library .songlist .song');
+  await expect(rows.locator('.song-title')).toHaveText(['Tagged Lanterns', 'Harbour Lights']);
+  await rows.nth(1).click();
+  await expect(page.locator('.lyrics .line')).toHaveCount(3);
+  await expect(page.locator('.lyrics .line').first()).toHaveText('Paper lanterns');
+  await page.getByRole('button', { name: 'Previous', exact: true }).click();
+  await expect(page.locator('.lyrics .roman')).toHaveCount(3);
+
+  // Forgetting them empties the list, now and on the next visit.
+  await page.getByRole('button', { name: 'Songs' }).first().click();
+  await page.getByRole('button', { name: 'Forget these songs' }).click();
+  await page.getByRole('button', { name: 'Forget them' }).click();
+  await expect(page.locator('.now-title')).toHaveCount(0);
+  await expect(page.getByText('Music on this device')).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('Music on this device')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Songs' })).toHaveCount(0);
+});
