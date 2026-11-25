@@ -15,7 +15,7 @@ export function App() {
   const track = snap.currentTrack;
   const lyricsShown = track !== null && snap.view === 'lyrics';
   // The library takes the first screen over once there is something in it, or a NAS that may have something.
-  const stocked = snap.tracks.length > 0 || snap.page.kind !== 'home' || snap.libraryQuery.trim() !== ''
+  const stocked = snap.tracks.length > 0 || snap.offline.sets.length > 0 || snap.page.kind !== 'home' || snap.libraryQuery.trim() !== ''
     || (snap.pairing !== null && (snap.library.albums.length > 0 || snap.library.scanning || snap.library.state === 'idle' || snap.library.state === 'loading'));
 
   // Files dropped anywhere on the page are added.

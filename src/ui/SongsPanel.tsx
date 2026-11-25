@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { smallCover } from '../library/tracks';
 import type { Snapshot, SongsTab } from '../player/store';
-import { sharedKey, store } from '../player/store';
+import { playlistKey, sharedKey, store } from '../player/store';
 import type { PlaylistAccess } from '../shared/playlists';
 import { canPickFolder, pickFiles } from './format';
-import { ACCESS, AddToPlaylist, FOLDER, ForgetSongs, NOTE, QueueItems, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { ACCESS, AddToPlaylist, FOLDER, ForgetSongs, KeepButton, NOTE, QueueItems, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /** The paired NAS, folder by folder. A folder of songs plays through as an album. */
 function Folders({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
@@ -149,6 +149,7 @@ function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: stri
               <button className="plain-button primary-button" type="button" disabled={!count} onClick={() => { void store.playPlaylist(id); onChosen(); }}>Play</button>
               <button className="plain-button" type="button" onClick={() => setRenaming(playlist.name)}>Rename</button>
               <button className="plain-button" type="button" onClick={() => setDeleting(true)}>Delete</button>
+              <KeepButton snap={snap} at={playlistKey(id)} total={count} keep={() => void store.keepPlaylistOffline(id)} />
             </div>
           )}
           {snap.user && snap.playlistsShared && (

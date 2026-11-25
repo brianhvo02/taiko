@@ -559,3 +559,44 @@ test('the queue: play next, add to the end, rearrange, remove, and find it as it
   await expect(panel.getByText('Nothing after this')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
 });
+
+test('an album kept on the device plays with no connection to the NAS, lyrics and all', async ({ page }) => {
+  await mockCatalog(page);
+  await pair(page, 'Offline test');
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await expect(page.locator('.library .songlist .song')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Keep on this device' }).click();
+  await expect(page.locator('.toast')).toContainText('Night Market is on this device, and plays with no connection.', { timeout: 30_000 });
+  await expect(page.getByRole('button', { name: 'Remove from this device' })).toBeVisible();
+
+  // The NAS goes out of reach: nothing it serves can be fetched.
+  await page.route(/localhost:4195/, (route) => route.abort());
+  await page.goto('/');
+  await listen(page);
+  await page.getByRole('button', { name: 'play what is on this device' }).click();
+  await expect(page.getByRole('tab', { name: 'Downloaded' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('.library .noted .tile-title')).toHaveText(['Night Market']);
+  await expect(page.locator('.library-foot').first()).toContainText('of music is kept on this device');
+
+  // The album opens from what was kept, and its songs play, in time, with their lyrics.
+  await page.locator('.library .noted .tile').click();
+  await expect(page.locator('.library .songlist .song .song-title')).toHaveText(['Paper Lanterns', '港の灯', 'untagged']);
+  await page.locator('.library .songlist .song', { hasText: 'Paper Lanterns' }).click();
+  await expect(page.locator('.lyrics .line')).toHaveCount(3);
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await seekTo(page, 30);
+  await expectInTime(page, 'from the kept copy, after a seek');
+  await expect(page.locator('.lyrics .line').nth(2)).toHaveAttribute('data-state', 'active');
+
+  // Taken off the device, it is gone from the list.
+  await page.unroute(/localhost:4195/);
+  await page.getByRole('button', { name: 'Library' }).first().click();
+  await page.getByRole('button', { name: 'Remove from this device' }).click();
+  await expect(page.getByRole('button', { name: 'Keep on this device' })).toBeVisible();
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Downloaded' }).click();
+  await expect(page.getByText('Nothing is kept on this device yet.')).toBeVisible();
+  // On a phone the library's tabs are wider than the screen; the row of tabs scrolls, not the page.
+  await page.setViewportSize({ width: 390, height: 780 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+});

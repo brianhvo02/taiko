@@ -3,10 +3,10 @@ import type { ReactNode } from 'react';
 import type { Track } from '../library/tracks';
 import type { QueueSource, SavedTrack } from '../player/persist';
 import type { Snapshot } from '../player/store';
-import { sharedKey, store } from '../player/store';
+import { albumKey, sharedKey, store } from '../player/store';
 import type { NasAlbum } from '../shared/api';
-import { otherForms, qualityOf } from './format';
-import { AddToPlaylist, ForgetSongs, HEART, HEART_ON, QueueItems, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { otherForms, qualityOf, sizeOf } from './format';
+import { AddToPlaylist, ForgetSongs, HEART, HEART_ON, KeepButton, QueueItems, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /**
  * The library: the albums the NAS has read from its tagged music, their artists, the playlists, and the songs
@@ -189,6 +189,53 @@ function Favourites({ snap }: { snap: Snapshot }) {
   );
 }
 
+/** What is kept on this device to play with no connection, and the room it takes. */
+function Downloaded({ snap }: { snap: Snapshot }) {
+  const { sets, use, busy } = snap.offline;
+  const albums = sets.filter((set) => set.kind === 'album');
+  const playlists = sets.filter((set) => set.kind === 'playlist');
+  const bytes = sets.reduce((sum, set) => sum + set.bytes, 0);
+  if (!sets.length && !busy) {
+    return <p className="library-note">Nothing is kept on this device yet. Open an album or one of your playlists and choose "Keep on this device"; it then plays with no connection, lyrics and all.</p>;
+  }
+  return (
+    <>
+      {busy && <p className="library-note" role="status">Keeping {busy.title}: {busy.done} of {busy.total} songs so far. <button className="text-button" type="button" onClick={() => store.stopKeeping()}>Stop</button></p>}
+      {albums.length > 0 && (
+        <section className="noted">
+          <h2>Albums</h2>
+          <ul className="tiles">
+            {albums.map((set) => (
+              <Tile key={set.key} cover={set.cover} title={set.title} detail={[set.detail, sizeOf(set.bytes)].filter(Boolean).join(', ')} onOpen={() => void store.showAlbum(set.key.slice('album:'.length))} />
+            ))}
+          </ul>
+        </section>
+      )}
+      {playlists.length > 0 && (
+        <section className="noted">
+          <h2>Playlists</h2>
+          <ul className="names">
+            {playlists.map((set) => (
+              <li key={set.key}>
+                <button type="button" className="name-row with-lead" onClick={() => { store.showPlaylist(set.key.slice('playlist:'.length)); store.openSongs('playlists'); }}>
+                  <span className="name-row-lead">{LIST}</span>
+                  <span className="name-row-title">{set.title}</span>
+                  <span className="name-row-detail">{count(set.tracks.length, 'song')}, {sizeOf(set.bytes)}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {sets.length > 0 && (
+        <p className="library-foot">
+          {sizeOf(bytes)} of music is kept on this device{use ? `; this browser may hold about ${sizeOf(use.quota)} in all` : ''}. To take an album or a playlist off, open it and choose "Remove from this device".
+        </p>
+      )}
+    </>
+  );
+}
+
 /** When something was played, said the way a person would: the time today, the day this week, the date before that. */
 function whenPlayed(iso: string, now = Date.now()): string {
   const at = new Date(iso);
@@ -322,6 +369,9 @@ function AlbumPage({ snap, path }: { snap: Snapshot; path: string }) {
             {loved ? HEART_ON : HEART}{loved ? 'In your favourites' : 'Add to favourites'}
           </button>
         )}
+        {snap.pairing && tracks.some((track) => track.nas) && (
+          <KeepButton snap={snap} at={albumKey(path)} total={tracks.length} keep={() => void store.keepOffline({ key: albumKey(path), kind: 'album', title, detail: artist, cover: view?.cover ?? known?.cover }, tracks)} />
+        )}
         {tracks.length > 0 && <RowMenu label="More for this album">{(close) => <AddToPlaylist snap={snap} tracks={tracks} close={close} />}</RowMenu>}
       </Sleeve>
       {(!view || view.state === 'loading') && <p className="library-note">Opening the album</p>}
@@ -428,13 +478,13 @@ function Results({ snap, query }: { snap: Snapshot; query: string }) {
   );
 }
 
-type Shelf = 'albums' | 'artists' | 'playlists' | 'favourites' | 'history';
+type Shelf = 'albums' | 'artists' | 'playlists' | 'favourites' | 'history' | 'downloaded';
 const SHELF_KEY = 'taiko:library-shelf';
 
 function loadShelf(): Shelf {
   try {
     const saved = localStorage.getItem(SHELF_KEY);
-    return saved === 'artists' || saved === 'playlists' || saved === 'favourites' || saved === 'history' ? saved : 'albums';
+    return saved === 'artists' || saved === 'playlists' || saved === 'favourites' || saved === 'history' || saved === 'downloaded' ? saved : 'albums';
   } catch {
     return 'albums';
   }
@@ -447,7 +497,7 @@ function Home({ snap }: { snap: Snapshot }) {
   const artists = artistsOf(library.albums);
   const device = deviceAlbums(snap.tracks);
   const shelves: [Shelf, string][] = snap.pairing
-    ? [['albums', 'Albums'], ['artists', 'Artists'], ['playlists', 'Playlists'], ...(snap.favourites ? [['favourites', 'Favourites'], ['history', 'History']] as [Shelf, string][] : [])]
+    ? [['albums', 'Albums'], ['artists', 'Artists'], ['playlists', 'Playlists'], ...(snap.favourites ? [['favourites', 'Favourites'], ['history', 'History']] as [Shelf, string][] : []), ['downloaded', 'Downloaded']]
     : [];
   // A shelf remembered from a NAS that kept favourites isn't one this NAS has.
   const shown: Shelf = shelves.some(([name]) => name === shelf) ? shelf : 'albums';
@@ -494,7 +544,10 @@ function Home({ snap }: { snap: Snapshot }) {
             </p>
           )}
           {shown !== 'playlists' && library.state === 'error' && (
-            <p className="library-note">The library didn't load. <button className="text-button" type="button" onClick={() => void store.loadLibrary()}>Try again</button></p>
+            <p className="library-note">
+              The library didn't load. <button className="text-button" type="button" onClick={() => void store.loadLibrary()}>Try again</button>
+              {snap.offline.sets.length > 0 && <>, or <button className="text-button" type="button" onClick={() => chooseShelf('downloaded')}>play what is on this device</button></>}
+            </p>
           )}
           {shown !== 'playlists' && library.state === 'ready' && library.albums.length === 0 && !library.scanning && (
             <p className="library-note">The NAS has found no albums yet. Albums are folders of tagged songs in the music it was set to read.</p>
@@ -506,6 +559,7 @@ function Home({ snap }: { snap: Snapshot }) {
           {shown === 'artists' && <ArtistList artists={artists} />}
           {shown === 'favourites' && <Favourites snap={snap} />}
           {shown === 'history' && <History snap={snap} />}
+          {shown === 'downloaded' && <Downloaded snap={snap} />}
           {shown === 'playlists' && (
             <>
               {snap.playlists.length === 0 && snap.sharedPlaylists.length === 0 && <p className="library-note">No playlists yet. Add a song or an album to a new one from the button at the end of its row. {playlistsKept(snap)}</p>}

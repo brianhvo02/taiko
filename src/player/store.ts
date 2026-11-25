@@ -6,6 +6,7 @@
 import { counterpart, identify } from '../apple/catalog';
 import type { AppleSong, Identified } from '../apple/catalog';
 import { forgetKept, keepFiles, loadKept } from '../library/kept';
+import { keepSet, keepTrack, loadOffline, offlineTrack, removeSet, removeStrays, storageUse } from '../library/offline';
 import type { KeptFile } from '../library/kept';
 import { smallCover, sortFiles, trackFromNas } from '../library/tracks';
 import type { Track } from '../library/tracks';
@@ -42,6 +43,31 @@ export interface NasListing {
   /** The address of the folder's cover picture, when it has one. */
   cover: string | null;
 }
+
+/** An album or playlist kept on this device, as the screens list it. */
+export interface KeptSet {
+  key: string;
+  kind: 'album' | 'playlist';
+  title: string;
+  detail: string;
+  tracks: SavedTrack[];
+  bytes: number;
+  /** An address for its cover, made from the kept picture. */
+  cover: string | null;
+}
+
+export interface OfflineView {
+  sets: KeptSet[];
+  /** The NAS ids of every song stored. */
+  ids: string[];
+  /** What is being kept right now, and how far along it is. */
+  busy: { key: string; title: string; done: number; total: number } | null;
+  /** What the browser stores for the site, and about how much it may; null where it won't say. */
+  use: { used: number; quota: number } | null;
+}
+
+export const albumKey = (path: string): string => `album:${path}`;
+export const playlistKey = (id: string): string => `playlist:${id}`;
 
 export type SongsTab = 'queue' | 'folders' | 'playlists' | 'device';
 
@@ -127,6 +153,8 @@ export interface Snapshot {
   history: HistoryResponse | null;
   /** How often the user has played the songs of the album that is open. */
   playCounts: Record<string, number>;
+  /** NAS songs kept on this device to play with no connection. */
+  offline: OfflineView;
   /** Where the listener was last time, offered on the first screen. */
   /** From 0 to 1. */
   volume: number;
@@ -156,7 +184,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), canAirplay: false, pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), canAirplay: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -207,6 +235,9 @@ class PlayerStore {
   /** Counts changes to the playlists made on this device, so a sync can tell one happened while it ran. */
   private playlistEdits = 0;
   private syncing = false;
+  private keepRun = 0;
+  private offlineRead: Promise<void> = Promise.resolve();
+  private readonly keptCovers = new Map<string, string>();
   private sendingPlays = false;
   private syncTimer: ReturnType<typeof setTimeout> | undefined;
   /** While a saved session is being restored, the moment it is going back to. */
@@ -277,6 +308,7 @@ class PlayerStore {
       this.set({ canAirplay: (event as Event & { availability?: string }).availability === 'available' });
     });
     void this.restoreKept();
+    this.offlineRead = this.loadOffline();
     void this.syncPlaylists().then(() => this.repointStored());
     void this.refreshUser();
     void this.loadShared();
@@ -485,6 +517,12 @@ class PlayerStore {
       }
     } catch (error) {
       if (run !== this.albumRun) return;
+      // The NAS can't be reached: an album kept on this device opens from what was kept.
+      const kept = this.snapshot.offline.sets.find((set) => set.key === albumKey(path));
+      if (kept && !(error instanceof NasError && (error.status === 404 || error.status === 401))) {
+        this.set({ album: { path, state: 'ready', cover: kept.cover, tracks: kept.tracks.map((track) => ({ ...fromSaved(track), ...(kept.cover ? { cover: kept.cover } : {}) })) }, playCounts: {} });
+        return;
+      }
       if (error instanceof NasError && error.status === 404) this.set({ album: { path, state: 'missing', tracks: [], cover: null } });
       else {
         this.set({ album: { path, state: 'missing', tracks: [], cover: null } });
@@ -710,6 +748,19 @@ class PlayerStore {
     this.updateMediaSession();
     try {
       // A song from a playlist or a saved session is looked up again first: its lyrics files and cover may have changed.
+      // A song kept on this device plays from its copy, with or without the NAS.
+      // (What is kept is read when the page opens; a song restored at once waits that moment for it.)
+      await this.offlineRead;
+      if (run !== this.loadRun) return;
+      if (track.nas && !track.file && this.snapshot.offline.ids.includes(track.nas.id)) {
+        const copy = await offlineTrack(track.nas.id);
+        if (run !== this.loadRun) return;
+        if (copy) {
+          track.file = new File([copy.blob], copy.name, { type: copy.blob.type });
+          track.keptLyrics = copy.lyrics;
+          track.stale = false;
+        }
+      }
       if (track.stale && !(await this.freshen(track)) && !(await this.followMove(track))) {
         if (run === this.loadRun) this.set({ lyricsLoading: false, notice: `The NAS doesn't have "${track.title}" any more.` });
         return;
@@ -739,7 +790,8 @@ class PlayerStore {
     const texts: { text: string; name: string }[] = [];
     const unreadable: string[] = [];
     const pairing = this.snapshot.pairing;
-    for (const file of track.nas && pairing ? track.nas.lyrics : []) {
+    texts.push(...(track.keptLyrics ?? []));
+    for (const file of track.nas && pairing && !track.keptLyrics ? track.nas.lyrics : []) {
       try {
         texts.push({ text: await fetchLyrics(pairing!, track.nas!.id, file.index), name: file.name });
       } catch {
@@ -1167,6 +1219,8 @@ class PlayerStore {
   deletePlaylist(id: string): void {
     this.setPlaylists(this.snapshot.playlists.filter((playlist) => playlist.id !== id));
     if (this.snapshot.openPlaylist === id) this.set({ openPlaylist: null });
+    // Its songs kept on this device go with it.
+    if (this.snapshot.offline.sets.some((set) => set.key === playlistKey(id))) void this.removeOffline(playlistKey(id));
   }
 
   showPlaylist(id: string | null): void { this.set({ openPlaylist: id, openShared: null }); }
@@ -1174,6 +1228,101 @@ class PlayerStore {
   /** Says who but the owner may use a playlist: nobody, everyone to play it, or everyone to change it too. */
   setPlaylistAccess(id: string, access: PlaylistAccess): void {
     this.changePlaylist(id, ({ access: _was, ...playlist }) => (access === 'private' ? playlist : { ...playlist, access }));
+  }
+
+  /* ---------- NAS songs kept on this device (library/offline.ts) ---------- */
+
+  /** Reads what is kept, and how much room it takes. */
+  async loadOffline(): Promise<void> {
+    const [{ sets, ids }, use] = await Promise.all([loadOffline(), storageUse()]);
+    for (const url of this.keptCovers.values()) URL.revokeObjectURL(url);
+    this.keptCovers.clear();
+    const view = sets.map((set): KeptSet => {
+      const cover = set.cover ? URL.createObjectURL(set.cover) : null;
+      if (cover) this.keptCovers.set(set.key, cover);
+      return { key: set.key, kind: set.kind, title: set.title, detail: set.detail, tracks: set.tracks, bytes: set.bytes, cover };
+    });
+    this.set({ offline: { ...this.snapshot.offline, sets: view, ids, use } });
+  }
+
+  /**
+   * Keeps an album or a playlist on this device: each song's audio and lyrics are fetched and stored, one after
+   * another, skipping songs already here. It can be stopped, and pressed again later to carry on.
+   */
+  async keepOffline(set: { key: string; kind: 'album' | 'playlist'; title: string; detail: string; cover?: string | null }, tracks: Track[]): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    const songs = tracks.filter((track) => track.nas);
+    if (!pairing || !songs.length) return;
+    if (this.snapshot.offline.busy) {
+      this.set({ notice: `Still keeping ${this.snapshot.offline.busy.title}. This one can be kept when that is done.` });
+      return;
+    }
+    const run = ++this.keepRun;
+    const progress = (done: number) => this.set({ offline: { ...this.snapshot.offline, busy: { key: set.key, title: set.title, done, total: songs.length } } });
+    progress(0);
+    const stored: SavedTrack[] = [];
+    let bytes = 0;
+    let problem = '';
+    try {
+      for (const [index, track] of songs.entries()) {
+        if (run !== this.keepRun) break;
+        const id = track.nas!.id;
+        const had = this.snapshot.offline.ids.includes(id) ? await offlineTrack(id) : null;
+        if (had) {
+          bytes += had.bytes;
+        } else {
+          // A song from a playlist is looked up first: its lyrics files aren't known until its folder is read.
+          if (track.stale && !(await this.freshen(track))) continue;
+          const ticket = await fetchTicket(pairing, id);
+          const response = await fetch(ticket.url);
+          if (!response.ok) throw new Error('audio');
+          const blob = await response.blob();
+          const lyrics: { name: string; text: string }[] = [];
+          for (const file of track.nas!.lyrics) lyrics.push({ name: file.name, text: await fetchLyrics(pairing, id, file.index) });
+          if (run !== this.keepRun) break;
+          await keepTrack({ id, name: (pathOfTrackId(id) ?? id).split('/').pop() ?? id, blob, lyrics, bytes: blob.size });
+          bytes += blob.size;
+          this.set({ offline: { ...this.snapshot.offline, ids: [...this.snapshot.offline.ids, id] } });
+        }
+        stored.push(savedOf(track));
+        progress(index + 1);
+      }
+    } catch (error) {
+      const full = error instanceof DOMException && (error.name === 'QuotaExceededError' || error.name === 'AbortError');
+      problem = full ? `This device has no room for the rest of ${set.title}.` : `Couldn't keep all of ${set.title}. Press the button again to carry on.`;
+    }
+    // Stopped or cut short, the songs fetched so far are kept; pressing again carries on from there.
+    if (stored.length) {
+      let cover: Blob | null = null;
+      try {
+        if (set.cover) cover = await (await fetch(smallCover(set.cover))).blob();
+      } catch {
+        // The album is kept without its picture.
+      }
+      await keepSet({ key: set.key, kind: set.kind, title: set.title, detail: set.detail, tracks: stored, bytes, cover, keptAt: new Date().toISOString() }).catch(() => { problem ||= `Couldn't keep ${set.title} on this device.`; });
+    }
+    await removeStrays();
+    if (this.getSnapshot().offline.busy?.key === set.key) this.set({ offline: { ...this.snapshot.offline, busy: null } });
+    await this.loadOffline();
+    if (problem) this.set({ notice: problem });
+    else if (stored.length === songs.length) this.set({ notice: `${set.title} is on this device, and plays with no connection.` });
+  }
+
+  /** Keeps one of the listener's own playlists on this device. */
+  async keepPlaylistOffline(id: string): Promise<void> {
+    const playlist = this.snapshot.playlists.find((candidate) => candidate.id === id);
+    if (playlist) await this.keepOffline({ key: playlistKey(id), kind: 'playlist', title: playlist.name, detail: '' }, playlist.tracks.map(fromSaved));
+  }
+
+  /** Stops keeping what is being kept. What was fetched so far stays. */
+  stopKeeping(): void {
+    this.keepRun++;
+  }
+
+  async removeOffline(key: string): Promise<void> {
+    if (this.snapshot.offline.busy?.key === key) this.keepRun++;
+    await removeSet(key).catch(() => {});
+    await this.loadOffline();
   }
 
   /* ---------- Favourites and listening history (per user, on the NAS) ---------- */

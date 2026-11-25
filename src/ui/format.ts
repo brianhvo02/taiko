@@ -18,6 +18,13 @@ export interface NowPlaying {
   art: string;
 }
 
+/** A size as a listener reads it: "420 MB", "1.3 GB". */
+export function sizeOf(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+}
+
 /** How a song's audio is stored, as a listener reads it: "24-bit 96 kHz". Empty when it isn't known. */
 export function qualityOf(song: { sampleRate?: number; bitsPerSample?: number }): string {
   if (!song.sampleRate || !song.bitsPerSample) return '';

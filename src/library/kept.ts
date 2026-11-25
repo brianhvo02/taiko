@@ -22,10 +22,24 @@ interface Row {
 const DB = 'taiko';
 const FILES = 'files';
 
+/** The stores for NAS songs kept to play with no connection (see offline.ts): the songs, and the albums and playlists they were kept for. */
+export const OFFLINE_TRACKS = 'offline-tracks';
+export const OFFLINE_SETS = 'offline-sets';
+
+/** Opens the browser's database for Taiko, making whichever of its stores isn't there yet. */
+export function openDb(): Promise<IDBDatabase> {
+  return open();
+}
+
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(FILES, { autoIncrement: true });
+    const request = indexedDB.open(DB, 2);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(FILES)) db.createObjectStore(FILES, { autoIncrement: true });
+      if (!db.objectStoreNames.contains(OFFLINE_TRACKS)) db.createObjectStore(OFFLINE_TRACKS, { keyPath: 'id' });
+      if (!db.objectStoreNames.contains(OFFLINE_SETS)) db.createObjectStore(OFFLINE_SETS, { keyPath: 'key' });
+    };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('storage'));
     request.onblocked = () => reject(new Error('storage'));

@@ -39,12 +39,14 @@ export interface Track {
   stale?: boolean;
   /** The audio file's name, used to match lyrics files to it. */
   fileName: string;
-  /** Set for a device track. */
+  /** Set for a device track, and for a NAS song once its copy kept on this device has been opened. */
   file: File | null;
   /** Set for a NAS track. */
   nas: NasTrack | null;
   /** Lyrics files picked on this device for this track. */
   lyricFiles: File[];
+  /** For a NAS song kept on this device (offline.ts): its lyrics as they were kept, read in place of the NAS's. */
+  keptLyrics?: { name: string; text: string }[];
 }
 
 const extension = (name: string) => (/\.([^.]+)$/.exec(name)?.[1] ?? '').toLowerCase();

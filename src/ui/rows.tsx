@@ -5,7 +5,7 @@ import type { SavedTrack } from '../player/persist';
 import type { Snapshot } from '../player/store';
 import { sharedKey, store } from '../player/store';
 import type { PlaylistAccess } from '../shared/playlists';
-import { formatTime, otherForms } from './format';
+import { formatTime, otherForms, sizeOf } from './format';
 
 /** A song's row, its "more" menu and adding to a playlist: used by the Songs panel and by the library. */
 
@@ -154,6 +154,30 @@ export const ACCESS: Record<PlaylistAccess, { choice: string; said: string }> = 
   public: { choice: 'Everyone can play it', said: 'Everyone can play it' },
   collaborative: { choice: 'Everyone can change it', said: 'Everyone can change it' },
 };
+
+// An arrow down onto a line: kept on this device.
+const KEEP = icon(<path d="M12 3a1 1 0 0 1 1 1v8.600l2.800-2.800a1 1 0 1 1 1.400 1.400l-4.500 4.500a1 1 0 0 1-1.400 0l-4.500-4.500a1 1 0 1 1 1.400-1.400l2.800 2.800V4a1 1 0 0 1 1-1ZM5 18.500h14a1 1 0 1 1 0 2H5a1 1 0 1 1 0-2Z" />);
+
+/**
+ * Keeps an album or a playlist on this device, to play with no connection; says how far along it is while it is
+ * being kept, and takes it off the device again once it is here. `keep` starts the keeping.
+ */
+export function KeepButton({ snap, at, total, keep }: { snap: Snapshot; at: string; total: number; keep: () => void }) {
+  const busy = snap.offline.busy?.key === at ? snap.offline.busy : null;
+  const kept = snap.offline.sets.find((set) => set.key === at);
+  if (busy) {
+    return (
+      <span className="keeping" role="status">
+        Keeping {Math.min(busy.done + 1, busy.total)} of {busy.total}
+        <button className="plain-button" type="button" onClick={() => store.stopKeeping()}>Stop</button>
+      </span>
+    );
+  }
+  if (kept && kept.tracks.length >= total) {
+    return <button className="plain-button with-icon" type="button" aria-pressed="true" title={`${sizeOf(kept.bytes)} on this device`} onClick={() => void store.removeOffline(at)}>{KEEP}Remove from this device</button>;
+  }
+  return <button className="plain-button with-icon" type="button" disabled={!total} onClick={keep}>{KEEP}{kept ? 'Keep the rest on this device' : 'Keep on this device'}</button>;
+}
 
 /** The two lines that queue a stored song, for menus that aren't the full song menu. */
 export function QueueItems({ song, close }: { song: SavedTrack; close: () => void }) {
