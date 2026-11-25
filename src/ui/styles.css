@@ -236,6 +236,15 @@ input::placeholder { color: var(--unsung); }
 }
 .line[data-state="past"] { opacity: .38; }
 @media (hover: hover) { .lyrics .line:hover { opacity: 1; } }
+/* A quiet note that stays put above the lyrics, for lyrics that only say when each line is sung. */
+.timing-note {
+  position: fixed;
+  top: calc(var(--top-height) + .25rem);
+  left: var(--gutter);
+  z-index: 4;
+  color: var(--quiet);
+  font-size: var(--small);
+}
 .no-lyrics {
   min-height: 100vh;
   min-height: 100dvh;
@@ -252,7 +261,7 @@ input::placeholder { color: var(--unsung); }
   position: fixed;
   left: var(--gutter);
   right: var(--gutter);
-  top: calc(var(--top-height) + .5rem);
+  top: calc(var(--top-height) + 2rem);
   z-index: 4;
   max-width: 44rem;
   padding: .6rem .9rem;

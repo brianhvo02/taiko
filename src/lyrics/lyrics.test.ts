@@ -36,6 +36,7 @@ describe('openLyrics', () => {
     expect(song.parts.map((part) => part.name)).toEqual(['Verse', 'Pre-chorus']);
     expect(song.hasRoman).toBe(true);
     expect(song.hasTranslation).toBe(false);
+    expect(song.wordTimed).toBe(true);
     const [first, second] = song.parts[0].lines;
     expect(first.original).toEqual([
       { kind: 'word', text: '紙の', begin: 1, end: 2 },
@@ -60,6 +61,8 @@ describe('openLyrics', () => {
     expect(source.catalogId).toBe('777');
     const song = songFromDoc(source.doc);
     expect(song.hasRoman || song.hasTranslation).toBe(false);
+    // Each line is one stretch of text with the line's own times: timed by line, not by word.
+    expect(song.wordTimed).toBe(false);
     expect(song.writers).toEqual(['Midori Vale']);
     expect(song.parts[0].lines.map((line) => line.original)).toEqual([
       [{ kind: 'word', text: '紙の灯籠', begin: 1, end: 5 }],
@@ -114,6 +117,7 @@ describe('LRC', () => {
   it('turns lines into timed lines that end where the next begins', () => {
     const song = songFromDoc(openLyrics('[ti:Paper Lanterns]\n[00:01.00]Paper lanterns\n[00:03.50]Crossing the night\n[00:06.00]\n', 'song.lrc').doc);
     const lines = song.parts[0].lines;
+    expect(song.wordTimed).toBe(false);
     expect(lines.map((line) => [line.begin, line.end, text(line.original)])).toEqual([
       [1, 3.5, 'Paper lanterns'],
       [3.5, 6, 'Crossing the night'],
@@ -124,6 +128,7 @@ describe('LRC', () => {
     const xml = lrcToTtml('[00:10.00]<00:10.00>one <00:10.50>two\n[00:20.00][00:30.00]again\n[offset:500]');
     const song = songFromDoc(openLyrics(xml, 'song.ttml').doc);
     const lines = song.parts[0].lines;
+    expect(song.wordTimed).toBe(true);
     expect(lines).toHaveLength(3);
     expect(lines[0].original).toEqual([
       { kind: 'word', text: 'one', begin: 9.5, end: 10 },

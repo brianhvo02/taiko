@@ -39,6 +39,11 @@ export interface Song {
   writers: string[];
   hasRoman: boolean;
   hasTranslation: boolean;
+  /**
+   * Whether the words have their own timings. False when the file only says when each line starts and ends: a
+   * plain LRC file, or Apple's line-timed lyrics. Such a line lights up whole; it is not swept word by word.
+   */
+  wordTimed: boolean;
 }
 
 /** An open lyrics file: the TTML document, and the JSON it came wrapped in, if any. */
@@ -132,6 +137,8 @@ export function songFromDoc(doc: Document): Song {
     writers: all(doc, 'songwriter').map((w) => (w.textContent ?? '').trim()).filter(Boolean),
     hasRoman: lines.some((line) => line.roman),
     hasTranslation: lines.some((line) => line.translation),
+    // Word-timed when any word in the song starts or ends at a time that isn't its line's.
+    wordTimed: lines.some((line) => line.original.some((piece) => piece.kind === 'word' && (piece.begin !== line.begin || piece.end !== line.end))),
   };
 }
 

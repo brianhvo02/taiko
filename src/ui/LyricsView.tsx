@@ -107,7 +107,9 @@ export function LyricsView({ song }: { song: Song }) {
         if (state !== line.state) { line.state = state; line.el.dataset.state = state; }
         if (t >= line.begin && (current < 0 || line.begin >= lines[current].begin)) current = i;
         for (const word of line.words) {
-          const p = t <= word.begin ? 0 : t >= word.end ? 1 : (t - word.begin) / (word.end - word.begin);
+          // Without word timings a line lights up whole as it starts; sweeping across it would show timing the file doesn't have.
+          const p = !song.wordTimed ? (t >= word.begin ? 1 : 0)
+            : t <= word.begin ? 0 : t >= word.end ? 1 : (t - word.begin) / (word.end - word.begin);
           if (p !== word.p) { word.p = p; word.el.style.setProperty('--p', p.toFixed(3)); }
         }
       }

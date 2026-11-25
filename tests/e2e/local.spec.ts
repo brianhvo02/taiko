@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { expect, test } from '@playwright/test';
 import { lyrics, toneFlac } from './fixtures.ts';
-import { mockCatalog, pick, shown } from './helpers.ts';
+import { mockCatalog, pick, seekTo, shown } from './helpers.ts';
 
 const lanterns = () => ({ name: 'Lanterns.flac', content: toneFlac({ seconds: 50, title: 'Tagged Lanterns', artist: 'Midori Vale', album: 'Night Market', track: 1 }) });
 const harbour = () => ({ name: 'Harbour.flac', content: toneFlac({ seconds: 20, title: 'Harbour Lights', artist: 'Midori Vale', album: 'Night Market', track: 2 }) });
@@ -24,6 +24,8 @@ test('plays a song with lyrics combined from three versions and named by the cat
   await expect(page.locator('.lyrics .roman')).toHaveCount(3);
   await expect(page.locator('.lyrics .translation')).toHaveCount(3);
   await expect(page.locator('.part-name')).toHaveText(['Verse', 'Chorus']);
+  // These lyrics time each word, so there is nothing to say about their timing.
+  await expect(page.getByText('These lyrics are timed by line, not by word')).toHaveCount(0);
   // The catalog's names, home storefront first, replace the file's tags.
   await expect(page.locator('.now-title')).toHaveText('紙の灯籠 (Paper Lanterns)');
   await expect(page.locator('.credit')).toHaveText('Midori Vale, written by Midori Vale');
@@ -85,6 +87,14 @@ test('lists the songs, walks them, and pairs lyrics with songs by name', async (
   await pick(page, 'Add a lyrics file', [{ name: 'Harbour.lrc', content: lyrics.lrc }]);
   await expect(page.locator('.lyrics .line')).toHaveCount(3);
   await expect(page.locator('.lyrics .line').first()).toHaveText('Paper lanterns');
+  // A plain LRC file only times its lines: the player says so, and a line lights up whole, not word by word.
+  await expect(page.getByText('These lyrics are timed by line, not by word')).toBeVisible();
+  const fill = () => page.locator('.lyrics .line').first().locator('.w').first().evaluate((el: HTMLElement) => Number(el.style.getPropertyValue('--p') || 0));
+  await seekTo(page, 1.5);
+  await expect.poll(() => shown(page)).toBeGreaterThan(1.3);
+  expect(await fill()).toBe(0);
+  await seekTo(page, 2.5);
+  await expect.poll(fill).toBe(1);
 
   // Lyrics with other words are not mixed into a song's lyrics.
   await rows.first().click();
