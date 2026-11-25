@@ -26,7 +26,13 @@ test('pairs from an invite link, browses the folders and plays a song with its l
 
   // In file-name order ("2" before "10"), named by their tags; a file without tags keeps its file name, and
   // files that aren't songs are not listed.
-  await expect(songs.locator('.song-title')).toHaveText(['Paper Lanterns', 'Harbour Lights', 'untagged']);
+  await expect(songs.locator('.song-title')).toHaveText(['Paper Lanterns', '港の灯', 'untagged']);
+  // A title in another script has its reading and its English name under it.
+  await expect(songs.nth(1).locator('.song-detail')).toHaveText('Minato no Akari, Harbour Lights');
+  // The album's cover picture heads its folder.
+  await expect(panel.locator('.album-name')).toHaveText('Night Market');
+  await expect(panel.locator('.folder-cover')).toHaveJSProperty('complete', true);
+  expect(await panel.locator('.folder-cover').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
   await expect(songs.locator('.song-lead')).toHaveText(['2', '10', '']);
   await expect(songs.first()).toContainText('Midori Vale, Night Market');
   await expect(songs.first()).toContainText('Lyrics, 0:50');
@@ -40,6 +46,7 @@ test('pairs from an invite link, browses the folders and plays a song with its l
   await expect(page.locator('.now-title')).toHaveText('紙の灯籠 (Paper Lanterns)');
   await expect(page.locator('.play')).toHaveText('Pause');
   await expect(page.locator('.seek-row output').last()).toHaveText('0:50');
+  await expect(page.locator('.bar .art')).toHaveAttribute('src', /\/api\/cover\?path=Music%2FMidori%20Vale%2FNight%20Market&/);
   await expect(page).toHaveURL('/nas/play/Music/Midori%20Vale/Night%20Market/2%20-%20lanterns.flac');
   await expectInTime(page, 'streamed from the NAS');
 
@@ -55,7 +62,10 @@ test('pairs from an invite link, browses the folders and plays a song with its l
 
   // Next and Back walk the folder the song came from.
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Harbour Lights' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '港の灯' })).toBeVisible();
+  // Named from its tags: the Japanese name, then its reading and English name; and its Apple Music id links it.
+  await expect(page.locator('.now-title')).toHaveText('港の灯 (Minato no Akari, Harbour Lights)');
+  await expect(page.locator('.credit')).toHaveText('緑の谷 (Midori no Tani, Midori Vale)');
   await expect(page).toHaveURL('/nas/play/Music/Midori%20Vale/Night%20Market/10%20-%20harbour.flac');
   await page.getByRole('button', { name: 'Previous' }).click();
   await expect(page.locator('.now-title')).toContainText('紙の灯籠');
@@ -134,7 +144,7 @@ test('opens a link to a song, at the time it names, and a link to a folder', asy
   await expectInTime(page, 'a link opened at 31 seconds');
   // Next walks the song's folder, as if it had been chosen there.
   await page.getByRole('button', { name: 'Next', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Harbour Lights' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '港の灯' })).toBeVisible();
 
   await page.goto('/nas/folders/Music/Midori%20Vale/Night%20Market');
   const panel = page.getByRole('complementary', { name: 'Songs' });

@@ -5,7 +5,7 @@
  */
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { NAS, lyrics, toneFlac } from './fixtures.ts';
+import { COVER_PNG, NAS, lyrics, toneFlac } from './fixtures.ts';
 
 rmSync('.cache/e2e', { recursive: true, force: true });
 const album = path.join(NAS.library, 'Midori Vale', 'Night Market');
@@ -18,9 +18,14 @@ writeFileSync(path.join(album, '2 - lanterns.flac'), toneFlac({ seconds: 50, tit
 writeFileSync(path.join(album, '2 - lanterns.json'), lyrics.plain);
 writeFileSync(path.join(album, '2 - lanterns.ja-Latn.json'), lyrics.roman);
 writeFileSync(path.join(album, '2 - lanterns_en.json'), lyrics.english);
-writeFileSync(path.join(album, '10 - harbour.flac'), toneFlac({ seconds: 20, title: 'Harbour Lights', artist: 'Midori Vale', album: 'Night Market', track: 10 }));
+// A song named in Japanese, with its reading, its English name and an Apple Music id in its tags, and no lyrics.
+writeFileSync(path.join(album, '10 - harbour.flac'), toneFlac({
+  seconds: 20, title: '港の灯', artist: '緑の谷', album: '夜市', track: 10,
+  tags: ['TITLESORT=Minato no Akari', 'ARTISTSORT=Midori no Tani', 'TITLE_EN=Harbour Lights', 'ARTIST_EN=Midori Vale', 'APPLE_SONG_ID=9900112244'],
+}));
 writeFileSync(path.join(album, 'untagged.flac'), toneFlac({ seconds: 5 }));
-writeFileSync(path.join(album, 'cover.jpg'), 'not a song');
+writeFileSync(path.join(album, 'cover.png'), COVER_PNG);
+writeFileSync(path.join(album, 'booklet.txt'), 'not a song');
 
 Object.assign(process.env, {
   PORT: String(NAS.port),

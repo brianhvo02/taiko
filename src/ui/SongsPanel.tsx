@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Track } from '../library/tracks';
 import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
-import { canPickFolder, formatTime, pickFiles } from './format';
+import { canPickFolder, formatTime, otherForms, pickFiles } from './format';
 
 // What a row leads with when it has no track number, and for a folder.
 const NOTE = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4.5a1 1 0 0 1 .76-.97l8-2A1 1 0 0 1 20 2.5V15.5a3.5 3.5 0 1 1-2-3.16V7.28l-6 1.5V17.5a3.5 3.5 0 1 1-2-3.16V4.5Z" transform="translate(-1 2) scale(.92)" /></svg>;
@@ -10,7 +10,8 @@ const FOLDER = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A2.5 2
 
 function SongRow({ track, current, onChosen }: { track: Track; current: boolean; onChosen: () => void }) {
   const hasLyrics = track.lyricFiles.length > 0 || (track.nas?.lyrics.length ?? 0) > 0;
-  const detail = [track.artist, track.album].filter(Boolean).join(', ');
+  // Under a title in another script goes its reading and English name; otherwise who and what it is from.
+  const detail = otherForms(track.title, track.titleRoman, track.titleEnglish) || [track.artist, track.album].filter(Boolean).join(', ');
   return (
     <li>
       <button type="button" className={current ? 'song current' : 'song'} aria-current={current || undefined} onClick={() => { void store.select(track.id); onChosen(); }}>
@@ -48,6 +49,12 @@ function NasBrowser({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string
           </span>
         ))}
       </nav>
+      {folder?.cover && (
+        <div className="album">
+          <img className="folder-cover" src={folder.cover} alt="" />
+          <div className="album-name">{segments[segments.length - 1]}</div>
+        </div>
+      )}
       {snap.nasState === 'loading' && !folder && <p className="songs-note">Opening the NAS</p>}
       {snap.nasState === 'error' && <p className="songs-note">The folder didn't open. <button className="text-button" type="button" onClick={() => void store.refreshNas()}>Try again</button></p>}
       {empty && <p className="songs-note">{wanted ? 'Nothing here matches the filter.' : 'This folder has no songs or folders.'}</p>}

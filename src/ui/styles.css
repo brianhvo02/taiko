@@ -277,7 +277,7 @@ input::placeholder { color: var(--unsung); }
   font-size: .9rem;
 }
 .now-zone { display: flex; align-items: center; gap: .8rem; min-width: 0; }
-.art { width: 3rem; height: 3rem; border-radius: 3px; flex: none; }
+.art { width: 3rem; height: 3rem; object-fit: cover; border-radius: 3px; flex: none; }
 .now { min-width: 0; line-height: 1.35; }
 .now div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .now-title { font-weight: 500; }
@@ -409,6 +409,10 @@ input::placeholder { color: var(--unsung); }
 .crumbs { padding: 0 1rem .4rem; color: var(--unsung); font-size: .85rem; overflow-wrap: anywhere; }
 .crumbs .text-button { color: var(--hide); text-decoration-color: var(--unsung); }
 .crumbs .text-button:disabled { color: var(--quiet); text-decoration: none; cursor: default; }
+/* An album folder shows its cover above its songs. */
+.album { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: 1rem; align-items: end; padding: .6rem 1rem 1rem; }
+.folder-cover { width: 6rem; height: 6rem; object-fit: cover; border-radius: 3px; display: block; background: var(--night); }
+.album-name { font-family: var(--lyric-face); font-weight: 700; font-size: var(--large); line-height: 1.3; overflow-wrap: anywhere; }
 
 /* On a wide screen the open Songs panel sits beside the player, not over its controls. */
 @media (min-width: 44.01rem) {

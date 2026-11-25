@@ -47,7 +47,7 @@ Every NAS folder and every NAS song has its own address, shown in the address ba
 
 ## Not there yet
 
-- Tags are read from FLAC and ID3 (MP3) files. Other formats show their file name.
+- Tags are read from FLAC and ID3 (MP3) files. Other formats show their file name. A cover picture is shown from an album's folder on the NAS, not from inside a file.
 - No offline install: there is a web app manifest but no service worker.
 - The NAS is browsed by folder. Songs are named by their tags, but there is no library sorted by artist and album: the server can scan for one (`LIBRARY_SCAN`), and the player has no screen for it yet.
 - The NAS is reached over HTTPS only. There are no typed pairing codes without the address, no QR codes and no WebRTC route.

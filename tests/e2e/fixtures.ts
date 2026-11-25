@@ -53,6 +53,8 @@ export interface ToneOptions {
   artist?: string;
   album?: string;
   track?: number;
+  /** Further tags, as written in the file: 'TITLESORT=Minato no Akari'. */
+  tags?: string[];
 }
 
 /** A mono 16-bit FLAC file of the rising tone, with the tags given. */
@@ -98,6 +100,7 @@ export function toneFlac(options: ToneOptions): Buffer {
     options.artist && `ARTIST=${options.artist}`,
     options.album && `ALBUM=${options.album}`,
     options.track && `TRACKNUMBER=${options.track}`,
+    ...(options.tags ?? []),
   ].filter((entry): entry is string => Boolean(entry)).map((entry) => Buffer.from(entry, 'utf8'));
   const le32 = (n: number) => Buffer.from([n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
   const vendor = Buffer.from('taiko tests');
@@ -152,6 +155,9 @@ export const catalog: Record<string, unknown> = {
   jp: { kind: 'song', trackId: Number(SONG_ID), trackName: '紙の灯籠', artistName: 'Midori Vale', collectionName: '夜市', trackTimeMillis: 50000, trackViewUrl: 'https://music.apple.com/jp/album/x/1?i=9900112233' },
   us: { kind: 'song', trackId: Number(SONG_ID), trackName: 'Paper Lanterns', artistName: 'Midori Vale', collectionName: 'Night Market', trackTimeMillis: 50000, trackViewUrl: 'https://music.apple.com/us/album/x/1?i=9900112233' },
 };
+
+/** A one-pixel PNG, for an album's cover. */
+export const COVER_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==', 'base64');
 
 /** The folders and ports the test NAS uses. */
 export const NAS = {

@@ -13,12 +13,25 @@ export interface Tags {
   trackNumber: number | null;
   discNumber: number | null;
   durationSeconds: number | null;
+  /**
+   * Other forms of the names, present only when the file has them: the reading in Latin script (the TITLESORT,
+   * ARTISTSORT and ALBUMSORT tags, which for Japanese music hold the romaji), the official English name
+   * (TITLE_EN, ARTIST_EN, ALBUM_EN) and the Apple Music song id (APPLE_SONG_ID).
+   */
+  titleRoman?: string;
+  artistRoman?: string;
+  albumRoman?: string;
+  titleEnglish?: string;
+  artistEnglish?: string;
+  albumEnglish?: string;
+  appleSongId?: string;
 }
 
 /** How much of a file's start to hand to `readTags`. Tags sit before the audio, ahead of any large cover picture. */
 export const TAG_HEAD_BYTES = 256 * 1024;
 
-type Field = 'title' | 'artist' | 'album' | 'trackNumber' | 'discNumber';
+type Field = 'title' | 'artist' | 'album' | 'trackNumber' | 'discNumber'
+  | 'titleRoman' | 'artistRoman' | 'albumRoman' | 'titleEnglish' | 'artistEnglish' | 'albumEnglish' | 'appleSongId';
 
 const VORBIS_FIELDS: Record<string, Field> = {
   TITLE: 'title',
@@ -26,11 +39,19 @@ const VORBIS_FIELDS: Record<string, Field> = {
   ALBUM: 'album',
   TRACKNUMBER: 'trackNumber',
   DISCNUMBER: 'discNumber',
+  TITLESORT: 'titleRoman',
+  ARTISTSORT: 'artistRoman',
+  ALBUMSORT: 'albumRoman',
+  TITLE_EN: 'titleEnglish',
+  ARTIST_EN: 'artistEnglish',
+  ALBUM_EN: 'albumEnglish',
+  APPLE_SONG_ID: 'appleSongId',
 };
 
 const ID3_FIELDS: Record<string, Field> = {
   TIT2: 'title', TPE1: 'artist', TALB: 'album', TRCK: 'trackNumber', TPOS: 'discNumber',
   TT2: 'title', TP1: 'artist', TAL: 'album', TRK: 'trackNumber', TPA: 'discNumber',
+  TSOT: 'titleRoman', TSOP: 'artistRoman', TSOA: 'albumRoman',
 };
 
 const utf8 = new TextDecoder('utf-8');

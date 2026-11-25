@@ -15,6 +15,8 @@ import type { FolderListing, ResolvedTrack } from './paths';
 import { sendAudioFile } from './ranges';
 import { VERSION } from './version';
 import { TagCache } from './tag-cache';
+import { findCover, sendCover } from './cover';
+import type { Tags } from '../../src/shared/tags';
 
 export const MAX_JSON_BODY_BYTES = 16 * 1024;
 export const PAIR_ATTEMPTS = 10;
@@ -29,6 +31,15 @@ export interface AppDeps {
   secret: Buffer;
   now?: () => number;
   log?: (message: string) => void;
+}
+
+/** The other forms of a song's names that its tags carry, leaving out the ones it doesn't have. */
+function otherNames(tags: Tags): Partial<Tags> {
+  const out: Partial<Tags> = {};
+  for (const key of ['titleRoman', 'artistRoman', 'albumRoman', 'titleEnglish', 'artistEnglish', 'albumEnglish', 'appleSongId'] as const) {
+    if (tags[key]) out[key] = tags[key];
+  }
+  return out;
 }
 
 /** An error answered as `{ error: code }` with `status`. */
@@ -121,7 +132,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   async function browse(browsePath: string): Promise<BrowseResponse> {
     if (!browsePath) {
       const folders = config.roots.map((root) => ({ name: root.name, path: root.name }));
-      return { serverName: config.serverName, path: '', parent: null, folders, tracks: [] };
+      return { serverName: config.serverName, path: '', parent: null, folders, tracks: [], cover: null };
     }
     const folder = await paths.resolveFolder(browsePath);
     if (!folder) throw new HttpError(404, 'not-found');
@@ -144,9 +155,17 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       trackNumber: read[i].trackNumber,
       discNumber: read[i].discNumber,
       durationSeconds: read[i].durationSeconds,
+      ...otherNames(read[i]),
       lyrics: lyricsList(file.lyrics),
     }));
+    // The cover's address is signed until the end of the day after next, so it stays the same all day.
+    const cover = await findCover(folder.real);
+    const coverExp = (Math.floor(now() / 86_400_000) + 2) * 86_400;
+    const coverUrl = cover
+      ? `${config.publicBase}cover?path=${encodeURIComponent(here.join('/'))}&exp=${coverExp}&sig=${signTicket(secret, `cover:${here.join('/')}`, coverExp)}`
+      : null;
     return {
+      cover: coverUrl,
       serverName: config.serverName,
       path: here.join('/'),
       parent: here.slice(0, -1).join('/'),
@@ -198,6 +217,18 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
         return;
       }
       sendJson(req, res, 200, { serverName: config.serverName, deviceName: device.name } satisfies MeResponse);
+      return;
+    }
+
+    if (parts.length === 1 && parts[0] === 'cover') {
+      allow(req, 'GET');
+      // No token here, as for audio: the signature in the address is the permission, for this folder only.
+      const coverPath = url.searchParams.get('path') ?? '';
+      const check = verifyTicket(secret, `cover:${coverPath}`, url.searchParams.get('exp') ?? '', url.searchParams.get('sig') ?? '', Math.floor(now() / 1000));
+      if (check !== 'ok') throw new HttpError(403, check === 'expired' ? 'expired-ticket' : 'bad-ticket');
+      const folder = await paths.resolveFolder(coverPath);
+      const cover = folder ? await findCover(folder.real) : null;
+      if (!cover || !(await sendCover(req, res, cover))) throw new HttpError(404, 'not-found');
       return;
     }
 

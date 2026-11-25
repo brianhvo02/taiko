@@ -13,6 +13,7 @@
  *   GET    me                  paired  -> MeResponse
  *   DELETE me                  paired  -> 204                   (forgets this device)
  *   GET    browse?path=        paired  -> BrowseResponse        (a folder's contents; an empty path lists the roots)
+ *   GET    cover?path=&exp=&sig=       -> a folder's cover picture, at the address `browse` gave for it
  *   GET    library             paired  -> LibraryResponse       (the tag-based library; empty while LIBRARY_SCAN is off)
  *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
  *   GET    tracks/:id/lyrics/:index  paired -> the lyrics file's text, as stored
@@ -80,6 +81,18 @@ export interface NasTrack {
   discNumber: number | null;
   /** Known for FLAC; null where the server can't tell without decoding. */
   durationSeconds: number | null;
+  /**
+   * Other forms of the names, present only when the file has them: the reading in Latin script (the TITLESORT,
+   * ARTISTSORT and ALBUMSORT tags, which for Japanese music hold the romaji), the official English name
+   * (TITLE_EN, ARTIST_EN, ALBUM_EN) and the Apple Music song id (APPLE_SONG_ID).
+   */
+  titleRoman?: string;
+  artistRoman?: string;
+  albumRoman?: string;
+  titleEnglish?: string;
+  artistEnglish?: string;
+  albumEnglish?: string;
+  appleSongId?: string;
   /** Lyrics files found beside the audio file. Several versions of one song are combined by the player. */
   lyrics: NasLyricsFile[];
 }
@@ -103,6 +116,12 @@ export interface BrowseResponse {
   parent: string | null;
   folders: NasFolder[];
   tracks: NasTrack[];
+  /**
+   * An address for the folder's cover picture (cover, folder or front, as JPEG, PNG or WebP), or null when it has
+   * none. Signed like an audio link, so an `<img>` can load it without the token, and the same all day so that
+   * the browser keeps it.
+   */
+  cover: string | null;
 }
 
 export interface LibraryResponse {

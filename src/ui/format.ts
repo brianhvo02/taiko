@@ -17,19 +17,46 @@ export interface NowPlaying {
   art: string;
 }
 
+/** Whether a name is written in a script that a reading in Latin letters helps with (Japanese, say). */
+export const needsReading = (name: string): boolean => /[^\u0000-\u024f\u2000-\u206f]/.test(name);
+
+/**
+ * The other forms of a name worth showing beside it: its reading, when the name isn't in Latin script, and its
+ * English form, each only when it says something the name (or the form before it) doesn't.
+ */
+export function otherForms(name: string, reading?: string, english?: string): string {
+  const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+  const forms: string[] = [];
+  if (reading && needsReading(name) && !same(reading, name)) forms.push(reading);
+  if (english && !same(english, name) && !forms.some((form) => same(form, english))) forms.push(english);
+  return forms.join(', ');
+}
+
 /** What to call the open song: Apple's catalog names when it was identified, the file's tags otherwise. */
 export function nowPlaying(snap: Snapshot): NowPlaying | null {
   const track = snap.currentTrack;
   if (!track) return null;
   const { songInfo, usInfo } = snap;
-  if (!songInfo) return { title: track.title, otherTitle: '', artist: track.artist, otherArtist: '', link: '', art: '' };
+  // The album's own cover on the NAS comes before Apple's.
+  const art = track.cover ?? songInfo?.artworkUrl100 ?? '';
+  // A file that carries its own other names (a reading, an English name) is named by them, not by the catalog.
+  if (track.titleRoman || track.titleEnglish || track.artistRoman || track.artistEnglish || !songInfo) {
+    return {
+      title: track.title,
+      otherTitle: otherForms(track.title, track.titleRoman, track.titleEnglish),
+      artist: track.artist,
+      otherArtist: otherForms(track.artist, track.artistRoman, track.artistEnglish),
+      link: songInfo?.trackViewUrl ?? '',
+      art,
+    };
+  }
   return {
     title: songInfo.trackName,
     otherTitle: usInfo && usInfo.trackName !== songInfo.trackName ? usInfo.trackName : '',
     artist: songInfo.artistName,
     otherArtist: usInfo && usInfo.artistName !== songInfo.artistName ? usInfo.artistName : '',
     link: songInfo.trackViewUrl ?? '',
-    art: songInfo.artworkUrl100 ?? '',
+    art,
   };
 }
 

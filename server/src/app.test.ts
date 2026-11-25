@@ -389,7 +389,7 @@ describe('the folder browser, with the library scan off', () => {
   });
 
   it('lists the roots, in the order configured, for an empty or missing path', async () => {
-    const roots = { serverName: 'Test NAS', path: '', parent: null, folders: [{ name: 'Shelf', path: 'Shelf' }, { name: 'main', path: 'main' }], tracks: [] };
+    const roots = { serverName: 'Test NAS', path: '', parent: null, folders: [{ name: 'Shelf', path: 'Shelf' }, { name: 'main', path: 'main' }], tracks: [], cover: null };
     for (const reply of [await browse(), await browse('')]) {
       expect(reply.status).toBe(200);
       expect(reply.json()).toEqual(roots);
@@ -398,7 +398,7 @@ describe('the folder browser, with the library scan off', () => {
 
   it('lists a root and a nested folder, with their parents', async () => {
     expect((await browse('Shelf')).json()).toEqual({
-      serverName: 'Test NAS', path: 'Shelf', parent: '', folders: [{ name: 'Tin Harbor', path: 'Shelf/Tin Harbor' }], tracks: [],
+      serverName: 'Test NAS', path: 'Shelf', parent: '', folders: [{ name: 'Tin Harbor', path: 'Shelf/Tin Harbor' }], tracks: [], cover: null,
     });
     const artist = (await browse('Shelf/Tin Harbor')).json<BrowseResponse>();
     expect(artist).toMatchObject({ path: 'Shelf/Tin Harbor', parent: 'Shelf', folders: [{ name: 'Low Tide', path: 'Shelf/Tin Harbor/Low Tide' }] });

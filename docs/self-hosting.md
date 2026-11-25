@@ -12,6 +12,17 @@ The player is a static web app. Your music stays on your machine; the NAS server
 
 You name the folders to share (the roots). The player browses them folder by folder: the server reads a folder when a device opens it, so there is no scan and nothing to wait for. It lists sub-folders and `flac`, `mp3`, `m4a`, `aac`, `ogg`, `oga`, `opus` and `wav` files in file-name order, and skips dot-files and NAS housekeeping folders (`@eaDir`, `#recycle`). Songs are named by their tags (FLAC and ID3), which the server reads the first time a folder is opened and remembers while the files don't change; a file without tags shows its file name.
 
+What the player uses from a file's tags:
+
+| Tag | Used for |
+|---|---|
+| `TITLE`, `ARTIST`, `ALBUM`, `TRACKNUMBER`, `DISCNUMBER` | The song's names and its place on the album. |
+| `TITLESORT`, `ARTISTSORT`, `ALBUMSORT` | A reading in Latin letters (romaji, for Japanese music), shown beside a name that isn't in Latin script. |
+| `TITLE_EN`, `ARTIST_EN`, `ALBUM_EN` | The official English name, shown when it differs. These three names are a convention shared with Ringobushi, not a standard. |
+| `APPLE_SONG_ID` | Links the song to Apple Music when it has no lyrics file to carry the id. |
+
+A picture named `cover`, `folder` or `front` (JPEG, PNG or WebP) in a folder is shown as that album's cover. It is served at its own size, since the server has nothing to resize it with, so a very large cover costs every device that opens the folder.
+
 A library sorted by artist and album across all folders is in the server but on hold: `LIBRARY_SCAN=on` turns its scan on, and the player has no screen for it yet.
 
 Lyrics are found beside a song, by name: `Song.flac` takes `Song.json`, `Song.ttml`, `Song.lrc`, and versions such as `Song.ja-Latn.json` or `Song_en.json`. The player combines the versions.

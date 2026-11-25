@@ -26,6 +26,8 @@ export interface NasListing {
   parent: string | null;
   folders: NasFolder[];
   tracks: Track[];
+  /** The address of the folder's cover picture, when it has one. */
+  cover: string | null;
 }
 
 export interface Snapshot {
@@ -425,9 +427,11 @@ class PlayerStore {
     const song = source ? songFromDoc(source.doc) : null;
     this.set({ song, lyricsLoading: false, lyricsNames: source ? [...source.names] : [], notice });
 
-    if (source?.catalogId && !this.identified.has(track.id)) {
+    // The song's Apple Music id comes with its lyrics, or failing that from its tags.
+    const catalogId = source?.catalogId || track.appleSongId || '';
+    if (catalogId && !this.identified.has(track.id)) {
       try {
-        const found = await identify(source.catalogId, song?.language ?? '');
+        const found = await identify(catalogId, song?.language ?? '');
         this.identified.set(track.id, found);
         if (run === this.loadRun) {
           this.set({ songInfo: found.song, usInfo: found.us });
@@ -634,7 +638,10 @@ class PlayerStore {
       saveLastPath(folder.path);
       this.set({
         nasState: 'ready',
-        nasFolder: { path: folder.path, parent: folder.parent, folders: folder.folders, tracks: folder.tracks.map(trackFromNas) },
+        nasFolder: {
+          path: folder.path, parent: folder.parent, folders: folder.folders, cover: folder.cover ?? null,
+          tracks: folder.tracks.map((track) => trackFromNas(track, folder.cover ?? null)),
+        },
       });
       return true;
     } catch (error) {
@@ -720,7 +727,9 @@ class PlayerStore {
           title: songInfo?.trackName ?? track.title,
           artist: songInfo?.artistName ?? track.artist,
           album: songInfo?.collectionName ?? track.album,
-          artwork: songInfo?.artworkUrl100 ? [{ src: songInfo.artworkUrl100.replace('100x100', '512x512'), sizes: '512x512' }] : [],
+          artwork: track.cover
+            ? [{ src: track.cover }]
+            : songInfo?.artworkUrl100 ? [{ src: songInfo.artworkUrl100.replace('100x100', '512x512'), sizes: '512x512' }] : [],
         })
       : null;
   }

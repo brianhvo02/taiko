@@ -15,6 +15,16 @@ export interface Track {
   trackNumber: number | null;
   discNumber: number | null;
   durationSeconds: number | null;
+  /** Other forms of the names, from the file's tags (see `Tags`). */
+  titleRoman?: string;
+  artistRoman?: string;
+  albumRoman?: string;
+  titleEnglish?: string;
+  artistEnglish?: string;
+  albumEnglish?: string;
+  appleSongId?: string;
+  /** The address of the album's cover picture on the NAS, when its folder has one. */
+  cover?: string;
   /** The audio file's name, used to match lyrics files to it. */
   fileName: string;
   /** Set for a device track. */
@@ -54,16 +64,13 @@ async function trackFromFile(file: File): Promise<Track> {
   };
 }
 
-export function trackFromNas(nas: NasTrack): Track {
+export function trackFromNas(nas: NasTrack, cover: string | null = null): Track {
+  const { id, lyrics: _lyrics, ...names } = nas;
   return {
-    id: `nas:${nas.id}`,
+    ...names,
+    id: `nas:${id}`,
     origin: 'nas',
-    title: nas.title,
-    artist: nas.artist,
-    album: nas.album,
-    trackNumber: nas.trackNumber,
-    discNumber: nas.discNumber,
-    durationSeconds: nas.durationSeconds,
+    ...(cover ? { cover } : {}),
     fileName: '',
     file: null,
     nas,
