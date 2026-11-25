@@ -73,6 +73,36 @@ describe('readTagsFrom', () => {
     expect(reads.reduce((sum, n) => sum + n, 0)).toBeLessThan(1024);
   });
 
+  it('reads an MP4 file\'s iTunes items and length, with the movie atom after the audio and a cover among the items', async () => {
+    const be32 = (n: number) => [(n >>> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+    const atom = (type: string | number[], ...body: (number[] | Uint8Array | string)[]) => {
+      const inner = bytes(...body);
+      return bytes(be32(inner.length + 8), typeof type === 'string' ? type : type, inner);
+    };
+    const text = (type: number[] | string, value: string) => atom(type, atom('data', be32(1), be32(0), value));
+    const free = (name: string, value: string) => atom('----', atom('mean', be32(0), 'com.apple.iTunes'), atom('name', be32(0), name), atom('data', be32(1), be32(0), value));
+    const c = (rest: string) => [0xa9, ...[...rest].map((ch) => ch.charCodeAt(0))];
+    const items = atom('ilst',
+      atom('covr', atom('data', be32(13), be32(0), new Uint8Array(2 * 1024 * 1024).fill(0x55))),
+      text(c('nam'), '紙の灯籠'), text(c('ART'), 'Midori Vale'), text(c('alb'), 'Night Market'), text('aART', 'Various'), text(c('day'), '2026-03-01'),
+      atom('trkn', atom('data', be32(0), be32(0), [0, 0, 0, 2, 0, 9, 0, 0])), atom('disk', atom('data', be32(0), be32(0), [0, 0, 0, 1, 0, 1])),
+      text('sonm', 'Kami no Tourou'), free('TITLE_EN', 'Paper Lanterns'), free('APPLE_SONG_ID', '9900112233'), free('SOMETHING_ELSE', 'ignored'));
+    // Timescale 44100, 441000 units: ten seconds.
+    const mvhd = atom('mvhd', be32(0), be32(0), be32(0), be32(44100), be32(441000), new Uint8Array(80));
+    const moov = atom('moov', mvhd, atom('trak', new Uint8Array(64)), atom('udta', atom('meta', be32(0), atom('hdlr', new Uint8Array(25)), items)));
+    const file = bytes(atom('ftyp', 'M4A ', be32(0), 'M4A mp42isom'), atom('mdat', new Uint8Array(1024 * 1024)), moov);
+
+    const reads: number[] = [];
+    expect(await readTagsFrom(reader(file, reads), file.length)).toEqual({
+      title: '紙の灯籠', artist: 'Midori Vale', album: 'Night Market', trackNumber: 2, discNumber: 1, durationSeconds: 10,
+      albumArtist: 'Various', date: '2026-03-01', titleRoman: 'Kami no Tourou', titleEnglish: 'Paper Lanterns', appleSongId: '9900112233',
+    });
+    // Neither the audio nor the cover was read.
+    expect(reads.reduce((sum, n) => sum + n, 0)).toBeLessThan(4096);
+    // A file cut short gives what it can, not an error.
+    expect((await readTagsFrom(reader(file.subarray(0, file.length - 200)), file.length - 200)).title).toBe('');
+  });
+
   it('reads other formats from their start, and gives empty tags for anything unreadable', async () => {
     const utf16 = (text: string) => [0x01, 0xff, 0xfe, ...[...text].flatMap((ch) => [ch.charCodeAt(0) & 0xff, ch.charCodeAt(0) >> 8])];
     const frame = bytes('TIT2', [0, 0, 0, utf16('灯籠').length, 0, 0], utf16('灯籠'));
