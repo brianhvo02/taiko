@@ -33,6 +33,9 @@ export function otherNames(tags: Tags): Partial<Tags> {
   }
   if (tags.sampleRate) out.sampleRate = tags.sampleRate;
   if (tags.bitsPerSample) out.bitsPerSample = tags.bitsPerSample;
+  for (const key of ['trackGain', 'trackPeak', 'albumGain', 'albumPeak'] as const) {
+    if (tags[key] !== undefined) out[key] = tags[key];
+  }
   return out;
 }
 
@@ -85,7 +88,7 @@ function firstOf(songs: AlbumSong[], key: 'albumRoman' | 'albumEnglish' | 'album
  * What a folder's songs say their album is. `songs` are in file-name order and there is at least one.
  * `path` is the folder as the browser names it, `folderName` its own name.
  */
-export function albumOf(path: string, folderName: string, songs: AlbumSong[], hasCover: boolean): LibraryAlbum {
+export function albumOf(path: string, folderName: string, songs: AlbumSong[], hasCover: boolean, createdMs = 0): LibraryAlbum {
   const tagged = commonest(songs.map((song) => song.tags.album));
   // The songs that carry the title; all of them when the title is only the folder's name.
   const titled = tagged ? songs.filter((song) => song.tags.album === tagged) : songs;
@@ -114,7 +117,7 @@ export function albumOf(path: string, folderName: string, songs: AlbumSong[], ha
     trackCount: songs.length,
     durationSeconds: lengths.every((length) => length !== null) ? lengths.reduce<number>((sum, length) => sum + (length ?? 0), 0) : null,
     hasCover,
-    addedAt: Math.max(...songs.map((song) => song.mtimeMs)),
+    addedAt: createdMs > 0 ? createdMs : Math.max(...songs.map((song) => song.mtimeMs)),
   };
 }
 
@@ -314,6 +317,8 @@ export class Library {
       }
     }
     if (!songs.length) return null;
-    return { album: albumOf(here.join('/'), here[here.length - 1], songs, (await findCover(dir)) !== null), tracks };
+    // When the folder was made, where the disk keeps that: retagging rewrites the songs but leaves this alone.
+    const createdMs = await stat(dir).then((stats) => stats.birthtimeMs, () => 0);
+    return { album: albumOf(here.join('/'), here[here.length - 1], songs, (await findCover(dir)) !== null, createdMs), tracks };
   }
 }

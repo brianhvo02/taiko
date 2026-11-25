@@ -222,6 +222,14 @@ export interface NasTrack {
   sampleRate?: number;
   bitsPerSample?: number;
   /**
+   * How loud the song and its album are, from the ReplayGain tags when the file has them: the change in decibels
+   * that brings each to the common level (-18 LUFS), and the highest peak as a linear number (it can be over 1).
+   */
+  trackGain?: number;
+  trackPeak?: number;
+  albumGain?: number;
+  albumPeak?: number;
+  /**
    * Other forms of the names, present only when the file has them: the reading in Latin script (the TITLESORT,
    * ARTISTSORT and ALBUMSORT tags, which for Japanese music hold the romaji), the official English name
    * (TITLE_EN, ARTIST_EN, ALBUM_EN) and the Apple Music song id (APPLE_SONG_ID).
@@ -296,7 +304,10 @@ export interface NasAlbum {
    * small copy (cover.small.jpg) when it has one, for a page of many albums. Null when the folder has no picture.
    */
   cover: string | null;
-  /** The newest modified time among its songs, in milliseconds since 1970: when the album was added or last changed. */
+  /**
+   * When the album was added, in milliseconds since 1970: when its folder was made, where the disk says; failing
+   * that the newest modified time among its songs. (Retagging a song changes its modified time, not its folder's making.)
+   */
   addedAt: number;
 }
 

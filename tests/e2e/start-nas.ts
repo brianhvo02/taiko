@@ -23,7 +23,8 @@ writeFileSync(path.join(album, '2 - lanterns_en.json'), lyrics.english);
 // A song named in Japanese, with its reading, its English name and an Apple Music id in its tags, and no lyrics.
 writeFileSync(path.join(album, '10 - harbour.flac'), toneFlac({
   seconds: 20, title: '港の灯', artist: '緑の谷', album: 'Night Market', track: 10,
-  tags: ['TITLESORT=Minato no Akari', 'ARTISTSORT=Midori no Tani', 'TITLE_EN=Harbour Lights', 'ARTIST_EN=Midori Vale', 'APPLE_SONG_ID=9900112244', 'ALBUMARTIST=Midori Vale', 'DATE=2026-10-14'],
+  // This one says how loud it is, so the player turns it down to the common level.
+  tags: ['REPLAYGAIN_TRACK_GAIN=-10.00 dB', 'REPLAYGAIN_TRACK_PEAK=1.000000', 'REPLAYGAIN_ALBUM_GAIN=-16.00 dB', 'REPLAYGAIN_ALBUM_PEAK=1.000000', 'TITLESORT=Minato no Akari', 'ARTISTSORT=Midori no Tani', 'TITLE_EN=Harbour Lights', 'ARTIST_EN=Midori Vale', 'APPLE_SONG_ID=9900112244', 'ALBUMARTIST=Midori Vale', 'DATE=2026-10-14'],
 }));
 writeFileSync(path.join(album, 'untagged.flac'), toneFlac({ seconds: 5 }));
 writeFileSync(path.join(album, 'cover.png'), COVER_PNG);

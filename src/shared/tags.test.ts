@@ -33,6 +33,17 @@ describe('readTags', () => {
     expect(tags).toEqual({ title: 'Paper Lanterns', artist: 'Midori Vale', album: 'Night Market', trackNumber: 3, discNumber: 1, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16 });
   });
 
+  it('reads how loud the song and its album are from the ReplayGain tags', () => {
+    const tags = readTags(flac(['TITLE=Paper Lanterns', 'REPLAYGAIN_TRACK_GAIN=-10.27 dB', 'REPLAYGAIN_TRACK_PEAK=1.091440', 'replaygain_album_gain=-9.30 dB', 'REPLAYGAIN_ALBUM_PEAK=1.091440']));
+    expect(tags).toMatchObject({ trackGain: -10.27, trackPeak: 1.09144, albumGain: -9.3, albumPeak: 1.09144 });
+    // A silent track has a peak and no gain; nonsense is left out.
+    const silent = readTags(flac(['REPLAYGAIN_TRACK_PEAK=0.000000', 'REPLAYGAIN_ALBUM_GAIN=loud', 'REPLAYGAIN_ALBUM_PEAK=-1']));
+    expect(silent.trackPeak).toBe(0);
+    expect(silent).not.toHaveProperty('trackGain');
+    expect(silent).not.toHaveProperty('albumGain');
+    expect(silent).not.toHaveProperty('albumPeak');
+  });
+
   it('reads Japanese text', () => {
     expect(readTags(flac(['TITLE=紙の灯籠'])).title).toBe('紙の灯籠');
   });

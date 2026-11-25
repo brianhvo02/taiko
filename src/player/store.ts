@@ -25,6 +25,7 @@ import {
   cleanName, loadOffsets, loadPendingPlays, loadPlaylistSync, loadPlaylists, loadSession, loadSettings, saveOffset, savePendingPlays, savePlaylistSync, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
 } from './persist';
 import type { Playlist, QueueSource, SavedTrack, Session } from './persist';
+import { levelFactor } from './level';
 import { inPlayOrder, makeOrder, nextRepeat, stepFrom, withMovedInQueue, withQueued, withoutQueued, withoutUpcoming } from './queue';
 import type { Repeat } from './queue';
 import { folderOf, parseRoute, routeUrl } from './route';
@@ -134,6 +135,8 @@ export interface Snapshot {
   sweepLines: boolean;
   /** Whether pressing a lyric line moves the song to it. */
   seekOnLine: boolean;
+  /** Whether songs are brought to about the same loudness (see level.ts). */
+  levelVolume: boolean;
   /** This NAS's playlists, kept in the browser. */
   playlists: Playlist[];
   /** The playlist open in the panel, or null for the list of them. */
@@ -776,6 +779,8 @@ class PlayerStore {
         if (index) this.exact = { index, total: index.totalSamples / index.sampleRate };
       }
       if (this.exact) this.set({ duration: this.exact.total });
+      // By now a stored song has been looked up again, so how loud it is is known.
+      this.applyVolume();
       this.audio.src = url;
       this.streamLoaded = true;
       if (autoplay) this.audio.play().catch(() => {});
@@ -956,11 +961,12 @@ class PlayerStore {
     this.order = makeOrder(queue.length, shuffle, queue.findIndex((track) => track.id === currentId));
     this.set({ shuffle });
     this.keepSettings();
+    this.applyVolume();
   }
 
   private keepSettings(): void {
-    const { showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine } = this.snapshot;
-    saveSettings({ showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine });
+    const { showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine, levelVolume } = this.snapshot;
+    saveSettings({ showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine, levelVolume });
   }
 
   /** Opens Safari's list of AirPlay speakers and screens. */
@@ -1625,7 +1631,6 @@ class PlayerStore {
 
   setVolume(volume: number): void {
     const level = Math.max(0, Math.min(1, volume));
-    this.audio.volume = level;
     this.audio.muted = false;
     try {
       localStorage.setItem(VOLUME_KEY, String(level));
@@ -1633,6 +1638,7 @@ class PlayerStore {
       // Without storage the volume lasts until the tab closes.
     }
     this.set({ volume: level, muted: false });
+    this.applyVolume();
   }
 
   toggleMute(): void {
@@ -1647,6 +1653,18 @@ class PlayerStore {
   setShowTranslation(showTranslation: boolean): void { this.set({ showTranslation }); this.keepSettings(); }
   setSweepLines(sweepLines: boolean): void { this.set({ sweepLines }); this.keepSettings(); }
   setSeekOnLine(seekOnLine: boolean): void { this.set({ seekOnLine }); this.keepSettings(); }
+  setLevelVolume(levelVolume: boolean): void { this.set({ levelVolume }); this.keepSettings(); this.applyVolume(); }
+
+  /**
+   * Sets the audio element's volume: the listener's, times what brings the open song to the common loudness. An
+   * album played through in order keeps its own quiet and loud songs. The element can only be turned down, and on
+   * a phone a page can't set it at all, so there this does nothing.
+   */
+  private applyVolume(): void {
+    const { volume, levelVolume, currentTrack, source, shuffle } = this.snapshot;
+    const album = source.kind === 'folder' && !shuffle;
+    this.audio.volume = Math.max(0, Math.min(1, volume * (levelVolume && currentTrack ? levelFactor(currentTrack, album, 1) : 1)));
+  }
   dismissNotice(): void { this.set({ notice: '' }); }
 
   /* ---------- Naming the song ---------- */

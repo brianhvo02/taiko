@@ -124,7 +124,7 @@ test('sets the volume, mutes, and remembers the volume', async ({ page }) => {
     return { volume: audio.volume, muted: audio.muted };
   });
   await pick(page, 'Choose files', [lanterns()]);
-  const slider = page.getByLabel('Volume');
+  const slider = page.getByLabel('Volume', { exact: true });
   await expect(slider).toHaveValue('1');
 
   await slider.fill('0.3');
@@ -138,7 +138,7 @@ test('sets the volume, mutes, and remembers the volume', async ({ page }) => {
 
   await page.reload();
   await pick(page, 'Choose files', [lanterns()]);
-  await expect(page.getByLabel('Volume')).toHaveValue('0.3');
+  await expect(page.getByLabel('Volume', { exact: true })).toHaveValue('0.3');
   expect((await volume()).volume).toBeCloseTo(0.3);
 });
 
@@ -161,9 +161,9 @@ test.describe('on a phone', () => {
     await page.getByRole('button', { name: 'Options' }).click();
     await expect(page.getByLabel('Romanization')).toBeVisible();
     // On a phone the volume slider sits with the options, not on the bar.
-    await expect(page.getByLabel('Volume')).toHaveCount(2);
-    await expect(page.getByLabel('Volume').first()).toBeVisible();
-    await page.mouse.click(195, 300);
+    await expect(page.getByLabel('Volume', { exact: true })).toHaveCount(2);
+    await expect(page.getByLabel('Volume', { exact: true }).first()).toBeVisible();
+    await page.mouse.click(195, 80);
     await expect(page.getByLabel('Romanization')).toBeHidden();
 
     // The Songs panel covers the screen, and choosing a song closes it.

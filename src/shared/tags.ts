@@ -18,6 +18,14 @@ export interface Tags {
   sampleRate?: number;
   bitsPerSample?: number;
   /**
+   * How loud the song and its album are, from the ReplayGain tags when the file has them: the change in decibels
+   * that brings each to the common level (-18 LUFS), and the highest peak as a linear number (it can be over 1).
+   */
+  trackGain?: number;
+  trackPeak?: number;
+  albumGain?: number;
+  albumPeak?: number;
+  /**
    * Other forms of the names, present only when the file has them: the reading in Latin script (the TITLESORT,
    * ARTISTSORT and ALBUMSORT tags, which for Japanese music hold the romaji), the official English name
    * (TITLE_EN, ARTIST_EN, ALBUM_EN) and the Apple Music song id (APPLE_SONG_ID).
@@ -58,6 +66,13 @@ const VORBIS_FIELDS: Record<string, Field> = {
   ALBUMARTIST: 'albumArtist',
   ALBUMARTISTSORT: 'albumArtistRoman',
   DATE: 'date',
+};
+
+const LOUDNESS_FIELDS: Record<string, 'trackGain' | 'trackPeak' | 'albumGain' | 'albumPeak'> = {
+  REPLAYGAIN_TRACK_GAIN: 'trackGain',
+  REPLAYGAIN_TRACK_PEAK: 'trackPeak',
+  REPLAYGAIN_ALBUM_GAIN: 'albumGain',
+  REPLAYGAIN_ALBUM_PEAK: 'albumPeak',
 };
 
 const ID3_FIELDS: Record<string, Field> = {
@@ -115,8 +130,15 @@ function readVorbisComments(block: Uint8Array, tags: Tags): void {
     const entry = utf8.decode(block.subarray(at, at + length));
     at += length;
     const equals = entry.indexOf('=');
-    const field = equals > 0 ? VORBIS_FIELDS[entry.slice(0, equals).toUpperCase()] : undefined;
+    const name = equals > 0 ? entry.slice(0, equals).toUpperCase() : '';
+    const field = VORBIS_FIELDS[name];
     if (field) set(tags, field, entry.slice(equals + 1));
+    const loudness = LOUDNESS_FIELDS[name];
+    // "-10.27 dB" for a gain, "1.091440" for a peak: the number at the start is the value.
+    if (loudness && tags[loudness] === undefined) {
+      const value = parseFloat(entry.slice(equals + 1));
+      if (Number.isFinite(value) && Math.abs(value) < 100 && (loudness.endsWith('Gain') || value >= 0)) tags[loudness] = value;
+    }
   }
 }
 

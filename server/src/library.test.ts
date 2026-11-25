@@ -12,6 +12,9 @@ const NO_TAGS: Tags = { title: '', artist: '', album: '', trackNumber: null, dis
 const song = (tags: Partial<Tags>, mtimeMs = 1000): AlbumSong => ({ tags: { ...NO_TAGS, ...tags }, mtimeMs });
 const album = (songs: AlbumSong[], folder = 'Folder Name', cover = false): LibraryAlbum => albumOf(`Music/${folder}`, folder, songs, cover);
 
+/** When a folder was made, as the scan reads it: from the disk where it says, else the time given. */
+const made = (dir: string, otherwise: number): number => statSync(dir).birthtimeMs || otherwise;
+
 describe('albumOf', () => {
   it('takes the album title most songs carry', () => {
     const made = album([song({ album: 'Bonus Disc' }), song({ album: 'Low Tide' }), song({ album: 'Low Tide' }), song({})]);
@@ -86,6 +89,8 @@ describe('albumOf', () => {
 
   it('is as new as its newest song, and says whether it has a cover', () => {
     expect(album([song({}, 5000), song({}, 9000), song({}, 7000)]).addedAt).toBe(9000);
+    // When its folder was made, where that is known: retagging a song changes the song's time, not this.
+    expect(albumOf('Music/Folder Name', 'Folder Name', [song({}, 9000)], false, 4000).addedAt).toBe(4000);
     expect(album([song({})], 'x', true).hasCover).toBe(true);
   });
 });
@@ -164,16 +169,16 @@ describe('Library', () => {
     expect(lib.albums).toEqual([
       {
         path: 'Music/Midori Vale/[2021] Night Market', title: 'Night Market', artist: 'Midori Vale', date: '2021-03-04',
-        trackCount: 2, durationSeconds: 20, hasCover: true, addedAt: when.getTime(),
+        trackCount: 2, durationSeconds: 20, hasCover: true, addedAt: made(market, when.getTime()),
       },
       {
         path: 'Music/Midori Vale/[2021] Night Market/Bonus', title: 'Night Market (Bonus)', artist: 'Midori Vale', date: '',
-        trackCount: 1, durationSeconds: 10, hasCover: false, addedAt: statSync(path.join(market, 'Bonus', '01. Dawn Stalls.flac')).mtimeMs,
+        trackCount: 1, durationSeconds: 10, hasCover: false, addedAt: made(path.join(market, 'Bonus'), statSync(path.join(market, 'Bonus', '01. Dawn Stalls.flac')).mtimeMs),
       },
       // No tags at all: named after its folder, with no artist, so it comes last. A folder of folders is no album.
       {
         path: 'Music/Tin Harbor/Loose', title: 'Loose', artist: '', date: '',
-        trackCount: 1, durationSeconds: null, hasCover: false, addedAt: statSync(path.join(root, 'Tin Harbor', 'Loose', 'Gulls.mp3')).mtimeMs,
+        trackCount: 1, durationSeconds: null, hasCover: false, addedAt: made(path.join(root, 'Tin Harbor', 'Loose'), statSync(path.join(root, 'Tin Harbor', 'Loose', 'Gulls.mp3')).mtimeMs),
       },
     ]);
     // The songs, as `browse` would list them, album by album.

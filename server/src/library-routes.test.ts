@@ -112,7 +112,7 @@ describe('GET library', () => {
     expect(album).toEqual({
       path: 'Music/Midori Vale/[2021] Night Market', title: 'Night Market', titleRoman: 'Yoichi', artist: 'Midori Vale', date: '2021-03-04',
       trackCount: 2, durationSeconds: 20, cover: album.cover,
-      addedAt: Math.max(statSync(path.join(market(), '01. Paper Lanterns.flac')).mtimeMs, statSync(path.join(market(), '02. Closing Bell.flac')).mtimeMs),
+      addedAt: statSync(market()).birthtimeMs || Math.max(statSync(path.join(market(), '01. Paper Lanterns.flac')).mtimeMs, statSync(path.join(market(), '02. Closing Bell.flac')).mtimeMs),
     });
     expect(compilation).toMatchObject({ path: 'Music/Various/Harbor Lights', title: 'Harbor Lights', artist: '', date: '2019', trackCount: 2, cover: null });
     expect(compilation).not.toHaveProperty('hasCover');

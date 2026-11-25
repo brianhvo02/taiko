@@ -227,6 +227,11 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
                   <input type="checkbox" checked={snap.sweepLines} onChange={(e) => store.setSweepLines(e.currentTarget.checked)} /> Sweep across each line
                 </label>
               )}
+              {snap.canSetVolume && (
+                <label className="toggle" title="Songs whose files say how loud they are play at about the same loudness. An album played in order keeps its own quiet and loud songs.">
+                  <input type="checkbox" checked={snap.levelVolume} onChange={(e) => store.setLevelVolume(e.currentTarget.checked)} /> Level the volume between songs
+                </label>
+              )}
               {snap.song && (
                 <label className="toggle" title="When this is off, pressing a line does nothing, so a stray touch can't move the song.">
                   <input type="checkbox" checked={snap.seekOnLine} onChange={(e) => store.setSeekOnLine(e.currentTarget.checked)} /> Press a line to go to it

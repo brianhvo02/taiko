@@ -19,6 +19,11 @@ export interface Track {
   /** How the audio is stored, known for FLAC (see `Tags`). */
   sampleRate?: number;
   bitsPerSample?: number;
+  /** How loud the song and its album are, from the file's ReplayGain tags (see `Tags`). */
+  trackGain?: number;
+  trackPeak?: number;
+  albumGain?: number;
+  albumPeak?: number;
   /** Other forms of the names, from the file's tags (see `Tags`). */
   titleRoman?: string;
   artistRoman?: string;

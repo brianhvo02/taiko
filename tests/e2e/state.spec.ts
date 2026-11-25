@@ -98,7 +98,7 @@ test('keeps repeat, shuffle, the lyric lines shown and the volume between visits
   await repeat(page).click();
   await repeat(page).click();
   await shuffle(page).click();
-  await page.getByLabel('Volume').fill('0.4');
+  await page.getByLabel('Volume', { exact: true }).fill('0.4');
   // A song with line-timed lyrics, to reach the switch for sweeping them.
   const lined = [short(1), { name: 'Song 1.lrc', content: '[00:01.00]one\n[00:03.00]two\n' }];
   await pick(page, 'Add a lyrics file', [lined[1]]);
@@ -112,7 +112,7 @@ test('keeps repeat, shuffle, the lyric lines shown and the volume between visits
   await page.keyboard.press('Escape');
   await expect(repeat(page)).toHaveAccessibleName('Repeat: this song');
   await expect(shuffle(page)).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByLabel('Volume')).toHaveValue('0.4');
+  await expect(page.getByLabel('Volume', { exact: true })).toHaveValue('0.4');
 });
 
 test('playlists: make one from a song, add to it, reorder, play through, and find it again after a reload', async ({ page }) => {
@@ -599,4 +599,31 @@ test('an album kept on the device plays with no connection to the NAS, lyrics an
   // On a phone the library's tabs are wider than the screen; the row of tabs scrolls, not the page.
   await page.setViewportSize({ width: 390, height: 780 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0);
+});
+
+test('volume levelling: a song that says how loud it is plays at the common level, unless turned off', async ({ page }) => {
+  await mockCatalog(page);
+  await pair(page, 'Level test');
+  const volume = () => page.evaluate(() => (window as unknown as { taikoStore: { audio: HTMLAudioElement } }).taikoStore.audio.volume);
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  // From its album, in order: the album's level (16 dB down, less 4 dB of pre-amp: about a quarter).
+  await page.locator('.library .songlist .song', { hasText: '港の灯' }).click();
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await expect.poll(volume).toBeCloseTo(0.251, 2);
+  // Shuffled, it is one song among others: its own level (10 dB down, less 4: about half).
+  await page.getByRole('button', { name: 'Shuffle' }).click();
+  await expect.poll(volume).toBeCloseTo(0.501, 2);
+  // The listener's own volume is taken from there.
+  await page.getByLabel('Volume', { exact: true }).fill('0.5');
+  await expect.poll(volume).toBeCloseTo(0.251, 2);
+  // Turned off, the song plays as it is; a song that doesn't say how loud it is always does.
+  await page.getByRole('button', { name: 'Options' }).click();
+  await page.getByLabel('Level the volume between songs').uncheck();
+  await expect.poll(volume).toBeCloseTo(0.5, 2);
+  await page.getByLabel('Level the volume between songs').check();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Library' }).first().click();
+  await page.locator('.library .songlist .song', { hasText: 'untagged' }).click();
+  await expect.poll(volume).toBeCloseTo(0.5, 2);
+  await page.getByRole('button', { name: 'Shuffle' }).click();
 });
