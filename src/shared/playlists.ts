@@ -8,10 +8,23 @@ import type { NasTrack } from './api';
 /** A NAS song as it is stored: what the folder browser said about it, without its lyrics list or cover address. */
 export type SavedTrack = Omit<NasTrack, 'lyrics'>;
 
+/**
+ * Who but its owner may use a playlist: nobody (`private`, also what a missing value means), every user of the NAS
+ * to see and play (`public`), or every user to change its songs as well (`collaborative`).
+ */
+export type PlaylistAccess = 'private' | 'public' | 'collaborative';
+
 export interface Playlist {
   id: string;
   name: string;
   tracks: SavedTrack[];
+  access?: PlaylistAccess;
+}
+
+/** Someone else's playlist, as the NAS shows it to a user who may see it. */
+export interface SharedPlaylist extends Playlist {
+  access: 'public' | 'collaborative';
+  owner: { id: string; name: string };
 }
 
 /** The most the NAS keeps: playlists, songs in one, and characters in a name or an id. */
@@ -50,7 +63,8 @@ export function toPlaylists(value: unknown): Playlist[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry): Playlist[] => {
     if (!isObject(entry) || typeof entry.id !== 'string' || !entry.id || typeof entry.name !== 'string') return [];
-    return [{ id: entry.id, name: entry.name, tracks: toSavedTracks(entry.tracks) }];
+    const access: { access?: PlaylistAccess } = entry.access === 'public' || entry.access === 'collaborative' ? { access: entry.access } : {};
+    return [{ id: entry.id, name: entry.name, tracks: toSavedTracks(entry.tracks), ...access }];
   });
 }
 
@@ -68,6 +82,15 @@ export function acceptPlaylists(value: unknown): Playlist[] | null {
     if (playlist.tracks.some((track) => Object.values(track).some((field) => typeof field === 'string' && field.length > MAX_ID))) return null;
   }
   return playlists;
+}
+
+/** Songs a collaborator sent for someone's playlist, as the NAS will keep them, or null when they are too many or too long. */
+export function acceptTracks(value: unknown): SavedTrack[] | null {
+  if (!Array.isArray(value) || value.length > MAX_PLAYLIST_TRACKS) return null;
+  const tracks = toSavedTracks(value);
+  if (tracks.length !== value.length) return null;
+  if (tracks.some((track) => Object.values(track).some((field) => typeof field === 'string' && field.length > MAX_ID))) return null;
+  return tracks;
 }
 
 /** What a device remembers about sharing its playlists with a NAS. */

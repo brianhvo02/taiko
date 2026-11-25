@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import type { IncomingHttpHeaders, Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -117,13 +118,13 @@ describe('the whole flow', () => {
     const paired = await app.call('POST', 'pair', { body: { code, deviceName: '  Kitchen tablet ' } });
     expect(paired.status).toBe(200);
     const { token, ...rest } = paired.json<PairResponse>();
-    expect(rest).toEqual({ serverName: 'Test NAS', deviceName: 'Kitchen tablet' });
+    expect(rest).toEqual({ serverName: 'Test NAS', deviceName: 'Kitchen tablet', user: { id: 'owner', name: 'Owner', owner: true } });
     expect((await app.call('POST', 'pair', { body: { code, deviceName: 'Again' } })).status).toBe(403);
 
     // me
     const me = await app.call('GET', 'me', { token });
     expect(me.status).toBe(200);
-    expect(me.json()).toEqual({ serverName: 'Test NAS', deviceName: 'Kitchen tablet' });
+    expect(me.json()).toEqual({ serverName: 'Test NAS', deviceName: 'Kitchen tablet', user: { id: 'owner', name: 'Owner', owner: true } });
 
     // library
     const library = await app.call('GET', 'library', { token });
@@ -503,10 +504,16 @@ describe('the folder browser, with the library scan off', () => {
   });
 });
 
-describe('playlists shared by the paired devices', () => {
+describe('users and their playlists', () => {
   const song = (name: string) => ({ id: name, title: name, artist: 'Midori Vale', album: '', trackNumber: null, discNumber: null, durationSeconds: 10 });
+  /** Pairs a device for a user, as an invite made for them would. */
+  const pairFor = async (running: Running, userId: string, deviceName: string): Promise<string> => {
+    const reply = await running.call('POST', 'pair', { body: { code: running.pairing.createCode(1, userId).code, deviceName } });
+    expect(reply.status).toBe(200);
+    return reply.json<PairResponse>().token;
+  };
 
-  it('keeps one set for every device, and refuses a change made from an older version', async () => {
+  it('keeps one set for all of a user\'s devices, and refuses a change made from an older version', async () => {
     const shared = await start('/api/');
     const phone = await pair(shared, 'Phone');
     const tablet = await pair(shared, 'Tablet');
@@ -517,7 +524,7 @@ describe('playlists shared by the paired devices', () => {
     const saved = await shared.call('PUT', 'playlists', { token: phone, body: { base: 0, playlists: first } });
     expect(saved.status).toBe(200);
     expect(saved.json()).toEqual({ version: 1, playlists: first });
-    // The other device sees it, and what it sends from the version it saw is kept.
+    // The user's other device sees it, and what it sends from the version it saw is kept.
     expect((await shared.call('GET', 'playlists', { token: tablet })).json()).toEqual({ version: 1, playlists: first });
     const second = [...first, { id: 'p2', name: 'Morning', tracks: [] }];
     expect((await shared.call('PUT', 'playlists', { token: tablet, body: { base: 1, playlists: second } })).json()).toEqual({ version: 2, playlists: second });
@@ -532,13 +539,100 @@ describe('playlists shared by the paired devices', () => {
   it('stores playlists only, and refuses what is not a set of them', async () => {
     const shared = await start('/api/');
     const token = await pair(shared);
-    const extra = await shared.call('PUT', 'playlists', { token, body: { base: 0, playlists: [{ id: 'p1', name: 'Evening', owner: 'x', tracks: [{ ...song('a'), cover: 'http://elsewhere/' }] }] } });
+    const extra = await shared.call('PUT', 'playlists', { token, body: { base: 0, playlists: [{ id: 'p1', name: 'Evening', owner: 'x', access: 'everyone', tracks: [{ ...song('a'), cover: 'http://elsewhere/' }] }] } });
     expect(extra.json()).toEqual({ version: 1, playlists: [{ id: 'p1', name: 'Evening', tracks: [song('a')] }] });
     for (const body of [{ playlists: [] }, { base: -1, playlists: [] }, { base: 1, playlists: 'all' }, { base: 1, playlists: [{ id: 'p1' }] }, { base: 1, playlists: [{ id: 'p', name: 'n'.repeat(81), tracks: [] }] }]) {
       expect((await shared.call('PUT', 'playlists', { token, body })).status).toBe(400);
     }
     expect((await shared.call('POST', 'playlists', { token, body: {} })).status).toBe(405);
     expect((await shared.call('GET', 'playlists', { token })).json()).toMatchObject({ version: 1 });
+  });
+
+  it('gives each user their own playlists, and shows the others only what is public or collaborative', async () => {
+    const home = await start('/api/');
+    const aki = home.pairing.addUser('Aki')!;
+    const owner = await pair(home, 'Owner phone');
+    const friend = await pairFor(home, aki.id, 'Aki phone');
+    expect((await home.call('GET', 'me', { token: friend })).json()).toEqual({ serverName: 'Test NAS', deviceName: 'Aki phone', user: { id: aki.id, name: 'Aki', owner: false } });
+
+    const mine = [
+      { id: 'secret', name: 'Just mine', tracks: [song('a')] },
+      { id: 'open', name: 'For everyone', tracks: [song('b')], access: 'public' },
+      { id: 'ours', name: 'Road trip', tracks: [song('c')], access: 'collaborative' },
+    ];
+    expect((await home.call('PUT', 'playlists', { token: owner, body: { base: 0, playlists: mine } })).status).toBe(200);
+    // Aki's own set is empty, and is theirs alone.
+    expect((await home.call('GET', 'playlists', { token: friend })).json()).toEqual({ version: 0, playlists: [] });
+    expect((await home.call('PUT', 'playlists', { token: friend, body: { base: 0, playlists: [{ id: 'aki', name: 'Aki only', tracks: [] }] } })).status).toBe(200);
+    expect((await home.call('GET', 'playlists', { token: owner })).json<{ playlists: unknown[] }>().playlists).toHaveLength(3);
+
+    // What Aki is shown of the owner's: not the private one, and whose each is.
+    const by = { id: 'owner', name: 'Owner' };
+    expect((await home.call('GET', 'playlists/shared', { token: friend })).json()).toEqual({
+      playlists: [{ ...mine[1], owner: by }, { ...mine[2], owner: by }],
+    });
+    expect((await home.call('GET', 'playlists/shared', { token: owner })).json()).toEqual({ playlists: [] });
+
+    // Aki may change the songs of the collaborative one, and of no other.
+    const changed = await home.call('PUT', 'playlists/shared/owner/ours', { token: friend, body: { tracks: [song('c'), song('d')] } });
+    expect(changed.status).toBe(200);
+    expect(changed.json()).toEqual({ ...mine[2], tracks: [song('c'), song('d')], owner: by });
+    expect((await home.call('PUT', 'playlists/shared/owner/open', { token: friend, body: { tracks: [] } })).json()).toEqual({ error: 'not-collaborative' });
+    expect((await home.call('PUT', 'playlists/shared/owner/secret', { token: friend, body: { tracks: [] } })).status).toBe(404);
+    expect((await home.call('PUT', 'playlists/shared/nobody/ours', { token: friend, body: { tracks: [] } })).status).toBe(404);
+    expect((await home.call('PUT', 'playlists/shared/owner/ours', { token: friend, body: { tracks: 'all' } })).status).toBe(400);
+    // The owner's devices take the change up as a newer version of their own set.
+    const now = (await home.call('GET', 'playlists', { token: owner })).json<{ version: number; playlists: { id: string; tracks: unknown[] }[] }>();
+    expect(now.version).toBe(2);
+    expect(now.playlists.find((playlist) => playlist.id === 'ours')?.tracks).toHaveLength(2);
+  });
+
+  it('lets a device invite another device of its own user, a few times', async () => {
+    const home = await start('/api/');
+    const aki = home.pairing.addUser('Aki')!;
+    const phone = await pairFor(home, aki.id, 'Aki phone');
+    const invite = await home.call('POST', 'invite', { token: phone, headers: { origin: APP_ORIGIN } });
+    expect(invite.status).toBe(200);
+    const made = invite.json<{ code: string; link: string; expiresAt: string }>();
+    expect(made.link).toBe(`${APP_ORIGIN}/#pair=${encodeURIComponent(home.base)}&code=${made.code}`);
+    const tablet = (await home.call('POST', 'pair', { body: { code: made.code, deviceName: 'Aki tablet' } })).json<PairResponse>().token;
+    expect((await home.call('GET', 'me', { token: tablet })).json<{ user: { name: string } }>().user.name).toBe('Aki');
+    expect((await home.call('POST', 'invite')).status).toBe(401);
+    for (let i = 0; i < 4; i++) expect((await home.call('POST', 'invite', { token: phone })).status).toBe(200);
+    expect((await home.call('POST', 'invite', { token: phone })).status).toBe(429);
+  });
+
+  it('removes a user with their devices; what they shared passes to the owner', async () => {
+    const home = await start('/api/');
+    const aki = home.pairing.addUser('Aki')!;
+    expect(home.pairing.addUser(' aki ')).toBeNull();
+    expect(home.pairing.addUser('')).toBeNull();
+    const friend = await pairFor(home, aki.id, 'Aki phone');
+    await home.call('PUT', 'playlists', { token: friend, body: { base: 0, playlists: [{ id: 'a1', name: 'Private', tracks: [] }, { id: 'a2', name: 'Shared', tracks: [song('a')], access: 'public' }] } });
+    const store = new PlaylistStore(path.join(dir, `data${servers.length - 1}`));
+    expect(store.removeUser(aki.id)).toBe(1);
+    expect(home.pairing.removeUser(aki.id)).toBe(1);
+    expect(home.pairing.removeUser('owner')).toBeNull();
+    expect((await home.call('GET', 'me', { token: friend })).status).toBe(401);
+    const owner = await pair(home, 'Owner phone');
+    expect((await home.call('GET', 'playlists', { token: owner })).json()).toEqual({ version: 1, playlists: [{ id: 'a2', name: 'Shared', tracks: [song('a')], access: 'public' }] });
+  });
+
+  it('gives a store from before there were users to the owner', async () => {
+    const home = await start('/api/');
+    const data = path.join(dir, `data${servers.length - 1}`);
+    const token = await pair(home, 'Old phone');
+    // As the files were: devices and codes with no user, and one set of playlists for everyone.
+    const pairingFile = JSON.parse(readFileSync(path.join(data, 'pairing.json'), 'utf8')) as { users?: unknown; devices: { userId?: string }[] };
+    delete pairingFile.users;
+    for (const device of pairingFile.devices) delete device.userId;
+    writeFile(path.join(data, 'pairing.json'), JSON.stringify(pairingFile));
+    writeFile(path.join(data, 'playlists.json'), JSON.stringify({ version: 4, playlists: [{ id: 'old', name: 'From before', tracks: [song('a')] }] }));
+
+    expect((await home.call('GET', 'me', { token })).json<{ user: unknown }>().user).toEqual({ id: 'owner', name: 'Owner', owner: true });
+    expect((await home.call('GET', 'playlists', { token })).json()).toEqual({ version: 4, playlists: [{ id: 'old', name: 'From before', tracks: [song('a')] }] });
+    expect(home.pairing.renameUser('owner', 'Midori')).toBe(true);
+    expect((await home.call('GET', 'me', { token })).json<{ user: { name: string } }>().user.name).toBe('Midori');
   });
 });
 

@@ -84,8 +84,28 @@ export function verifyTicket(secret: Buffer, trackId: string, exp: string, sig: 
 
 // ---- The store of codes and devices ----
 
+/** Someone who listens: the owner, or family and friends the owner has added. Each device belongs to one. */
+export interface User {
+  id: string;
+  name: string;
+  createdAt: string;
+  /** The person who runs the server. There is always exactly one, with the id `owner`. */
+  owner?: true;
+}
+
+export const OWNER_ID = 'owner';
+export const MAX_USER_NAME_LENGTH = 40;
+
+/** A user's name as kept: trimmed, single spaces. '' when nothing is left or it is too long. */
+export function cleanUserName(name: string): string {
+  const clean = name.trim().replace(/\s+/g, ' ');
+  return clean.length <= MAX_USER_NAME_LENGTH ? clean : '';
+}
+
 export interface Device {
   id: string;
+  /** The user this device belongs to: the one its invite was made for. */
+  userId: string;
   name: string;
   tokenHash: string;
   pairedAt: string;
@@ -94,12 +114,15 @@ export interface Device {
 
 interface StoredCode {
   hash: string;
+  /** The user the device that redeems this code will belong to. */
+  userId: string;
   /** ISO time. */
   expiresAt: string;
 }
 
 interface PairingData {
   version: 1;
+  users: User[];
   codes: StoredCode[];
   devices: Device[];
 }
@@ -123,10 +146,16 @@ export class PairingStore {
 
   private read(): PairingData {
     const raw = readJsonFile(this.file) as Partial<PairingData> | undefined;
+    const users = Array.isArray(raw?.users) ? raw.users : [];
+    // There is always an owner. A store from before there were users gets one, and its devices and codes are the owner's.
+    if (!users.some((user) => user.id === OWNER_ID)) users.unshift({ id: OWNER_ID, name: 'Owner', createdAt: new Date(this.now()).toISOString(), owner: true });
+    const known = new Set(users.map((user) => user.id));
+    const owned = <T extends { userId?: string }>(entry: T): T & { userId: string } => ({ ...entry, userId: entry.userId && known.has(entry.userId) ? entry.userId : OWNER_ID });
     return {
       version: 1,
-      codes: Array.isArray(raw?.codes) ? raw.codes : [],
-      devices: Array.isArray(raw?.devices) ? raw.devices : [],
+      users,
+      codes: (Array.isArray(raw?.codes) ? raw.codes : []).map(owned),
+      devices: (Array.isArray(raw?.devices) ? raw.devices : []).map(owned),
     };
   }
 
@@ -136,12 +165,13 @@ export class PairingStore {
     writeJsonAtomic(this.file, data);
   }
 
-  /** Makes a one-use code. The code itself is returned once and never stored. */
-  createCode(days: number = DEFAULT_CODE_DAYS): { code: string; expiresAt: string } {
+  /** Makes a one-use code for a device of `userId`. The code itself is returned once and never stored. */
+  createCode(days: number = DEFAULT_CODE_DAYS, userId: string = OWNER_ID): { code: string; expiresAt: string } {
     const code = generateCode();
     const expiresAt = new Date(this.now() + days * 24 * 60 * 60 * 1000).toISOString();
     const data = this.read();
-    data.codes.push({ hash: sha256Hex(code), expiresAt });
+    if (!data.users.some((user) => user.id === userId)) throw new Error(`No user has the id "${userId}".`);
+    data.codes.push({ hash: sha256Hex(code), userId, expiresAt });
     this.write(data);
     return { code, expiresAt };
   }
@@ -159,10 +189,11 @@ export class PairingStore {
       if (equalHex(stored.hash, hash) && Date.parse(stored.expiresAt) > now) found = index;
     });
     if (found < 0) return null;
+    const { userId } = data.codes[found];
     data.codes.splice(found, 1);
     const token = generateToken();
     const at = new Date(now).toISOString();
-    const device: Device = { id: randomBytes(6).toString('hex'), name: deviceName, tokenHash: sha256Hex(token), pairedAt: at, lastSeenAt: at };
+    const device: Device = { id: randomBytes(6).toString('hex'), userId, name: deviceName, tokenHash: sha256Hex(token), pairedAt: at, lastSeenAt: at };
     data.devices.push(device);
     this.write(data);
     return { token, device };
@@ -192,6 +223,58 @@ export class PairingStore {
 
   listDevices(): Device[] {
     return this.read().devices;
+  }
+
+  listUsers(): User[] {
+    return this.read().users;
+  }
+
+  /** The user a device belongs to. */
+  userOf(device: Device): User {
+    const users = this.read().users;
+    return users.find((user) => user.id === device.userId) ?? users.find((user) => user.id === OWNER_ID)!;
+  }
+
+  /** Users whose id is `idOrName`, or failing that whose name is (ignoring case). */
+  findUsers(idOrName: string): User[] {
+    const users = this.read().users;
+    const byId = users.filter((user) => user.id === idOrName);
+    if (byId.length) return byId;
+    return users.filter((user) => user.name.toLowerCase() === idOrName.trim().toLowerCase());
+  }
+
+  /** Adds a user. Null when the name is empty, too long or already someone's. */
+  addUser(name: string): User | null {
+    const clean = cleanUserName(name);
+    const data = this.read();
+    if (!clean || data.users.some((user) => user.name.toLowerCase() === clean.toLowerCase())) return null;
+    const user: User = { id: randomBytes(6).toString('hex'), name: clean, createdAt: new Date(this.now()).toISOString() };
+    data.users.push(user);
+    this.write(data);
+    return user;
+  }
+
+  /** Renames a user. False when there is no such user, or the name is empty, too long or someone else's. */
+  renameUser(id: string, name: string): boolean {
+    const clean = cleanUserName(name);
+    const data = this.read();
+    const user = data.users.find((candidate) => candidate.id === id);
+    if (!user || !clean || data.users.some((other) => other.id !== id && other.name.toLowerCase() === clean.toLowerCase())) return false;
+    user.name = clean;
+    this.write(data);
+    return true;
+  }
+
+  /** Removes a user with their devices and unused codes; how many devices went. Null for the owner or no such user. */
+  removeUser(id: string): number | null {
+    const data = this.read();
+    if (id === OWNER_ID || !data.users.some((user) => user.id === id)) return null;
+    const before = data.devices.length;
+    data.users = data.users.filter((user) => user.id !== id);
+    data.devices = data.devices.filter((device) => device.userId !== id);
+    data.codes = data.codes.filter((code) => code.userId !== id);
+    this.write(data);
+    return before - data.devices.length;
   }
 
   /** Devices whose id is `idOrName`, or failing that whose name is (ignoring case). */

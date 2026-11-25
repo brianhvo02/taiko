@@ -12,7 +12,8 @@
 import { createServer } from 'node:http';
 import { createApp } from './app';
 import { PlaylistStore } from './playlists';
-import { DEFAULT_CODE_DAYS, PairingStore, loadOrCreateSecret } from './auth';
+import { DEFAULT_CODE_DAYS, MAX_USER_NAME_LENGTH, PairingStore, loadOrCreateSecret } from './auth';
+import type { User } from './auth';
 import { loadConfig } from './config';
 import { Library } from './library';
 import { TagCache } from './tag-cache';
@@ -20,9 +21,17 @@ import { VERSION } from './version';
 
 const USAGE = `Usage:
   server.mjs                     start the server
-  server.mjs invite [--days N]   make a pairing code (valid ${DEFAULT_CODE_DAYS} days unless --days says otherwise)
-  server.mjs devices             list paired devices
-  server.mjs unpair <id|name>    remove a paired device`;
+  server.mjs invite [--user <id|name>] [--days N]
+                                 make a pairing code for one of that user's devices (the owner's unless
+                                 --user says otherwise; valid ${DEFAULT_CODE_DAYS} days unless --days says otherwise)
+  server.mjs devices             list paired devices and whose they are
+  server.mjs unpair <id|name>    remove a paired device
+  server.mjs users               list the users
+  server.mjs user add <name>     add a user (family, a friend); then invite their device with --user
+  server.mjs user rename <id|name> <new name>
+  server.mjs user remove <id|name>
+                                 remove a user and unpair their devices; the playlists they shared become the
+                                 owner's, their private ones are deleted`;
 
 class UsageError extends Error {}
 
@@ -70,32 +79,80 @@ function serve(): void {
   process.on('SIGTERM', stop);
 }
 
+/** The one user an id or a name picks out, or an error saying why it picks none or several. */
+function pickUser(pairing: PairingStore, idOrName: string): User {
+  const matches = pairing.findUsers(idOrName);
+  if (matches.length === 1) return matches[0];
+  throw new UsageError(matches.length ? `${matches.length} users match "${idOrName}". Use an id (see: users).` : `No user has the id or name "${idOrName}" (see: users).`);
+}
+
 function invite(args: string[]): void {
   let days = DEFAULT_CODE_DAYS;
-  if (args.length) {
-    days = Number(args[1]);
-    if (args[0] !== '--days' || args.length !== 2 || !(days > 0 && days <= 365)) {
-      throw new UsageError('invite takes only --days N, with N from 1 to 365.');
-    }
+  let who = '';
+  const rest = [...args];
+  while (rest.length) {
+    const flag = rest.shift();
+    const value = rest.shift();
+    if (flag === '--days' && value !== undefined && Number(value) > 0 && Number(value) <= 365) days = Number(value);
+    else if (flag === '--user' && value) who = value;
+    else throw new UsageError('invite takes --user <id or name> and --days N, with N from 1 to 365.');
   }
   const config = loadConfig(process.env, { library: false });
-  const { code, expiresAt } = new PairingStore(config.dataDir).createCode(days);
+  const pairing = new PairingStore(config.dataDir);
+  const user = who ? pickUser(pairing, who) : pairing.listUsers().find((candidate) => candidate.owner)!;
+  const { code, expiresAt } = pairing.createCode(days, user.id);
+  console.log(`For a device of ${user.name}${user.owner ? ' (the owner)' : ''}.`);
   console.log(`Pairing code: ${code}`);
   console.log(`Pairing link: ${config.appUrls[0]}#pair=${encodeURIComponent(config.publicBase)}&code=${code}`);
   console.log(`Works once, until ${new Date(expiresAt).toLocaleString()}.`);
 }
 
+function table(rows: string[][]): void {
+  const widths = rows[0].map((_, column) => Math.max(...rows.map((row) => row[column].length)));
+  for (const row of rows) console.log(row.map((cell, column) => cell.padEnd(widths[column])).join('  ').trimEnd());
+}
+
+function users(): void {
+  const config = loadConfig(process.env, { library: false });
+  const pairing = new PairingStore(config.dataDir);
+  const devices = pairing.listDevices();
+  table([['ID', 'NAME', 'DEVICES', ''], ...pairing.listUsers().map((user) => [user.id, user.name, String(devices.filter((device) => device.userId === user.id).length), user.owner ? 'owner' : ''])]);
+}
+
+function user(args: string[]): void {
+  const [action, ...rest] = args;
+  const config = loadConfig(process.env, { library: false });
+  const pairing = new PairingStore(config.dataDir);
+  if (action === 'add' && rest.length) {
+    const added = pairing.addUser(rest.join(' '));
+    if (!added) throw new UsageError(`"${rest.join(' ')}" can't be added: the name is empty, longer than ${MAX_USER_NAME_LENGTH} characters, or already someone's (see: users).`);
+    console.log(`Added ${added.name} (${added.id}). Invite their device with: invite --user ${added.id}`);
+  } else if (action === 'rename' && rest.length >= 2) {
+    const target = pickUser(pairing, rest[0]);
+    const name = rest.slice(1).join(' ');
+    if (!pairing.renameUser(target.id, name)) throw new UsageError(`${target.name} can't be renamed "${name}": the name is empty, longer than ${MAX_USER_NAME_LENGTH} characters, or already someone's.`);
+    console.log(`${target.name} is now ${pairing.listUsers().find((candidate) => candidate.id === target.id)?.name}.`);
+  } else if (action === 'remove' && rest.length === 1) {
+    const target = pickUser(pairing, rest[0]);
+    if (target.owner) throw new UsageError('The owner can\'t be removed. Rename them with: user rename');
+    const passed = new PlaylistStore(config.dataDir).removeUser(target.id);
+    const unpaired = pairing.removeUser(target.id) ?? 0;
+    console.log(`Removed ${target.name}: ${unpaired} ${unpaired === 1 ? 'device' : 'devices'} unpaired, ${passed} shared ${passed === 1 ? 'playlist' : 'playlists'} passed to the owner. Audio links their devices already have stop working within 6 hours.`);
+  } else {
+    throw new UsageError('user takes: add <name>, rename <id or name> <new name>, or remove <id or name>.');
+  }
+}
+
 function devices(): void {
   const config = loadConfig(process.env, { library: false });
-  const list = new PairingStore(config.dataDir).listDevices();
+  const pairing = new PairingStore(config.dataDir);
+  const list = pairing.listDevices();
   if (!list.length) {
     console.log('No paired devices. Make a pairing code with: invite');
     return;
   }
   const date = (iso: string): string => new Date(iso).toLocaleString();
-  const rows = [['ID', 'NAME', 'PAIRED', 'LAST SEEN'], ...list.map((device) => [device.id, device.name, date(device.pairedAt), date(device.lastSeenAt)])];
-  const widths = rows[0].map((_, column) => Math.max(...rows.map((row) => row[column].length)));
-  for (const row of rows) console.log(row.map((cell, column) => cell.padEnd(widths[column])).join('  ').trimEnd());
+  table([['ID', 'NAME', 'USER', 'PAIRED', 'LAST SEEN'], ...list.map((device) => [device.id, device.name, pairing.userOf(device).name, date(device.pairedAt), date(device.lastSeenAt)])]);
 }
 
 function unpair(args: string[]): void {
@@ -123,6 +180,8 @@ try {
   else if (command === 'invite') invite(args);
   else if (command === 'devices' && !args.length) devices();
   else if (command === 'unpair') unpair(args);
+  else if (command === 'users' && !args.length) users();
+  else if (command === 'user') user(args);
   else if (command === 'help' || command === '--help' || command === '-h') console.log(USAGE);
   else throw new UsageError(`Unknown command "${[command, ...args].join(' ')}".`);
 } catch (error) {

@@ -3,12 +3,13 @@ import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, PairResponse, ScanResponse, SearchResponse,
-  MovedResponse, PlaylistsResponse, TicketRequest, TicketResponse,
+  InviteResponse, MovedResponse, NasUser, PlaylistsResponse, SharedPlaylistsResponse, TicketRequest, TicketResponse,
 } from '../../src/shared/api';
 import { MAX_MOVED_IDS } from '../../src/shared/api';
-import { acceptPlaylists } from '../../src/shared/playlists';
+import { acceptPlaylists, acceptTracks } from '../../src/shared/playlists';
+import type { SharedPlaylist } from '../../src/shared/playlists';
 import { MAX_DEVICE_NAME_LENGTH, RateLimiter, TICKET_LIFETIME_SECONDS, signTicket, verifyTicket } from './auth';
-import type { Device, PairingStore } from './auth';
+import type { Device, PairingStore, User } from './auth';
 import type { Config } from './config';
 import { flacSeek } from './flac-file';
 import { nasTrack } from './library';
@@ -28,6 +29,9 @@ export const MAX_PLAYLISTS_BODY_BYTES = 8 * 1024 * 1024;
 export const MAX_MOVED_BODY_BYTES = 4 * 1024 * 1024;
 export const PAIR_ATTEMPTS = 10;
 export const PAIR_WINDOW_MS = 10 * 60 * 1000;
+/** Invites a device may make for its own user in that window, and how long each lasts. */
+export const DEVICE_INVITES = 5;
+export const DEVICE_INVITE_DAYS = 1;
 /** A device may ask for a rescan this often; sooner, it is told none was started. */
 export const SCAN_REQUEST_GAP_MS = 10_000;
 export const MAX_SEARCH_CHARS = 200;
@@ -46,6 +50,8 @@ export interface AppDeps {
   now?: () => number;
   log?: (message: string) => void;
 }
+
+const publicUser = (user: User): NasUser => ({ id: user.id, name: user.name, owner: user.owner === true });
 
 /** An error answered as `{ error: code }` with `status`. */
 class HttpError extends Error {
@@ -110,6 +116,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => {});
   const pairLimit = new RateLimiter(PAIR_ATTEMPTS, PAIR_WINDOW_MS);
+  const inviteLimit = new RateLimiter(DEVICE_INVITES, PAIR_WINDOW_MS);
   const paths = new LibraryPaths(config.roots);
   const moved = new MovedRecord(config.roots);
   const tags = deps.tags ?? new TagCache();
@@ -202,7 +209,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       const paired = pairing.redeem(body.code, deviceName);
       if (!paired) throw new HttpError(403, 'bad-code');
       log(`paired a device: "${paired.device.name}" (${paired.device.id})`);
-      sendJson(req, res, 200, { token: paired.token, serverName: config.serverName, deviceName: paired.device.name } satisfies PairResponse);
+      sendJson(req, res, 200, { token: paired.token, serverName: config.serverName, deviceName: paired.device.name, user: publicUser(pairing.userOf(paired.device)) } satisfies PairResponse);
       return;
     }
 
@@ -215,7 +222,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
         res.writeHead(204).end();
         return;
       }
-      sendJson(req, res, 200, { serverName: config.serverName, deviceName: device.name } satisfies MeResponse);
+      sendJson(req, res, 200, { serverName: config.serverName, deviceName: device.name, user: publicUser(pairing.userOf(device)) } satisfies MeResponse);
       return;
     }
 
@@ -302,17 +309,56 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       return;
     }
 
+    if (parts.length === 1 && parts[0] === 'invite') {
+      allow(req, 'POST');
+      const device = requireDevice(req);
+      // For another device of the same user, so nobody needs the owner for each new phone. Counted like pairing attempts.
+      if (!inviteLimit.allow(device.id, now())) throw new HttpError(429, 'too-many-attempts');
+      const { code, expiresAt } = pairing.createCode(DEVICE_INVITE_DAYS, device.userId);
+      log(`"${device.name}" made an invite for another device of ${pairing.userOf(device).name}`);
+      const origin = req.headers.origin;
+      const app = config.appOrigins.find((allowed) => allowed === origin) ?? config.appOrigins[0] ?? '';
+      sendJson(req, res, 200, { code, link: `${app}/#pair=${encodeURIComponent(config.publicBase)}&code=${code}`, expiresAt } satisfies InviteResponse);
+      return;
+    }
+
+    if (parts.length === 2 && parts[0] === 'playlists' && parts[1] === 'shared') {
+      allow(req, 'GET');
+      const device = requireDevice(req);
+      const names = new Map(pairing.listUsers().map((user) => [user.id, user]));
+      const playlists = deps.playlists.sharedWith(device.userId).flatMap(({ ownerId, playlist }): SharedPlaylist[] => {
+        const owner = names.get(ownerId);
+        return owner ? [{ ...playlist, access: playlist.access === 'collaborative' ? 'collaborative' : 'public', owner: { id: owner.id, name: owner.name } }] : [];
+      });
+      sendJson(req, res, 200, { playlists } satisfies SharedPlaylistsResponse);
+      return;
+    }
+
+    if (parts.length === 4 && parts[0] === 'playlists' && parts[1] === 'shared') {
+      allow(req, 'PUT');
+      const device = requireDevice(req);
+      const owner = pairing.listUsers().find((user) => user.id === parts[2]);
+      const tracks = acceptTracks((await readJsonBody(req, false, MAX_PLAYLISTS_BODY_BYTES)).tracks);
+      if (!tracks) throw new HttpError(400, 'bad-request');
+      const changed = owner && owner.id !== device.userId ? deps.playlists.replaceTracks(owner.id, decodeURIComponent(parts[3]), tracks) : 'missing';
+      if (changed === 'missing' || !owner) throw new HttpError(404, 'not-found');
+      if (changed === 'closed') throw new HttpError(403, 'not-collaborative');
+      log(`"${changed.name}" (${owner.name}'s playlist) changed by ${pairing.userOf(device).name}: now ${changed.tracks.length} songs`);
+      sendJson(req, res, 200, { ...changed, access: 'collaborative', owner: { id: owner.id, name: owner.name } } satisfies SharedPlaylist);
+      return;
+    }
+
     if (parts.length === 1 && parts[0] === 'playlists') {
       allow(req, 'GET', 'PUT');
       const device = requireDevice(req);
       if (req.method !== 'PUT') {
-        sendJson(req, res, 200, deps.playlists.read() satisfies PlaylistsResponse);
+        sendJson(req, res, 200, deps.playlists.of(device.userId) satisfies PlaylistsResponse);
         return;
       }
       const body = await readJsonBody(req, false, MAX_PLAYLISTS_BODY_BYTES);
       const playlists = acceptPlaylists(body.playlists);
       if (typeof body.base !== 'number' || !Number.isSafeInteger(body.base) || body.base < 0 || !playlists) throw new HttpError(400, 'bad-request');
-      const saved = deps.playlists.replace(body.base, playlists);
+      const saved = deps.playlists.replace(device.userId, body.base, playlists);
       if (!saved) throw new HttpError(409, 'conflict');
       log(`playlists changed by "${device.name}": now ${saved.playlists.length}, version ${saved.version}`);
       sendJson(req, res, 200, saved satisfies PlaylistsResponse);

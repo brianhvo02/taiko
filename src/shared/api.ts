@@ -17,9 +17,13 @@
  *   GET    library             paired  -> LibraryResponse       (the albums in the scanned roots; see LIBRARY_SCAN)
  *   GET    library/search?q=   paired  -> SearchResponse        (songs in the scanned roots matching every word of q)
  *   POST   library/scan        paired  -> ScanResponse          (starts a rescan now, unless one is running)
- *   GET    playlists           paired  -> PlaylistsResponse     (the playlists every paired device shares)
+ *   POST   invite              paired  -> InviteResponse        (a code for another device of the same user)
+ *   GET    playlists           paired  -> PlaylistsResponse     (the user's own playlists, shared by their devices)
  *   PUT    playlists           paired  PlaylistsUpdate -> PlaylistsResponse  (409 `conflict` when they changed
  *          since `base`: read them again, bring the two together and send again; 400 when they are too many or long)
+ *   GET    playlists/shared    paired  -> SharedPlaylistsResponse  (other users' public and collaborative playlists)
+ *   PUT    playlists/shared/:owner/:id  paired  SharedPlaylistUpdate -> SharedPlaylist  (the songs of a collaborative
+ *          playlist; 403 `not-collaborative` when it is only public, 404 when it isn't shared at all)
  *   POST   moved               paired  MovedRequest -> MovedResponse  (where songs that are gone from their old
  *          place went, for playlists and links made before an album was replaced)
  *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
@@ -33,14 +37,14 @@
  * server that works without the token until it expires.
  */
 
-import type { Playlist } from './playlists';
+import type { Playlist, SavedTrack, SharedPlaylist } from './playlists';
 
 export interface ApiError {
   /** A stable code such as `bad-code`, `unauthorized`, `not-found`, `bad-request`. */
   error: string;
 }
 
-/** The playlists shared by every device paired with the server, and the version they are at. */
+/** A user's own playlists, shared by all of their devices, and the version they are at. */
 export interface PlaylistsResponse {
   version: number;
   playlists: Playlist[];
@@ -85,11 +89,41 @@ export interface PairResponse {
   token: string;
   serverName: string;
   deviceName: string;
+  /** Whose device this now is: the user the invite was made for. Missing from a server from before it had users. */
+  user?: NasUser;
 }
 
 export interface MeResponse {
   serverName: string;
   deviceName: string;
+  /** Whose device this is. Missing from a server from before it had users. */
+  user?: NasUser;
+}
+
+/** Someone who listens on this NAS: the owner, or family and friends the owner has added. */
+export interface NasUser {
+  id: string;
+  name: string;
+  /** The person who runs the server. */
+  owner: boolean;
+}
+
+/** An invite for another device of the same user, made by one of their devices. */
+export interface InviteResponse {
+  code: string;
+  /** The link to open on the other device. */
+  link: string;
+  expiresAt: string;
+}
+
+/** The playlists the other users let this one see. */
+export interface SharedPlaylistsResponse {
+  playlists: SharedPlaylist[];
+}
+
+/** The songs of someone's collaborative playlist, as changed. */
+export interface SharedPlaylistUpdate {
+  tracks: SavedTrack[];
 }
 
 export type LyricsFormat = 'json' | 'ttml' | 'lrc';

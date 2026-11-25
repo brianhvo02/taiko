@@ -21,9 +21,12 @@
 # can't take a running server down.
 #
 # With one of these it deploys nothing and runs the command on the running server:
-#   --invite [--days N]     make a pairing code and print it with its link
+#   --invite [--user <id or name>] [--days N]
+#                           make a pairing code for one of that user's devices and print it with its link
 #   --devices               list paired devices
 #   --unpair <id or name>   remove one
+#   --users                 list the users
+#   --user add <name> | rename <id or name> <new name> | remove <id or name>
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -71,7 +74,7 @@ on_nas() {
 }
 
 case "${1:-}" in
-  --invite|--devices|--unpair)
+  --invite|--devices|--unpair|--users|--user)
     COMMAND="${1#--}"
     shift
     # Extra args (such as --days 7, or a device name) pass through, quoted for the remote shell.
@@ -82,7 +85,7 @@ case "${1:-}" in
     ;;
   "") ;;
   *)
-    echo "Unknown argument: $1 (expected --invite, --devices or --unpair, or nothing to deploy)" >&2
+    echo "Unknown argument: $1 (expected --invite, --devices, --unpair, --users or --user, or nothing to deploy)" >&2
     exit 1
     ;;
 esac
