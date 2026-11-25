@@ -13,6 +13,12 @@ import type { LyricsSource, Song } from '../lyrics/ttml';
 import { NasError, clearPairing, fetchFolder, fetchLyrics, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
+import {
+  cleanName, loadOffsets, loadPlaylists, loadSession, loadSettings, saveOffset, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
+} from './persist';
+import type { Playlist, QueueSource, SavedTrack, Session } from './persist';
+import { makeOrder, nextRepeat, stepFrom } from './queue';
+import type { Repeat } from './queue';
 import { folderOf, parseRoute, routeUrl } from './route';
 import type { Route } from './route';
 import { flacStartAt, readFlacIndex, streamHeader } from '../shared/flac';
@@ -29,6 +35,8 @@ export interface NasListing {
   /** The address of the folder's cover picture, when it has one. */
   cover: string | null;
 }
+
+export type SongsTab = 'folders' | 'playlists' | 'device';
 
 export interface Snapshot {
   /** The songs picked on this device. */
@@ -57,6 +65,18 @@ export interface Snapshot {
   nasFolder: NasListing | null;
   /** Whether the Songs panel is open. */
   songsOpen: boolean;
+  /** Which of the panel's lists is showing. */
+  songsTab: SongsTab;
+  /** Where the queue came from: this device's songs, a NAS folder, or a playlist. */
+  source: QueueSource;
+  repeat: Repeat;
+  shuffle: boolean;
+  /** This NAS's playlists, kept in the browser. */
+  playlists: Playlist[];
+  /** The playlist open in the panel, or null for the list of them. */
+  openPlaylist: string | null;
+  /** Where the listener was last time, offered on the first screen. */
+  resume: Session | null;
   /** From 0 to 1. */
   volume: number;
   muted: boolean;
@@ -73,12 +93,16 @@ const NAS_MESSAGES: Record<string, string> = {
   unreachable: "Can't reach the NAS. If the browser asked about local network access, allow it. Otherwise check the address and that this device is on the NAS's network.",
 };
 
+/** The pairing the page started with. */
+const START_PAIRING = loadPairing();
+
 class PlayerStore {
   readonly audio = new Audio();
   private snapshot: Snapshot = {
     tracks: [], queue: [], currentId: null, currentTrack: null, song: null, lyricsLoading: false, lyricsNames: [], songInfo: null, usInfo: null,
-    playing: false, duration: 0, offset: 0, showRoman: true, showTranslation: true, notice: '',
-    pairing: loadPairing(), nasState: 'idle', nasFolder: null, songsOpen: false, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
+    playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
+    pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, resume: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -88,6 +112,10 @@ class PlayerStore {
   private waitingLyrics: File[] = [];
   private loadRun = 0;
   private browseRun = 0;
+  /** The queue positions in the order they play (queue.ts): as listed, or shuffled. */
+  private order: number[] = [];
+  /** Each song's lyric timing nudge, kept between visits. */
+  private offsets = loadOffsets();
 
   // Exact seeking (src/shared/flac.ts). A FLAC track is never seeked by the browser: each seek plays a new stream
   // that begins at a frame, so the position is the stream's start plus how long it has played.
@@ -159,7 +187,14 @@ class PlayerStore {
     addEventListener('popstate', () => void this.applyRoute(parseRoute(location.pathname, location.search)));
     const route = parseRoute(location.pathname, location.search);
     if (route.kind !== 'home') void this.applyRoute(route);
-    else if (this.snapshot.pairing) void this.openFolder(loadLastPath());
+    else {
+      this.offerResume();
+      if (this.snapshot.pairing) void this.openFolder(loadLastPath());
+    }
+    // Where the listener is gets saved as they go, and when the page is put away.
+    setInterval(() => { if (!this.audio.paused) this.saveSessionNow(); }, 5000);
+    this.audio.addEventListener('pause', () => this.saveSessionNow());
+    addEventListener('pagehide', () => this.saveSessionNow());
     this.wireMediaSession();
   }
 
@@ -183,9 +218,18 @@ class PlayerStore {
   private songEnded(): void {
     if (this.finished) return;
     this.finished = true;
-    const { queue, currentId } = this.snapshot;
-    if (queue.findIndex((track) => track.id === currentId) >= queue.length - 1) this.set({ playing: false });
-    else this.step(1, true);
+    const { queue, currentId, repeat } = this.snapshot;
+    const at = queue.findIndex((track) => track.id === currentId);
+    if (repeat === 'one') {
+      // The same song again, from its start.
+      this.resumeAfterSeek = true;
+      this.seek(0);
+      if (!this.exact) this.audio.play().catch(() => {});
+    } else if (stepFrom(this.order, at, 1, repeat).index < 0) {
+      this.set({ playing: false });
+    } else {
+      this.step(1, true);
+    }
   }
 
   /** Where the song is, in seconds. Read this, not `audio.currentTime`, which restarts with every exact seek. */
@@ -222,7 +266,7 @@ class PlayerStore {
       return;
     }
     if (route.kind === 'folders') {
-      this.set({ songsOpen: true });
+      this.set({ songsOpen: true, songsTab: 'folders' });
       if (await this.openFolder(route.path, true)) return;
       await this.openFolder('');
       this.set({ notice: "The NAS doesn't have that folder any more." });
@@ -244,18 +288,38 @@ class PlayerStore {
       return;
     }
     this.set({ songsOpen: false });
+    const list = this.snapshot.nasFolder?.tracks ?? [];
+    this.setQueue(list, { kind: 'folder', path: folderOf(route.path) }, list.indexOf(track));
     // A page can't start sound without a tap, so a song opened from a link waits for Play.
     await this.select(track.id, false, 'none');
     if (route.at > 0 && this.snapshot.currentId === id) this.seek(route.at);
   }
 
   /** Opens the Songs panel; on a paired device its address becomes the NAS folder it shows. */
-  openSongs(): void {
-    this.set({ songsOpen: true });
-    if (!this.snapshot.pairing) return;
-    const show = () => { if (this.snapshot.songsOpen) this.writeRoute({ kind: 'folders', path: this.snapshot.nasFolder?.path ?? '' }, 'push'); };
+  /** Opens the Songs panel, on the list asked for or the one it showed last. */
+  openSongs(tab?: SongsTab): void {
+    const { pairing, tracks } = this.snapshot;
+    let songsTab = tab ?? this.snapshot.songsTab;
+    if (!pairing) songsTab = 'device';
+    else if (songsTab === 'device' && !tracks.length) songsTab = 'folders';
+    this.set({ songsOpen: true, songsTab });
+    if (songsTab === 'folders') this.showFolders();
+  }
+
+  /** The folder browser has an address; the other lists don't. */
+  private showFolders(): void {
+    const show = () => {
+      const { songsOpen, songsTab, nasFolder } = this.snapshot;
+      if (songsOpen && songsTab === 'folders') this.writeRoute({ kind: 'folders', path: nasFolder?.path ?? '' }, 'push');
+    };
     if (this.snapshot.nasFolder) show();
     else void this.openFolder(loadLastPath()).then(show);
+  }
+
+  setSongsTab(songsTab: SongsTab): void {
+    this.set({ songsTab });
+    if (songsTab === 'folders') this.showFolders();
+    else this.writeRoute(this.playRoute(), 'replace');
   }
 
   closeSongs(): void {
@@ -306,7 +370,9 @@ class PlayerStore {
 
     const tracks = [...this.snapshot.tracks, ...added];
     // A queue that is the device's songs grows with them.
-    this.set({ tracks, queue: this.snapshot.queue === this.snapshot.tracks ? tracks : this.snapshot.queue, notice });
+    const grows = this.snapshot.queue === this.snapshot.tracks && this.snapshot.source.kind === 'device';
+    this.set({ tracks, queue: grows ? tracks : this.snapshot.queue, notice });
+    if (grows && current) this.order = makeOrder(tracks.length, this.snapshot.shuffle, tracks.indexOf(current));
     if (!current && added.length) await this.select(added[0].id, false);
     else if (current && currentGotLyrics) await this.loadLyrics(current, ++this.loadRun);
   }
@@ -347,10 +413,16 @@ class PlayerStore {
 
   /** Opens a track: its audio, then its lyrics. */
   async select(id: string, autoplay = true, history: 'push' | 'replace' | 'none' = 'push'): Promise<void> {
-    const lists = [this.snapshot.tracks, this.snapshot.nasFolder?.tracks ?? [], this.snapshot.queue];
+    // The queue first: Next, Back and a restored session name a song in it. A song found elsewhere (the first
+    // file added on this device) makes that list the queue.
+    const lists = [this.snapshot.queue, this.snapshot.tracks, this.snapshot.nasFolder?.tracks ?? []];
     const queue = lists.find((list) => list.some((candidate) => candidate.id === id));
     const track = queue?.find((candidate) => candidate.id === id);
     if (!track || !queue) return;
+    if (queue !== this.snapshot.queue || this.order.length !== queue.length) {
+      const source: QueueSource = queue === this.snapshot.tracks ? { kind: 'device' } : { kind: 'folder', path: this.snapshot.nasFolder?.path ?? '' };
+      this.setQueue(queue, source, queue.indexOf(track));
+    }
     const run = ++this.loadRun;
     const known = this.identified.get(id);
     this.source = null;
@@ -358,8 +430,9 @@ class PlayerStore {
     this.resetStream();
     this.set({
       currentId: id, currentTrack: track, queue, song: null, lyricsLoading: true, lyricsNames: [], songInfo: known?.song ?? null, usInfo: known?.us ?? null,
-      duration: track.durationSeconds ?? 0, notice: '',
+      duration: track.durationSeconds ?? 0, notice: '', offset: this.offsets.get(offsetKey(track)) ?? 0,
     });
+    this.saveSessionNow();
     // A NAS song has an address. A song from this device doesn't, so it only clears another song's address.
     if (history !== 'none') {
       if (track.nas) this.writeRoute(this.playRoute(), history);
@@ -367,6 +440,13 @@ class PlayerStore {
     }
     this.updateMediaSession();
     try {
+      // A song from a playlist or a saved session is looked up again first: its lyrics files and cover may have changed.
+      if (track.stale && !(await this.freshen(track))) {
+        if (run === this.loadRun) this.set({ lyricsLoading: false, notice: `The NAS doesn't have "${track.title}" any more.` });
+        return;
+      }
+      if (run !== this.loadRun) return;
+      if (track.nas) this.set({ duration: track.durationSeconds ?? 0 });
       const url = await this.urlFor(track);
       if (run !== this.loadRun) return;
       if (track.file) {
@@ -457,11 +537,171 @@ class PlayerStore {
 
   /** Moves to the next (1) or previous (-1) track in the list. */
   step(direction: 1 | -1, autoplay = !this.audio.paused): void {
-    const { queue, currentId } = this.snapshot;
+    const { queue, currentId, repeat, shuffle } = this.snapshot;
     const at = queue.findIndex((track) => track.id === currentId);
-    const next = queue[at + direction];
-    if (direction === -1 && (this.position() > 3 || !next)) this.seek(0);
-    else if (next) void this.select(next.id, autoplay, 'replace');
+    const next = stepFrom(this.order, at, direction, repeat);
+    // Back goes to the start of the song first, as music players do; only from there to the song before.
+    if (direction === -1 && (this.position() > 3 || next.index < 0)) {
+      this.seek(0);
+      return;
+    }
+    if (next.index < 0) return;
+    let target = next.index;
+    if (next.wrapped && shuffle && direction === 1 && queue.length > 1) {
+      // Coming round a shuffled queue plays it in a new order, not starting with the song that just played.
+      do this.order = makeOrder(queue.length, true); while (this.order[0] === at);
+      target = this.order[0];
+    }
+    void this.select(queue[target].id, autoplay, 'replace');
+  }
+
+  /** Whether Next leads anywhere. */
+  canGoNext(): boolean {
+    const { queue, currentId, repeat } = this.snapshot;
+    return stepFrom(this.order, queue.findIndex((track) => track.id === currentId), 1, repeat).index >= 0;
+  }
+
+  /** Makes a list the queue, in the order it will play. */
+  private setQueue(queue: Track[], source: QueueSource, current = -1): void {
+    this.order = makeOrder(queue.length, this.snapshot.shuffle, current);
+    this.set({ queue, source });
+  }
+
+  /**
+   * Plays a list from the song chosen in it; with no song chosen, from its first (or, shuffled, from any). The
+   * list becomes the queue, so Next, Back, repeat and shuffle work through it.
+   */
+  async playFrom(list: Track[], source: QueueSource, id?: string): Promise<void> {
+    if (!list.length) return;
+    const chosen = id ? list.findIndex((track) => track.id === id) : -1;
+    this.setQueue(list, source, chosen);
+    await this.select(list[chosen >= 0 ? chosen : this.order[0]].id, true, 'push');
+  }
+
+  cycleRepeat(): void {
+    this.set({ repeat: nextRepeat(this.snapshot.repeat) });
+    this.keepSettings();
+  }
+
+  toggleShuffle(): void {
+    const { queue, currentId } = this.snapshot;
+    const shuffle = !this.snapshot.shuffle;
+    // The open song stays where it is: shuffled, the rest follow it at random; unshuffled, the list carries on from it.
+    this.order = makeOrder(queue.length, shuffle, queue.findIndex((track) => track.id === currentId));
+    this.set({ shuffle });
+    this.keepSettings();
+  }
+
+  private keepSettings(): void {
+    const { showRoman, showTranslation, repeat, shuffle } = this.snapshot;
+    saveSettings({ showRoman, showTranslation, repeat, shuffle });
+  }
+
+  /* ---------- Picking up where the listener left off ---------- */
+
+  private saveSessionNow(): void {
+    const { pairing, currentTrack, queue, source } = this.snapshot;
+    // Only NAS songs can come back: a file picked on the device is gone once the page is.
+    if (!pairing || !currentTrack?.nas || source.kind === 'device') return;
+    saveSession({
+      nas: pairing.base,
+      source,
+      tracks: queue.filter((track) => track.nas).map(savedOf),
+      current: currentTrack.nas.id,
+      position: this.finished ? 0 : this.position(),
+    });
+  }
+
+  /** On the first screen, offers the session saved last time, if it was on the NAS this device is paired with. */
+  private offerResume(): void {
+    const saved = loadSession();
+    if (saved && this.snapshot.pairing && saved.nas === this.snapshot.pairing.base) this.set({ resume: saved });
+  }
+
+  /** Takes up the offer: the same queue, the same song, from where it stopped. */
+  async resumeSession(): Promise<void> {
+    const saved = this.snapshot.resume;
+    if (!saved) return;
+    const queue = saved.tracks.map(fromSaved);
+    const id = `nas:${saved.current}`;
+    this.setQueue(queue, saved.source, queue.findIndex((track) => track.id === id));
+    this.set({ resume: null });
+    await this.select(id, false, 'push');
+    if (this.snapshot.currentId !== id || !this.audio.src) return;
+    if (saved.position > 1) {
+      this.resumeAfterSeek = true;
+      this.seek(saved.position);
+      if (this.exact) return;
+    }
+    this.audio.play().catch(() => {});
+  }
+
+  /** Looks a NAS song up again in its folder. False when the NAS no longer has it. */
+  private async freshen(track: Track): Promise<boolean> {
+    const pairing = this.snapshot.pairing;
+    const path = track.nas ? pathOfTrackId(track.nas.id) : null;
+    if (!pairing || !track.nas || !path) return false;
+    let folder;
+    try {
+      folder = await fetchFolder(pairing, folderOf(path));
+    } catch (error) {
+      if (error instanceof NasError && error.status === 404) return false;
+      throw error;
+    }
+    const fresh = folder.tracks.find((candidate) => candidate.id === track.nas?.id);
+    if (!fresh) return false;
+    Object.assign(track, trackFromNas(fresh, folder.cover ?? null), { lyricFiles: track.lyricFiles, stale: false });
+    return true;
+  }
+
+  /* ---------- Playlists (persist.ts) ---------- */
+
+  private setPlaylists(playlists: Playlist[]): void {
+    this.set({ playlists });
+    if (this.snapshot.pairing) savePlaylists(this.snapshot.pairing.base, playlists);
+  }
+
+  private changePlaylist(id: string, change: (playlist: Playlist) => Playlist): void {
+    this.setPlaylists(this.snapshot.playlists.map((playlist) => (playlist.id === id ? change(playlist) : playlist)));
+  }
+
+  /** Makes a playlist, with any songs given in it, and opens it in the panel. */
+  createPlaylist(name: string, tracks: Track[] = [], show = true): void {
+    const id = `p${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+    const playlist = withTracks({ id, name: cleanName(name), tracks: [] }, tracks.filter((track) => track.nas).map(savedOf));
+    this.setPlaylists([...this.snapshot.playlists, playlist]);
+    if (show) this.set({ openPlaylist: id, songsTab: 'playlists' });
+    // Made from a song's row, the playlist isn't opened; say that it exists.
+    else this.set({ notice: `Made ${playlist.name} with ${playlist.tracks.length} ${playlist.tracks.length === 1 ? 'song' : 'songs'}.` });
+  }
+
+  /** Adds NAS songs to a playlist, each once, and says what happened. */
+  addToPlaylist(id: string, tracks: Track[]): void {
+    const playlist = this.snapshot.playlists.find((candidate) => candidate.id === id);
+    if (!playlist) return;
+    const next = withTracks(playlist, tracks.filter((track) => track.nas).map(savedOf));
+    const added = next.tracks.length - playlist.tracks.length;
+    this.changePlaylist(id, () => next);
+    this.set({ notice: added ? `Added ${added} ${added === 1 ? 'song' : 'songs'} to ${playlist.name}.` : `${tracks.length === 1 ? 'That song is' : 'Those songs are'} already in ${playlist.name}.` });
+  }
+
+  removeFromPlaylist(id: string, index: number): void { this.changePlaylist(id, (playlist) => withoutTrack(playlist, index)); }
+  moveInPlaylist(id: string, index: number, direction: 1 | -1): void { this.changePlaylist(id, (playlist) => withMoved(playlist, index, direction)); }
+  renamePlaylist(id: string, name: string): void { this.changePlaylist(id, (playlist) => ({ ...playlist, name: cleanName(name) })); }
+
+  deletePlaylist(id: string): void {
+    this.setPlaylists(this.snapshot.playlists.filter((playlist) => playlist.id !== id));
+    if (this.snapshot.openPlaylist === id) this.set({ openPlaylist: null });
+  }
+
+  showPlaylist(id: string | null): void { this.set({ openPlaylist: id }); }
+
+  /** Plays a playlist from the song at `index`, or from its start. */
+  async playPlaylist(id: string, index?: number): Promise<void> {
+    const playlist = this.snapshot.playlists.find((candidate) => candidate.id === id);
+    if (!playlist?.tracks.length) return;
+    const list = playlist.tracks.map(fromSaved);
+    await this.playFrom(list, { kind: 'playlist', id }, index === undefined ? undefined : list[index]?.id);
   }
 
   seek(time: number): void {
@@ -543,8 +783,12 @@ class PlayerStore {
     if (resume) this.audio.play().catch(() => { this.restarting = false; this.set({ playing: false }); });
   }
 
+  /** Shifts the open song's lyrics. The shift is the song's own, and is kept for the next time it plays. */
   nudge(seconds: number): void {
-    this.set({ offset: Math.round((this.snapshot.offset + seconds) * 100) / 100 });
+    const offset = Math.round((this.snapshot.offset + seconds) * 100) / 100;
+    this.set({ offset });
+    const track = this.current();
+    if (track) saveOffset(this.offsets, offsetKey(track), offset);
   }
 
   setVolume(volume: number): void {
@@ -567,8 +811,8 @@ class PlayerStore {
     else this.set({ muted });
   }
 
-  setShowRoman(showRoman: boolean): void { this.set({ showRoman }); }
-  setShowTranslation(showTranslation: boolean): void { this.set({ showTranslation }); }
+  setShowRoman(showRoman: boolean): void { this.set({ showRoman }); this.keepSettings(); }
+  setShowTranslation(showTranslation: boolean): void { this.set({ showTranslation }); this.keepSettings(); }
   dismissNotice(): void { this.set({ notice: '' }); }
 
   /* ---------- Naming the song ---------- */
@@ -613,7 +857,7 @@ class PlayerStore {
     if (error instanceof NasError && error.status === 401) {
       clearPairing();
       this.set({
-        pairing: null, nasState: 'idle', nasFolder: null,
+        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, resume: null, songsTab: 'device',
         notice: 'This device is no longer paired with the NAS. Ask its owner for a new invite.',
       });
       this.writeRoute({ kind: 'home' }, 'replace');
@@ -671,7 +915,7 @@ class PlayerStore {
     if (!link) return;
     try {
       const pairing = await pair(link, deviceName);
-      this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null });
+      this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null, playlists: loadPlaylists(pairing.base), openPlaylist: null, songsTab: 'folders' });
       await this.openFolder('');
     } catch (error) {
       this.set({ pairError: (error instanceof NasError && NAS_MESSAGES[error.code]) || "Pairing didn't finish. Check the address and try again." });
@@ -691,7 +935,7 @@ class PlayerStore {
       this.audio.load();
     }
     this.set({
-      pairing: null, nasState: 'idle', nasFolder: null,
+      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, resume: null, songsTab: 'device',
       ...(playingFromNas ? { currentId: null, currentTrack: null, queue: [], song: null, lyricsNames: [], songInfo: null, usInfo: null } : {}),
     });
     this.writeRoute({ kind: 'home' }, 'replace');
@@ -752,6 +996,18 @@ function volumeCanBeSet(): boolean {
   probe.volume = 0.5;
   return probe.volume === 0.5;
 }
+
+/** What names a song for its saved lyric timing: its place on the NAS, or its file name on this device. */
+const offsetKey = (track: Track): string => (track.nas ? `nas:${track.nas.id}` : `file:${track.fileName}`);
+
+/** A NAS song as it is stored in a playlist or a session. */
+function savedOf(track: Track): SavedTrack {
+  const { lyrics: _lyrics, ...saved } = track.nas!;
+  return saved;
+}
+
+/** A stored song as a track. It is looked up again before it plays (`stale`). */
+const fromSaved = (saved: SavedTrack): Track => ({ ...trackFromNas({ ...saved, lyrics: [] }), stale: true });
 
 /** Reads parts of a file picked on this device. */
 function fileReader(file: File): Reader {

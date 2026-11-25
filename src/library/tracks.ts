@@ -25,6 +25,11 @@ export interface Track {
   appleSongId?: string;
   /** The address of the album's cover picture on the NAS, when its folder has one. */
   cover?: string;
+  /**
+   * Set on a NAS song that came from a playlist or a saved session, not from a folder just opened: what is known
+   * about it may be out of date (its lyrics files, its cover address), so it is looked up again before it plays.
+   */
+  stale?: boolean;
   /** The audio file's name, used to match lyrics files to it. */
   fileName: string;
   /** Set for a device track. */

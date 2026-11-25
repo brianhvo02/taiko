@@ -30,6 +30,12 @@ The NAS server runs in Docker next to your music, behind your own HTTPS address.
 
 Every NAS folder and every NAS song has its own address, shown in the address bar while you browse or play: `/nas/folders/Music/Some Artist/Some Album`, `/nas/play/Music/Some Artist/Some Album/01 song.flac`. Send one to someone paired with the same NAS and it opens there; add `?t=95` to a song's link to open it at 1:35. The browser's back and forward buttons move between folders and songs. A device that isn't paired is told to ask the owner for an invite. Songs picked on the device have no address.
 
+### Queues, playlists and what is remembered
+
+Choosing a song in a folder plays the folder through as an album; **Play** on the folder starts it from the top. The bar has shuffle and repeat (off, all songs, this song). A playlist is a list of NAS songs you name and order yourself: add a song or a whole folder from the button at the end of its row.
+
+The browser keeps, between visits: your playlists, repeat and shuffle, the volume, which lyric lines are shown, each song's lyric timing nudge, and where you left off (the queue, the song and the moment), which the first screen offers back. All of it stays in this browser: it is not on the NAS, and another device has its own. Songs picked from the device can't be kept, because a browser can't hold on to a file between visits.
+
 ## Develop
 
 | Command | What it does |
@@ -51,5 +57,5 @@ Every NAS folder and every NAS song has its own address, shown in the address ba
 - No offline install: there is a web app manifest but no service worker.
 - The NAS is browsed by folder. Songs are named by their tags, but there is no library sorted by artist and album: the server can scan for one (`LIBRARY_SCAN`), and the player has no screen for it yet.
 - The NAS is reached over HTTPS only. There are no typed pairing codes without the address, no QR codes and no WebRTC route.
-- The player remembers the NAS pairing, but not the files you picked: choose them again after a reload.
+- Files picked on the device are not remembered: choose them again after a reload. Playlists and the saved queue hold NAS songs only, and live in one browser; they don't follow you to another device.
 - All rights reserved for now: the project has no licence yet, so the code is public to read but not licensed for reuse.

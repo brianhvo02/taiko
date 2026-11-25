@@ -67,7 +67,7 @@ export function App() {
         <SearchBar snap={snap} />
       </header>
 
-      {!playing && <StartScreen snap={snap} onShowSongs={() => store.openSongs()} />}
+      {!playing && <StartScreen snap={snap} onShowSongs={() => store.openSongs('folders')} />}
 
       {playing && (
         <>

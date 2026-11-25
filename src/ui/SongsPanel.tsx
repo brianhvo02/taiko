@@ -1,45 +1,106 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { Track } from '../library/tracks';
-import type { Snapshot } from '../player/store';
+import type { SavedTrack } from '../player/persist';
+import type { Snapshot, SongsTab } from '../player/store';
 import { store } from '../player/store';
 import { canPickFolder, formatTime, otherForms, pickFiles } from './format';
 
-// What a row leads with when it has no track number, and for a folder.
-const NOTE = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4.5a1 1 0 0 1 .76-.97l8-2A1 1 0 0 1 20 2.5V15.5a3.5 3.5 0 1 1-2-3.16V7.28l-6 1.5V17.5a3.5 3.5 0 1 1-2-3.16V4.5Z" transform="translate(-1 2) scale(.92)" /></svg>;
-const FOLDER = <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h3.38a2.5 2.5 0 0 1 1.77.730L11.91 6H18.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11Z" /></svg>;
+const icon = (path: ReactNode) => <svg viewBox="0 0 24 24" aria-hidden="true">{path}</svg>;
+// What a row leads with when it has no track number, for a folder, and for a playlist.
+const NOTE = icon(<path d="M10 4.5a1 1 0 0 1 .76-.97l8-2A1 1 0 0 1 20 2.5V15.5a3.5 3.5 0 1 1-2-3.16V7.28l-6 1.5V17.5a3.5 3.5 0 1 1-2-3.16V4.5Z" transform="translate(-1 2) scale(.92)" />);
+const FOLDER = icon(<path d="M3 6.5A2.5 2.5 0 0 1 5.5 4h3.38a2.5 2.5 0 0 1 1.77.73L11.91 6H18.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-11Z" />);
+const LIST = icon(<path d="M4 6.5a1.25 1.25 0 1 1 2.5 0 1.25 1.25 0 0 1-2.5 0ZM9 5.5h10a1 1 0 1 1 0 2H9a1 1 0 0 1 0-2ZM4 12a1.25 1.25 0 1 1 2.5 0A1.25 1.25 0 0 1 4 12Zm5-1h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm-5 6.5a1.25 1.25 0 1 1 2.5 0 1.25 1.25 0 0 1-2.5 0Zm5-1h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Z" />);
+const MORE = icon(<path d="M6 10.25a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5Zm6 0a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5Zm6 0a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5Z" />);
 
-function SongRow({ track, current, onChosen }: { track: Track; current: boolean; onChosen: () => void }) {
-  const hasLyrics = track.lyricFiles.length > 0 || (track.nas?.lyrics.length ?? 0) > 0;
+/** What a song's row says, whether the song is a track or one stored in a playlist. */
+interface RowText {
+  lead: ReactNode;
+  title: string;
+  detail: string;
+  meta: string;
+}
+
+function rowText(song: Track | SavedTrack, withLyrics = false): RowText {
   // Under a title in another script goes its reading and English name; otherwise who and what it is from.
-  const detail = otherForms(track.title, track.titleRoman, track.titleEnglish) || [track.artist, track.album].filter(Boolean).join(', ');
+  const detail = otherForms(song.title, song.titleRoman, song.titleEnglish) || [song.artist, song.album].filter(Boolean).join(', ');
+  const length = song.durationSeconds ? formatTime(song.durationSeconds) : '';
+  return { lead: song.trackNumber ?? NOTE, title: song.title, detail, meta: [withLyrics ? 'Lyrics' : '', length].filter(Boolean).join(', ') };
+}
+
+/** A small menu that opens from a row's "more" button and closes on a click elsewhere or Escape. */
+function RowMenu({ label, children }: { label: string; children: (close: () => void) => ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !ref.current?.contains(e.target as Node)) setOpen(false);
+    };
+    addEventListener('click', close);
+    addEventListener('keydown', close);
+    return () => {
+      removeEventListener('click', close);
+      removeEventListener('keydown', close);
+    };
+  }, [open]);
   return (
-    <li>
-      <button type="button" className={current ? 'song current' : 'song'} aria-current={current || undefined} onClick={() => { void store.select(track.id); onChosen(); }}>
-        <span className="song-lead">{track.trackNumber ?? NOTE}</span>
-        <span className="song-title">{track.title}</span>
-        <span className="song-detail">{detail || (track.origin === 'device' ? track.fileName : '')}</span>
-        <span className="song-meta">
-          {hasLyrics ? 'Lyrics' : ''}
-          {hasLyrics && track.durationSeconds ? ', ' : ''}
-          {track.durationSeconds ? formatTime(track.durationSeconds) : ''}
-        </span>
+    <div className="row-menu" ref={ref}>
+      <button type="button" className="icon-button" title={label} aria-expanded={open} onClick={() => setOpen(!open)}>
+        {MORE}
+        <span className="sr-only">{label}</span>
       </button>
+      {open && <div className="menu" role="group" aria-label={label}>{children(() => setOpen(false))}</div>}
+    </div>
+  );
+}
+
+/** A menu's contents for putting songs in a playlist: the playlists there are, and a place to name a new one. */
+function AddToPlaylist({ snap, tracks, close }: { snap: Snapshot; tracks: Track[]; close: () => void }) {
+  const [name, setName] = useState('');
+  return (
+    <>
+      <div className="menu-heading">Add to a playlist</div>
+      {snap.playlists.map((playlist) => (
+        <button type="button" className="menu-item" key={playlist.id} onClick={() => { store.addToPlaylist(playlist.id, tracks); close(); }}>{playlist.name}</button>
+      ))}
+      <form className="menu-form" onSubmit={(e) => { e.preventDefault(); store.createPlaylist(name, tracks, false); close(); }}>
+        <input type="text" value={name} onChange={(e) => setName(e.currentTarget.value)} placeholder="New playlist" aria-label="Name for a new playlist" maxLength={80} />
+        <button className="plain-button" type="submit">Create</button>
+      </form>
+    </>
+  );
+}
+
+function SongRow({ text, current, onPlay, menu }: { text: RowText; current: boolean; onPlay: () => void; menu?: ReactNode }) {
+  return (
+    <li className="song-row">
+      <button type="button" className={current ? 'song current' : 'song'} aria-current={current || undefined} onClick={onPlay}>
+        <span className="song-lead">{text.lead}</span>
+        <span className="song-title">{text.title}</span>
+        <span className="song-detail">{text.detail}</span>
+        <span className="song-meta">{text.meta}</span>
+      </button>
+      {menu}
     </li>
   );
 }
 
-/** The paired NAS, browsed folder by folder. Choosing a song plays it, and Back and Next then walk its folder. */
-function NasBrowser({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
+const hasLyrics = (track: Track) => track.lyricFiles.length > 0 || (track.nas?.lyrics.length ?? 0) > 0;
+
+/** The paired NAS, folder by folder. A folder of songs plays through as an album. */
+function Folders({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
   const folder = snap.nasFolder;
   const segments = folder?.path ? folder.path.split('/') : [];
   const matches = (name: string) => !wanted || name.toLowerCase().includes(wanted);
   const folders = folder?.folders.filter((entry) => matches(entry.name)) ?? [];
   const tracks = folder?.tracks.filter((track) => matches(track.title)) ?? [];
   const empty = folder && folders.length === 0 && tracks.length === 0;
+  const all = folder?.tracks ?? [];
+  const play = (id?: string) => { void store.playFrom(all, { kind: 'folder', path: folder?.path ?? '' }, id); onChosen(); };
 
   return (
     <>
-      <h3>From {snap.pairing?.serverName}</h3>
       <nav className="crumbs" aria-label="Folder">
         <button className="text-button" type="button" onClick={() => void store.browse('')} disabled={segments.length === 0}>All folders</button>
         {segments.map((name, i) => (
@@ -49,10 +110,16 @@ function NasBrowser({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string
           </span>
         ))}
       </nav>
-      {folder?.cover && (
-        <div className="album">
-          <img className="folder-cover" src={folder.cover} alt="" />
-          <div className="album-name">{segments[segments.length - 1]}</div>
+      {folder && all.length > 0 && (
+        <div className={folder.cover ? 'album' : 'album no-cover'}>
+          {folder.cover && <img className="folder-cover" src={folder.cover} alt="" />}
+          <div className="album-text">
+            <div className="album-name">{segments[segments.length - 1]}</div>
+            <div className="actions">
+              <button className="plain-button primary-button" type="button" onClick={() => play()}>Play</button>
+              <RowMenu label="More for this folder">{(close) => <AddToPlaylist snap={snap} tracks={all} close={close} />}</RowMenu>
+            </div>
+          </div>
         </div>
       )}
       {snap.nasState === 'loading' && !folder && <p className="songs-note">Opening the NAS</p>}
@@ -60,25 +127,129 @@ function NasBrowser({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string
       {empty && <p className="songs-note">{wanted ? 'Nothing here matches the filter.' : 'This folder has no songs or folders.'}</p>}
       <ul className={snap.nasState === 'loading' ? 'busy' : undefined}>
         {folders.map((entry) => (
-          <li key={entry.path}>
+          <li className="song-row" key={entry.path}>
             <button type="button" className="song folder" onClick={() => void store.browse(entry.path)}>
               <span className="song-lead">{FOLDER}<span className="sr-only">Folder</span></span>
               <span className="song-title">{entry.name}</span>
             </button>
           </li>
         ))}
-        {tracks.map((track) => <SongRow key={track.id} track={track} current={track.id === snap.currentId} onChosen={onChosen} />)}
+        {tracks.map((track) => (
+          <SongRow
+            key={track.id}
+            text={rowText(track, hasLyrics(track))}
+            current={track.id === snap.currentId}
+            onPlay={() => play(track.id)}
+            menu={<RowMenu label={`More for ${track.title}`}>{(close) => <AddToPlaylist snap={snap} tracks={[track]} close={close} />}</RowMenu>}
+          />
+        ))}
       </ul>
     </>
   );
 }
 
-/** Every song the player can reach: the files picked on this device, then the paired NAS's folders. */
+/** One playlist: its songs in order, to play, reorder and remove, and the playlist itself to rename or delete. */
+function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: string; wanted: string; onChosen: () => void }) {
+  const playlist = snap.playlists.find((candidate) => candidate.id === id);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  if (!playlist) return null;
+  const count = playlist.tracks.length;
+
+  return (
+    <>
+      <nav className="crumbs" aria-label="Playlist">
+        <button className="text-button" type="button" onClick={() => store.showPlaylist(null)}>All playlists</button>
+        <span aria-hidden="true"> / </span>{playlist.name}
+      </nav>
+      <div className="album no-cover">
+        <div className="album-text">
+          {renaming === null ? <div className="album-name">{playlist.name}</div> : (
+            <form className="menu-form" onSubmit={(e) => { e.preventDefault(); store.renamePlaylist(id, renaming); setRenaming(null); }}>
+              <input type="text" value={renaming} onChange={(e) => setRenaming(e.currentTarget.value)} aria-label="Playlist name" maxLength={80} autoFocus />
+              <button className="plain-button" type="submit">Save</button>
+            </form>
+          )}
+          {deleting ? (
+            <div className="actions" role="alert">
+              <span>Delete this playlist? Its songs stay on the NAS.</span>
+              <button className="plain-button" type="button" onClick={() => store.deletePlaylist(id)}>Delete playlist</button>
+              <button className="plain-button" type="button" onClick={() => setDeleting(false)}>Keep it</button>
+            </div>
+          ) : (
+            <div className="actions">
+              <button className="plain-button primary-button" type="button" disabled={!count} onClick={() => { void store.playPlaylist(id); onChosen(); }}>Play</button>
+              <button className="plain-button" type="button" onClick={() => setRenaming(playlist.name)}>Rename</button>
+              <button className="plain-button" type="button" onClick={() => setDeleting(true)}>Delete</button>
+            </div>
+          )}
+        </div>
+      </div>
+      {count === 0 && <p className="songs-note">This playlist is empty. Add songs to it from their folders, with the button at the end of a song's row.</p>}
+      <ul>
+        {playlist.tracks.map((song, index) => (!wanted || song.title.toLowerCase().includes(wanted)) && (
+          <SongRow
+            key={song.id}
+            text={{ ...rowText(song), lead: index + 1 }}
+            current={`nas:${song.id}` === snap.currentId}
+            onPlay={() => { void store.playPlaylist(id, index); onChosen(); }}
+            menu={(
+              <RowMenu label={`More for ${song.title}`}>{(close) => (
+                <>
+                  <button type="button" className="menu-item" disabled={index === 0} onClick={() => { store.moveInPlaylist(id, index, -1); close(); }}>Move up</button>
+                  <button type="button" className="menu-item" disabled={index === count - 1} onClick={() => { store.moveInPlaylist(id, index, 1); close(); }}>Move down</button>
+                  <button type="button" className="menu-item" onClick={() => { store.removeFromPlaylist(id, index); close(); }}>Remove from playlist</button>
+                </>
+              )}</RowMenu>
+            )}
+          />
+        ))}
+      </ul>
+    </>
+  );
+}
+
+/** The playlists kept in this browser for the paired NAS. */
+function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
+  const [name, setName] = useState('');
+  if (snap.openPlaylist && snap.playlists.some((playlist) => playlist.id === snap.openPlaylist)) {
+    return <PlaylistView key={snap.openPlaylist} snap={snap} id={snap.openPlaylist} wanted={wanted} onChosen={onChosen} />;
+  }
+  const shown = snap.playlists.filter((playlist) => !wanted || playlist.name.toLowerCase().includes(wanted));
+  return (
+    <>
+      {snap.playlists.length === 0 && <p className="songs-note">No playlists yet. Name one below, or add a song to a new one from its folder. Playlists are kept in this browser.</p>}
+      <ul>
+        {shown.map((playlist) => (
+          <li className="song-row" key={playlist.id}>
+            <button type="button" className="song list" onClick={() => store.showPlaylist(playlist.id)}>
+              <span className="song-lead">{LIST}<span className="sr-only">Playlist</span></span>
+              <span className="song-title">{playlist.name}</span>
+              <span className="song-meta">{playlist.tracks.length} {playlist.tracks.length === 1 ? 'song' : 'songs'}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <form className="new-playlist menu-form" onSubmit={(e) => { e.preventDefault(); store.createPlaylist(name); setName(''); }}>
+        <input type="text" value={name} onChange={(e) => setName(e.currentTarget.value)} placeholder="New playlist" aria-label="Name for a new playlist" maxLength={80} />
+        <button className="plain-button" type="submit">Create playlist</button>
+      </form>
+    </>
+  );
+}
+
+const TAB_NAMES: Record<SongsTab, string> = { folders: 'Folders', playlists: 'Playlists', device: 'This device' };
+
+/** Every song the player can reach: the NAS folder by folder, the playlists, and the files picked on this device. */
 export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => void }) {
   const [filter, setFilter] = useState('');
   const wanted = filter.trim().toLowerCase();
+  const tabs: SongsTab[] = snap.pairing ? ['folders', 'playlists', ...(snap.tracks.length ? ['device' as const] : [])] : ['device'];
+  const tab = tabs.includes(snap.songsTab) ? snap.songsTab : tabs[0];
   const device = snap.tracks.filter((track) => !wanted || `${track.title}\n${track.artist}\n${track.album}`.toLowerCase().includes(wanted));
-  const listed = snap.tracks.length + (snap.nasFolder ? snap.nasFolder.folders.length + snap.nasFolder.tracks.length : 0);
+  const listed = tab === 'device' ? snap.tracks.length
+    : tab === 'folders' ? (snap.nasFolder ? snap.nasFolder.folders.length + snap.nasFolder.tracks.length : 0)
+      : (snap.playlists.find((playlist) => playlist.id === snap.openPlaylist)?.tracks.length ?? snap.playlists.length);
   // On a phone the panel covers the screen, so choosing a song closes it.
   const closeIfNarrow = () => { if (matchMedia('(max-width: 44rem)').matches) onClose(); };
 
@@ -88,24 +259,40 @@ export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => v
         <h2>Songs</h2>
         <button className="plain-button" type="button" onClick={onClose}>Close</button>
       </div>
+      {tabs.length > 1 && (
+        <div className="tabs" role="tablist" aria-label="Where to look for songs">
+          {tabs.map((name) => (
+            <button key={name} type="button" role="tab" aria-selected={name === tab} className={name === tab ? 'tab current' : 'tab'} onClick={() => { setFilter(''); store.setSongsTab(name); }}>{TAB_NAMES[name]}</button>
+          ))}
+        </div>
+      )}
       {listed > 8 && (
         <input className="songs-filter" type="search" value={filter} onChange={(e) => setFilter(e.currentTarget.value)} placeholder="Filter what's listed" aria-label="Filter the songs and folders listed" />
       )}
       <div className="songs-scroll">
-        {snap.tracks.length > 0 && (
+        {tab === 'folders' && <Folders snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
+        {tab === 'playlists' && <Playlists snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
+        {tab === 'device' && (
           <>
-            <h3>On this device</h3>
-            {device.length === 0 && <p className="songs-note">No songs match the filter.</p>}
-            <ul>{device.map((track) => <SongRow key={track.id} track={track} current={track.id === snap.currentId} onChosen={closeIfNarrow} />)}</ul>
+            {snap.tracks.length === 0 && <p className="songs-note">No songs yet. Add files, or pair with a NAS from the first screen.</p>}
+            {snap.tracks.length > 0 && device.length === 0 && <p className="songs-note">No songs match the filter.</p>}
+            <ul>
+              {device.map((track) => (
+                <SongRow
+                  key={track.id}
+                  text={{ ...rowText(track, hasLyrics(track)), detail: rowText(track).detail || track.fileName }}
+                  current={track.id === snap.currentId}
+                  onPlay={() => { void store.playFrom(snap.tracks, { kind: 'device' }, track.id); closeIfNarrow(); }}
+                />
+              ))}
+            </ul>
           </>
         )}
-        {snap.pairing && <NasBrowser snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
-        {!snap.pairing && snap.tracks.length === 0 && <p className="songs-note">No songs yet. Add files, or pair with a NAS from the first screen.</p>}
       </div>
       <div className="songs-foot">
         <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Add files</button>
         {canPickFolder() && <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles(true), true)}>Add a folder</button>}
-        {snap.pairing && <button className="plain-button" type="button" onClick={() => void store.refreshNas()}>Refresh</button>}
+        {tab === 'folders' && <button className="plain-button" type="button" onClick={() => void store.refreshNas()}>Refresh</button>}
       </div>
     </aside>
   );

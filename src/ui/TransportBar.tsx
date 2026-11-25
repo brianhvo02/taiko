@@ -30,6 +30,19 @@ const ICONS = {
       <path d="M4 17a1 1 0 0 1 1-1h2.18a3 3 0 0 1 5.64 0H19a1 1 0 1 1 0 2h-6.18a3 3 0 0 1-5.64 0H5a1 1 0 0 1-1-1Zm6-1a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" />
     </>
   ),
+  shuffle: (
+    <>
+      <path d="M3 7a1 1 0 0 1 1-1h2.34a5 5 0 0 1 4.16 2.22l3.66 5.5A3 3 0 0 0 16.66 15H17.59l-.800-.790a1 1 0 0 1 1.42-1.42l2.5 2.5a1 1 0 0 1 0 1.42l-2.5 2.5a1 1 0 1 1-1.42-1.42l.800-.790h-.930a5 5 0 0 1-4.16-2.22l-3.66-5.5A3 3 0 0 0 6.34 8H4a1 1 0 0 1-1-1Z" />
+      <path d="M16.79 5.21a1 1 0 0 1 1.42 0l2.5 2.5a1 1 0 0 1 0 1.42l-2.5 2.5a1 1 0 1 1-1.42-1.42l.800-.790h-.930a3 3 0 0 0-2.16.920l-1.2-1.8A5 5 0 0 1 16.66 7H17.59l-.800-.790a1 1 0 0 1 0-1ZM3 17a1 1 0 0 1 1-1h2.34a3 3 0 0 0 2.16-.920l1.2 1.8A5 5 0 0 1 6.34 18H4a1 1 0 0 1-1-1Z" />
+    </>
+  ),
+  repeat: <path d="M16.29 2.79a1 1 0 0 1 1.42 0l2.5 2.5a1 1 0 0 1 0 1.42l-2.5 2.5a1 1 0 1 1-1.42-1.42L17.09 7H8a3 3 0 0 0-3 3v1a1 1 0 1 1-2 0v-1a5 5 0 0 1 5-5h9.09l-.800-.790a1 1 0 0 1 0-1.42ZM20 12a1 1 0 0 1 1 1v1a5 5 0 0 1-5 5H6.91l.800.79a1 1 0 1 1-1.42 1.42l-2.5-2.5a1 1 0 0 1 0-1.42l2.5-2.5a1 1 0 0 1 1.42 1.42L6.91 17H16a3 3 0 0 0 3-3v-1a1 1 0 0 1 1-1Z" />,
+  repeatOne: (
+    <>
+      <path d="M16.29 2.79a1 1 0 0 1 1.42 0l2.5 2.5a1 1 0 0 1 0 1.42l-2.5 2.5a1 1 0 1 1-1.42-1.42L17.09 7H8a3 3 0 0 0-3 3v1a1 1 0 1 1-2 0v-1a5 5 0 0 1 5-5h9.09l-.800-.790a1 1 0 0 1 0-1.42ZM20 12a1 1 0 0 1 1 1v1a5 5 0 0 1-5 5H6.91l.800.79a1 1 0 1 1-1.42 1.42l-2.5-2.5a1 1 0 0 1 0-1.42l2.5-2.5a1 1 0 0 1 1.42 1.42L6.91 17H16a3 3 0 0 0 3-3v-1a1 1 0 0 1 1-1Z" />
+      <path d="M11.3 9.6a.900.9 0 0 1 1.6.560v4.24a.900.9 0 1 1-1.8 0v-2.33l-.300.19a.900.9 0 0 1-.960-1.52l1.46-.940Z" />
+    </>
+  ),
   songs: <path d="M4 6.5a1.25 1.25 0 1 1 2.5 0 1.25 1.25 0 0 1-2.5 0ZM9 5.5h10a1 1 0 1 1 0 2H9a1 1 0 0 1 0-2ZM4 12a1.25 1.25 0 1 1 2.5 0A1.25 1.25 0 0 1 4 12Zm5-1h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm-5 6.5a1.25 1.25 0 1 1 2.5 0 1.25 1.25 0 0 1-2.5 0Zm5-1h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Z" />,
 } satisfies Record<string, ReactNode>;
 
@@ -76,7 +89,6 @@ export function TransportBar({ snap }: { snap: Snapshot }) {
   const dragging = useRef(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const now = nowPlaying(snap);
-  const at = snap.queue.findIndex((track) => track.id === snap.currentId);
 
   // The seek bar and the clock follow the audio every frame, without re-rendering.
   useEffect(() => {
@@ -157,9 +169,16 @@ export function TransportBar({ snap }: { snap: Snapshot }) {
 
       <div className="center-zone">
         <div className="transport">
+          <IconButton icon="shuffle" label="Shuffle" pressed={snap.shuffle} onClick={() => store.toggleShuffle()} />
           <IconButton icon="previous" label="Previous" onClick={() => store.step(-1)} />
           <IconButton icon={snap.playing ? 'pause' : 'play'} label={snap.playing ? 'Pause' : 'Play'} className="play" onClick={() => store.toggle()} />
-          <IconButton icon="next" label="Next" onClick={() => store.step(1)} disabled={at < 0 || at >= snap.queue.length - 1} />
+          <IconButton icon="next" label="Next" onClick={() => store.step(1)} disabled={!store.canGoNext()} />
+          <IconButton
+            icon={snap.repeat === 'one' ? 'repeatOne' : 'repeat'}
+            label={snap.repeat === 'one' ? 'Repeat: this song' : snap.repeat === 'all' ? 'Repeat: all songs' : 'Repeat: off'}
+            pressed={snap.repeat !== 'off'}
+            onClick={() => store.cycleRepeat()}
+          />
         </div>
         <div className="seek-row">
           <output ref={elapsedRef}>0:00</output>

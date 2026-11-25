@@ -190,6 +190,10 @@ input::placeholder { color: var(--unsung); }
 .pair-form input, .dialog input { font-size: var(--body); color: var(--hide); }
 .pair-form button { justify-self: start; }
 .fine-print { max-width: 44rem; color: var(--unsung); font-size: var(--small); }
+/* Last time's song, offered back. Marked in brass, as what is "now" is. */
+.resume { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem 2rem; max-width: 44rem; padding: 1rem 1.25rem; border-left: 3px solid var(--brass); background: var(--night-raised); border-radius: 0 var(--corner) var(--corner) 0; }
+.resume h2 { font-size: var(--body); font-weight: 500; }
+.resume p { color: var(--quiet); }
 
 /* Pairing confirmation */
 .scrim { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 1rem; background: rgb(8 12 28 / .78); }
@@ -286,9 +290,13 @@ input::placeholder { color: var(--unsung); }
 .now a:hover { text-decoration: underline; text-underline-offset: .2em; }
 .other-name { color: var(--quiet); font-weight: 400; }
 .center-zone { display: grid; gap: .15rem; min-width: 0; }
-.transport { display: flex; align-items: center; justify-content: center; gap: 1rem; }
+.transport { display: flex; align-items: center; justify-content: center; gap: .6rem; }
 .transport .icon-button { color: var(--hide); }
 .transport .icon-button:disabled { color: var(--unsung); }
+/* Shuffle and repeat are quiet until they are on; then they are brass, like everything that is "now". */
+.transport .icon-button[aria-pressed] { color: var(--quiet); }
+.transport .icon-button[aria-pressed]:hover { color: var(--hide); }
+.transport .icon-button[aria-pressed="true"] { color: var(--brass); }
 /*
  * Play is the drum: a disc the colour of the drumhead, with the brass tacks that hold the skin around its rim.
  * Pressing it gives a little, as a struck head does.
@@ -382,6 +390,37 @@ input::placeholder { color: var(--unsung); }
 .songs ul { list-style: none; margin: 0; padding: 0; }
 .songs ul.busy { opacity: .5; }
 .songs-note { padding: .3rem 1rem; color: var(--quiet); }
+/* The panel's lists: the NAS's folders, the playlists, this device's files. */
+.tabs { display: flex; gap: 1.25rem; padding: 0 1rem; border-bottom: 1px solid var(--rule); }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; padding: .5rem 0; color: var(--quiet); cursor: pointer; }
+.tab:hover { color: var(--hide); }
+.tab.current { color: var(--hide); border-bottom-color: var(--brass); }
+.tabs + .songs-filter { margin-top: .75rem; }
+.tabs + .songs-scroll > .crumbs:first-child, .songs-filter + .songs-scroll > .crumbs:first-child { padding-top: .75rem; }
+/* A row is the song (or folder) to open, and for a song a "more" button at its end. */
+.song-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.song-row .row-menu { padding-right: .4rem; }
+.row-menu { position: relative; }
+.menu {
+  position: absolute;
+  right: .4rem;
+  top: 100%;
+  z-index: 8;
+  display: grid;
+  min-width: 13rem;
+  max-width: min(18rem, calc(100vw - 2rem));
+  padding: .4rem;
+  background: var(--night);
+  border: 1px solid var(--rule);
+  border-radius: .5rem;
+}
+.menu-heading { padding: .3rem .5rem; color: var(--quiet); font-size: var(--small); }
+.menu-item { background: none; border: 0; border-radius: var(--corner); padding: .45rem .5rem; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-item:hover { background: rgb(246 239 224 / .07); }
+.menu-item:disabled { color: var(--unsung); cursor: default; background: none; }
+.menu-form { display: flex; gap: .4rem; padding: .4rem .5rem .3rem; }
+.menu-form input { flex: 1; min-width: 0; }
+.new-playlist { padding: 1rem; }
 /* A row leads with what it is: a folder, or a song's place on its album. */
 .song {
   display: grid;
@@ -411,6 +450,10 @@ input::placeholder { color: var(--unsung); }
 .crumbs .text-button:disabled { color: var(--quiet); text-decoration: none; cursor: default; }
 /* An album folder shows its cover above its songs. */
 .album { display: grid; grid-template-columns: 6rem minmax(0, 1fr); gap: 1rem; align-items: end; padding: .6rem 1rem 1rem; }
+.album.no-cover { grid-template-columns: minmax(0, 1fr); }
+.album-text { display: grid; gap: .6rem; min-width: 0; }
+.album .actions { gap: .5rem; }
+.album .menu-form { padding: 0; }
 .folder-cover { width: 6rem; height: 6rem; object-fit: cover; border-radius: 3px; display: block; background: var(--night); }
 .album-name { font-family: var(--lyric-face); font-weight: 700; font-size: var(--large); line-height: 1.3; overflow-wrap: anywhere; }
 
@@ -446,11 +489,11 @@ input::placeholder { color: var(--unsung); }
   .part-name { padding-top: 0; }
   .lyrics::before, .lyrics::after { height: 4rem; }
   /* The bar stacks: the song, the seek bar, then the transport with Options and Songs at its sides. */
-  .bar { grid-template-columns: auto 1fr auto; gap: .5rem 1rem; padding-bottom: max(.8rem, env(safe-area-inset-bottom)); }
+  .bar { grid-template-columns: auto 1fr auto; gap: .5rem .25rem; padding-bottom: max(.8rem, env(safe-area-inset-bottom)); }
   .now-zone { grid-column: 1 / -1; }
   .center-zone { display: contents; }
   .seek-row { grid-column: 1 / -1; grid-row: 2; }
-  .transport { grid-column: 2; grid-row: 3; gap: 1.4rem; }
+  .transport { grid-column: 2; grid-row: 3; gap: .3rem; }
   .side-zone { display: contents; }
   .options { grid-column: 1; grid-row: 3; }
   .side-zone > .icon-button { grid-column: 3; grid-row: 3; }
@@ -461,7 +504,7 @@ input::placeholder { color: var(--unsung); }
   .extras-volume .volume { width: 100%; }
   .transport .play { width: 3.4rem; height: 3.4rem; }
   .transport .play svg { width: 1.6rem; height: 1.6rem; }
-  .icon-button { width: 2.75rem; height: 2.75rem; }
+  .icon-button { width: 2.5rem; height: 2.5rem; }
   .songs { inset: 0; width: 100%; z-index: 10; border-left: 0; }
 }
 @media (pointer: coarse) {

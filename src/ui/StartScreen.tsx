@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { defaultDeviceName, normalizeBase } from '../nas/client';
 import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
-import { canPickFolder, pickFiles } from './format';
+import { canPickFolder, formatTime, pickFiles } from './format';
 
 /**
  * The first screen opens with what the player does: a line being sung, filling word by word, with its
@@ -86,6 +86,7 @@ function NasWay({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void
         <p>Paired with {snap.pairing.serverName} as {snap.pairing.deviceName}.</p>
         <div className="actions">
           <button className="plain-button primary-button" type="button" onClick={onShowSongs}>Open from NAS</button>
+          <button className="plain-button" type="button" onClick={() => store.openSongs('playlists')}>Playlists</button>
           <button className="plain-button" type="button" onClick={() => void store.forgetNas()}>Forget this NAS</button>
         </div>
       </section>
@@ -115,11 +116,32 @@ function NasWay({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void
   );
 }
 
+/** Offers to pick up where the listener left off last time: the same queue and song, from the same moment. */
+function Resume({ snap }: { snap: Snapshot }) {
+  const saved = snap.resume;
+  const song = saved?.tracks.find((track) => track.id === saved.current);
+  if (!saved || !song) return null;
+  const rest = saved.tracks.length - 1;
+  return (
+    <section className="resume">
+      <div>
+        <h2>Where you left off</h2>
+        <p>
+          {song.title}{song.artist && `, ${song.artist}`}, at {formatTime(saved.position)}
+          {rest > 0 && ` (${rest} more ${rest === 1 ? 'song' : 'songs'} in the queue)`}
+        </p>
+      </div>
+      <button className="plain-button primary-button" type="button" onClick={() => void store.resumeSession()}>Continue</button>
+    </section>
+  );
+}
+
 export function StartScreen({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void }) {
   return (
     <main className="start">
       <HeroLine />
       <p className="lede">Taiko plays your music and fills in each word of the lyrics as it is sung.</p>
+      <Resume snap={snap} />
       <div className="ways">
         <section className="way">
           <h2>Music on this device</h2>
