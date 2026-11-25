@@ -20,6 +20,12 @@ npm run server:deploy  # the owner's deploy to a NAS over ssh (server/deploy/dep
 
 One test file: `npx vitest run src/lyrics/lyrics.test.ts`.
 
+## Deploys
+
+- **The player** is the classic Cloudflare Pages project `taiko-player` (https://taiko-player.pages.dev). `.github/workflows/ci.yml` typechecks and tests every push and pull request, then deploys `main` to the site and `beta` to `beta.taiko-player.pages.dev`. `preview.yml` deploys any other branch by hand. Both need the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+- Create Pages projects with `wrangler pages project create <name> --force`. Without `--force`, current Wrangler deploys a Worker instead and rewrites `package.json` and `vite.config.ts` for Workers.
+- **The NAS server** is deployed by hand with `npm run server:deploy`; CI doesn't touch it. A NAS only answers the production site (its `APP_URL`), so a beta or preview deploy can't use one unless its address is added there.
+
 ## Architecture
 
 - `src/shared/` is used by both the player and the server, so it touches neither the DOM nor Node. `api.ts` is the HTTP contract (routes, types, the lyrics-naming rule); change it first when a feature crosses the boundary. `tags.ts` reads FLAC and ID3 tags from a file's first bytes.

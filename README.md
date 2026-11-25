@@ -4,11 +4,11 @@ Taiko (太鼓, the drum) is a music player that runs in your browser and shows a
 
 ## Get started
 
-1. Run the player (`npm install`, then `npm run dev`) and open the address it prints.
+1. Open [taiko-player.pages.dev](https://taiko-player.pages.dev), or run the player yourself (`npm install`, then `npm run dev`).
 2. Choose audio files, with their lyrics if you have them. Or choose a whole folder.
 3. Or pair the player with a NAS server, if you or a friend run one.
 
-It is not hosted anywhere yet. `npm run build` makes a static site in `dist/` that any static host can serve.
+It is hosted at [taiko-player.pages.dev](https://taiko-player.pages.dev), deployed from `main` by CI. `npm run build` makes the same static site in `dist/`, which any static host can serve.
 
 ## Lyrics
 

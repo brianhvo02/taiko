@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    # main deploys the site to https://taiko-player.pages.dev; beta deploys to the Pages project's `beta` branch alias,
+    # https://beta.taiko-player.pages.dev
+    branches: [main, beta]
+  pull_request:
+  # By hand too; a manual run on main or beta deploys.
+  workflow_dispatch:
+
+# The event is in the group, so a manual run never cancels a push's run on the same branch (or the other way round).
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install -g npm@11.19.0 # allowScripts in package.json needs npm 11.19
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # The server bundle must build too: the image and the NAS deploy are made from it.
+      - run: npm run server:build
+
+  deploy:
+    name: Deploy to Cloudflare Pages
+    needs: check
+    if: >-
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/beta') &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # a newer push to the branch must not cancel an upload halfway; deploys queue instead
+    concurrency:
+      group: deploy-pages-${{ github.ref_name }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install -g npm@11.19.0
+      - run: npm ci
+      - run: npm run build
+      - run: test -f dist/index.html
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Pinned, not the action's 3.x default. The project is a classic Pages project (made with
+          # `wrangler pages project create --force`), and `pages deploy` uploads to it directly.
+          wranglerVersion: '4.148.0'
+          # main is the production site, taiko-player.pages.dev; beta is the branch alias beta.taiko-player.pages.dev
+          command: pages deploy dist --project-name=taiko-player --branch=${{ github.ref_name }}
