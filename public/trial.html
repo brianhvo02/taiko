@@ -46,6 +46,8 @@
     <li>Run each again, and lock the phone as soon as it starts: does the second song still come in?</li>
   </ol>
 
+  <p><strong style="color: var(--hide)">Round 2.</strong> Round 1 showed that plain players survive a locked phone and the mixer doesn't. Tests 5 to 8 are new: please run those, each with the screen on and then locked.</p>
+
   <section class="test" id="t1">
     <h2>1. Two players, the second started when the first ends</h2>
     <p>The simplest way. Expect a small gap.</p>
@@ -67,9 +69,30 @@
     <div class="row"><button class="go" data-test="4">Play test 4</button></div>
   </section>
 
+  <section class="test" id="t5">
+    <h2>5. Two players, the second started just early (corrected)</h2>
+    <p>Test 2 again, with the time left measured properly. Listen for a gap or an overlap at the join.</p>
+    <div class="row"><button class="go" data-test="5">Play test 5</button></div>
+  </section>
+  <section class="test" id="t6">
+    <h2>6. Crossfade, with the mixer's sound sent out through a player</h2>
+    <p>Test 3 again, but the mixed sound is played by an ordinary player, which a locked phone may leave alone.</p>
+    <div class="row"><button class="go" data-test="6">Play test 6</button></div>
+  </section>
+  <section class="test" id="t7">
+    <h2>7. Exact join, with the sound sent out through a player</h2>
+    <p>Test 4 again, the same way.</p>
+    <div class="row"><button class="go" data-test="7">Play test 7</button></div>
+  </section>
+  <section class="test" id="t8">
+    <h2>8. Exact join, with a silent player running beside it</h2>
+    <p>Test 4 again, with a second, silent player kept going, which sometimes keeps a locked phone from stopping the mixer.</p>
+    <div class="row"><button class="go" data-test="8">Play test 8</button></div>
+  </section>
+
   <div class="row"><button id="stop">Stop</button></div>
   <div id="log" aria-live="polite"></div>
-  <p>When you're done, tell Claude for each test: gap or no gap with the screen on, and whether the second song came in with the phone locked. A screenshot of the grey box helps too.</p>
+  <p>When you're done, tell Claude for tests 5 to 8: what you heard at the join with the screen on, and whether it kept playing with the phone locked. A screenshot of the grey box helps too.</p>
 </main>
 
 <script>
@@ -159,6 +182,72 @@
     cleanup.push(() => clearInterval(timer));
   };
 
+  /** A second of silence as a sound file, for a player that does nothing but keep the phone's sound going. */
+  function silence() {
+    const rate = 8000, samples = rate, bytes = new Uint8Array(44 + samples);
+    const view = new DataView(bytes.buffer);
+    const text = (at, word) => { for (let i = 0; i < word.length; i++) bytes[at + i] = word.charCodeAt(i); };
+    text(0, 'RIFF'); view.setUint32(4, 36 + samples, true); text(8, 'WAVEfmt '); view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, rate, true); view.setUint32(28, rate, true);
+    view.setUint16(32, 1, true); view.setUint16(34, 8, true); text(36, 'data'); view.setUint32(40, samples, true);
+    bytes.fill(128, 44);
+    return URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+  }
+
+  /**
+   * Both songs decoded and joined to the sample. `how` is where the sound goes: 'plain' straight to the speakers,
+   * 'stream' out through an ordinary player, 'silent' straight out with a silent player kept running beside it.
+   */
+  async function exactJoin(name, how) {
+    const { a, b } = await pair();
+    const Context = window.AudioContext || window.webkitAudioContext;
+    const context = new Context();
+    cleanup.push(() => context.close());
+    let target = context.destination;
+    let helper = null;
+    if (how === 'stream') {
+      const out = context.createMediaStreamDestination();
+      helper = new Audio();
+      helper.srcObject = out.stream;
+      target = out;
+    } else if (how === 'silent') {
+      const url = silence();
+      helper = new Audio(url);
+      helper.loop = true;
+      cleanup.push(() => URL.revokeObjectURL(url));
+    }
+    if (helper) cleanup.push(() => { helper.pause(); helper.srcObject = null; helper.removeAttribute('src'); });
+    await context.resume();
+    // Started in the tap, before the wait for the songs: a phone only lets a tap start sound.
+    if (helper) await helper.play().catch((error) => log(`  the helper player refused to start: ${error.name}`));
+    log(`${name}: fetching and decoding both songs`);
+    const controller = new AbortController();
+    cleanup.push(() => controller.abort());
+    const decode = (buffer) => new Promise((resolve, reject) => context.decodeAudioData(buffer, resolve, reject));
+    const whole = async (url, init = {}) => (await fetch(url, { signal: controller.signal, ...init })).arrayBuffer();
+    const first = await decode(await whole(a.url));
+    // Only the start of the second song is needed. Its first few megabytes are tried; a browser that won't decode
+    // a file cut short gets the whole of it.
+    let second;
+    try {
+      second = await decode(await whole(b.url, { headers: { Range: 'bytes=0-5999999' } }));
+    } catch {
+      log(`${name}: the start alone would not decode; fetching the whole second song`);
+      second = await decode(await whole(b.url));
+    }
+    const at = context.currentTime + 0.2;
+    const one = context.createBufferSource(), two = context.createBufferSource();
+    one.buffer = first; two.buffer = second;
+    one.connect(target); two.connect(target);
+    one.start(at);
+    two.start(at + first.duration, 0, HEAD);
+    cleanup.push(() => { one.stop(); two.stop(); });
+    log(`${name}: playing ${first.duration.toFixed(2)} s, then the next song joined at that exact sample (mixer is "${context.state}").`);
+    const watch = setInterval(() => log(`  mixer is "${context.state}"${helper ? `, helper player ${helper.paused ? 'paused' : 'playing'}` : ''}`), 4000);
+    cleanup.push(() => clearInterval(watch));
+    two.addEventListener('ended', () => { log(`${name}: done.`); stop(); });
+  }
+
   const tests = {
     async 1() {
       const { whole, b, length } = await pair();
@@ -216,37 +305,70 @@
       await playEnd(one, length);
       log(`Test 3: playing through the mixer (mixer is "${context.state}").`);
     },
-    async 4() {
-      const { a, b } = await pair();
+    async 4() { await exactJoin('Test 4', 'plain'); },
+    async 5() {
+      const { a, b, length } = await pair();
+      // The end of the first song as a stream that begins exactly where the NAS says, so the time left is known.
+      const one = player(a.url), two = player(b.url);
+      await unlock(two);
+      const begins = a.startSeconds || 0;
+      const LEAD = 0.06;
+      let fired = false, asked = 0;
+      const left = () => {
+        // Some browsers count such a stream from the song's start, others from the stream's.
+        const at = one.currentTime;
+        return begins > 1 && at >= begins - 0.25 ? length - at : (length - begins) - at;
+      };
+      const start = (why) => {
+        if (fired) return;
+        fired = true;
+        const remaining = left();
+        asked = performance.now();
+        two.play().catch((error) => log(`  second song refused to start: ${error.name}`));
+        log(`Test 5: asked the second song to start with ${Math.round(remaining * 1000)} ms of the first to go (${why}).`);
+        stopAfter(two, HEAD, 'Test 5');
+      };
+      two.addEventListener('playing', () => log(`Test 5: it began sounding ${Math.round(performance.now() - asked)} ms after being asked.`), { once: true });
+      const timer = setInterval(() => { if (one.currentTime > 0 && left() <= LEAD) { clearInterval(timer); start('by the timer'); } }, 5);
+      cleanup.push(() => clearInterval(timer));
+      one.addEventListener('ended', () => start('at the ending; the timer was late'));
+      await one.play();
+    },
+    async 6() {
+      const { whole, b, length } = await pair();
       const Context = window.AudioContext || window.webkitAudioContext;
       const context = new Context();
       cleanup.push(() => context.close());
+      const out = context.createMediaStreamDestination();
+      const speaker = new Audio();
+      speaker.srcObject = out.stream;
+      cleanup.push(() => { speaker.pause(); speaker.srcObject = null; });
+      const one = player(whole.url, true), two = player(b.url, true);
+      const gainOne = context.createGain(), gainTwo = context.createGain();
+      context.createMediaElementSource(one).connect(gainOne).connect(out);
+      context.createMediaElementSource(two).connect(gainTwo).connect(out);
+      gainTwo.gain.value = 0;
       await context.resume();
-      log('Test 4: fetching and decoding both songs');
-      const controller = new AbortController();
-      cleanup.push(() => controller.abort());
-      const decode = (buffer) => new Promise((resolve, reject) => context.decodeAudioData(buffer, resolve, reject));
-      const whole = async (url, init = {}) => (await fetch(url, { signal: controller.signal, ...init })).arrayBuffer();
-      const first = await decode(await whole(a.url));
-      // Only the start of the second song is needed. Its first few megabytes are tried; a browser that won't decode
-      // a file cut short gets the whole of it.
-      let second;
-      try {
-        second = await decode(await whole(b.url, { headers: { Range: 'bytes=0-5999999' } }));
-      } catch {
-        log('Test 4: the start alone would not decode; fetching the whole second song');
-        second = await decode(await whole(b.url));
-      }
-      const at = context.currentTime + 0.2;
-      const one = context.createBufferSource(), two = context.createBufferSource();
-      one.buffer = first; two.buffer = second;
-      one.connect(context.destination); two.connect(context.destination);
-      one.start(at);
-      two.start(at + first.duration, 0, HEAD);
-      cleanup.push(() => { one.stop(); two.stop(); });
-      log(`Test 4: playing ${first.duration.toFixed(2)} s, then the next song joined at that exact sample (mixer is "${context.state}").`);
-      two.addEventListener('ended', () => { log('Test 4: done.'); stop(); });
+      await speaker.play();
+      await unlock(two);
+      let fading = false;
+      one.addEventListener('timeupdate', () => {
+        const left = (Number.isFinite(one.duration) && one.duration > 0 ? one.duration : length) - one.currentTime;
+        if (fading || left > FADE) return;
+        fading = true;
+        const now = context.currentTime;
+        gainOne.gain.setValueAtTime(1, now); gainOne.gain.linearRampToValueAtTime(0, now + left);
+        gainTwo.gain.setValueAtTime(0, now); gainTwo.gain.linearRampToValueAtTime(1, now + left);
+        two.play().then(() => log(`Test 6: crossfade started with ${left.toFixed(1)} s to go (mixer is "${context.state}").`)).catch((error) => log(`  second song refused to start: ${error.name}`));
+        stopAfter(two, HEAD + FADE, 'Test 6');
+      });
+      const watch = setInterval(() => log(`  mixer is "${context.state}", speaker ${speaker.paused ? 'paused' : 'playing'}`), 4000);
+      cleanup.push(() => clearInterval(watch));
+      await playEnd(one, length);
+      log(`Test 6: playing through the mixer and out of a player (mixer is "${context.state}").`);
     },
+    async 7() { await exactJoin('Test 7', 'stream'); },
+    async 8() { await exactJoin('Test 8', 'silent'); },
   };
 
   for (const button of document.querySelectorAll('button[data-test]')) {
