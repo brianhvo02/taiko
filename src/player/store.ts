@@ -144,6 +144,7 @@ class PlayerStore {
   private loadRun = 0;
   private browseRun = 0;
   private albumRun = 0;
+  private positionTold = 0;
   private libraryTimer = 0;
   private searchTimer = 0;
   /** The queue positions in the order they play (queue.ts): as listed, or shuffled. */
@@ -182,11 +183,12 @@ class PlayerStore {
   constructor() {
     this.audio.preload = 'auto';
     this.audio.volume = this.snapshot.volume;
-    this.audio.addEventListener('play', () => this.set({ playing: true }));
+    this.audio.addEventListener('play', () => { this.set({ playing: true }); this.tellPosition(); });
     // Loading a restarted stream pauses the element for a moment; that isn't the listener pausing.
     this.audio.addEventListener('pause', () => {
       if (this.restarting) return;
       this.set({ playing: false });
+      this.tellPosition();
       // A stream cut by an exact seek can stop at its end without the browser ever saying it ended (Chrome, whose
       // clock for such a stream doesn't line up with its length). Stopping at the song's end is the end.
       if (this.exact && this.position() >= this.exact.total - 0.3) this.songEnded();
@@ -196,6 +198,7 @@ class PlayerStore {
       if (!this.exact && Number.isFinite(this.audio.duration)) this.set({ duration: this.audio.duration });
     });
     this.audio.addEventListener('timeupdate', () => {
+      if (Date.now() - this.positionTold > 1000) this.tellPosition();
       // A second look at the clock, at the first time reported while playing, in case the browser only shows the
       // song's time once it plays. Only where a stream's own time couldn't have got that far yet.
       if (this.clockChecked || this.audio.currentTime <= 0) return;
@@ -883,6 +886,7 @@ class PlayerStore {
     }
     // Show the time asked for at once, and restart the stream a moment later: dragging the seek bar asks many times.
     this.pendingSeek = target;
+    this.tellPosition();
     clearTimeout(this.seekTimer);
     this.seekTimer = window.setTimeout(() => void this.restartAt(target), 120);
   }
@@ -946,6 +950,7 @@ class PlayerStore {
       }
       this.pendingSeek = null;
       this.restarting = false;
+      this.tellPosition();
     };
     this.audio.addEventListener('canplay', ready, { once: true });
     this.audio.addEventListener('error', ready, { once: true });
@@ -1132,6 +1137,23 @@ class PlayerStore {
       } catch {
         // This browser doesn't offer the action.
       }
+    }
+  }
+
+  /**
+   * Tells the lock screen where the song is and how long it is. Left to itself it reads the audio element, and
+   * after an exact seek the element holds a stream that starts mid-song: its clock begins again at 0 and its
+   * length is only what remains, so the lock screen's bar would jump back to the start.
+   */
+  private tellPosition(): void {
+    if (!('mediaSession' in navigator) || !navigator.mediaSession.setPositionState) return;
+    this.positionTold = Date.now();
+    const duration = this.snapshot.duration;
+    try {
+      if (!this.snapshot.currentId || !Number.isFinite(duration) || duration <= 0) navigator.mediaSession.setPositionState();
+      else navigator.mediaSession.setPositionState({ duration, position: Math.max(0, Math.min(this.position(), duration)), playbackRate: 1 });
+    } catch {
+      // A browser that refuses the numbers keeps its own reading.
     }
   }
 

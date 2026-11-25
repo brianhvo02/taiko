@@ -70,3 +70,24 @@ test('a song that ends can be played again from its start', async ({ page }) => 
   await expect.poll(() => shown(page)).toBeLessThan(5);
   await expectInTime(page, 'played again');
 });
+
+test('tells the lock screen the song\'s own position and length after a seek', async ({ page }) => {
+  // The lock screen reads what the page reports; record it.
+  await page.addInitScript(() => {
+    const told: MediaPositionState[] = [];
+    (window as unknown as { told: MediaPositionState[] }).told = told;
+    navigator.mediaSession.setPositionState = (state?: MediaPositionState) => { if (state) told.push(state); };
+  });
+  await page.goto('/');
+  await pick(page, 'Choose files', [{ name: 'Tone.flac', content: toneFlac({ seconds: 50, title: 'Tone' }) }]);
+  const play = page.locator('.play');
+  await play.click();
+  await expect(play).toHaveText('Pause');
+  await seekTo(page, 30);
+  await expect.poll(() => shown(page)).toBeGreaterThan(31.5);
+  const last = await page.evaluate(() => (window as unknown as { told: MediaPositionState[] }).told.at(-1));
+  // The stream now playing starts at 30 s and is 20 s long; the lock screen is told the song's time, not the stream's.
+  expect(last?.duration).toBeCloseTo(50, 0);
+  expect(last?.position).toBeGreaterThan(30);
+  expect(last?.position).toBeLessThan(36);
+});
