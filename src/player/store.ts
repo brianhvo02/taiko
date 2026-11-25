@@ -24,7 +24,7 @@ import {
   cleanName, loadOffsets, loadPendingPlays, loadPlaylistSync, loadPlaylists, loadSession, loadSettings, saveOffset, savePendingPlays, savePlaylistSync, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
 } from './persist';
 import type { Playlist, QueueSource, SavedTrack, Session } from './persist';
-import { makeOrder, nextRepeat, stepFrom } from './queue';
+import { inPlayOrder, makeOrder, nextRepeat, stepFrom, withMovedInQueue, withQueued, withoutQueued, withoutUpcoming } from './queue';
 import type { Repeat } from './queue';
 import { folderOf, parseRoute, routeUrl } from './route';
 import type { Route } from './route';
@@ -43,7 +43,7 @@ export interface NasListing {
   cover: string | null;
 }
 
-export type SongsTab = 'folders' | 'playlists' | 'device';
+export type SongsTab = 'queue' | 'folders' | 'playlists' | 'device';
 
 /** What the library is showing: its front page, an artist, an album on the NAS, or an album of this device's songs. */
 export type LibraryPage = { kind: 'home' } | { kind: 'artist'; name: string } | { kind: 'album'; path: string } | { kind: 'deviceAlbum'; name: string };
@@ -547,8 +547,11 @@ class PlayerStore {
   openSongs(tab?: SongsTab): void {
     const { pairing, tracks } = this.snapshot;
     let songsTab = tab ?? this.snapshot.songsTab;
-    if (!pairing) songsTab = 'device';
-    else if (songsTab === 'device' && !tracks.length) songsTab = 'folders';
+    if (songsTab === 'queue' && !this.snapshot.currentTrack) songsTab = pairing ? 'folders' : 'device';
+    if (songsTab !== 'queue') {
+      if (!pairing) songsTab = 'device';
+      else if (songsTab === 'device' && !tracks.length) songsTab = 'folders';
+    }
     this.set({ songsOpen: true, songsTab });
     if (songsTab === 'folders') this.showFolders();
   }
@@ -822,6 +825,50 @@ class PlayerStore {
     void this.select(queue[target].id, autoplay, 'replace');
   }
 
+  /* ---------- The queue, as the listener sees and arranges it ---------- */
+
+  /** The songs still to come, in the order they will play. */
+  upcoming(): Track[] {
+    const { queue, currentId } = this.snapshot;
+    const place = this.order.indexOf(queue.findIndex((track) => track.id === currentId));
+    return place < 0 ? [] : this.order.slice(place + 1).map((index) => queue[index]);
+  }
+
+  /**
+   * Arranges what is to come. The list is first put in the order it plays, so a shuffled queue keeps its shuffle
+   * and the listener's changes sit in it exactly where they were made.
+   */
+  private arrange(change: (list: Track[], currentId: string) => Track[]): void {
+    const { queue, currentId } = this.snapshot;
+    if (!currentId) return;
+    const list = inPlayOrder(queue, this.order);
+    const next = change(list, currentId);
+    this.order = next.map((_, index) => index);
+    this.set({ queue: next });
+    this.saveSessionNow();
+  }
+
+  /** Puts songs straight after the one that is playing, or at the end of the queue. With nothing playing, they play. */
+  enqueue(tracks: Track[], next: boolean): void {
+    if (!tracks.length) return;
+    if (!this.snapshot.currentTrack) {
+      void this.playFrom(tracks, { kind: 'queue' }, tracks[0].id);
+      return;
+    }
+    const before = this.upcoming().length;
+    this.arrange((list, currentId) => withQueued(list, currentId, tracks, next));
+    const what = tracks.length === 1 ? tracks[0].title : `${tracks.length} songs`;
+    const only = tracks.length === 1 && tracks[0].id === this.snapshot.currentId;
+    this.set({ notice: only ? `${what} is playing now.` : next ? `${what} will play next.` : this.upcoming().length > before ? `Added ${what} to the queue.` : `Moved ${what} to the end of the queue.` });
+  }
+
+  /** The same for songs the NAS keeps for the listener: from a playlist, the favourites or the history. */
+  enqueueSaved(songs: SavedTrack[], next: boolean): void { this.enqueue(songs.map(fromSaved), next); }
+
+  moveInQueue(id: string, to: 'up' | 'down' | 'next'): void { this.arrange((list, currentId) => withMovedInQueue(list, currentId, id, to)); }
+  removeFromQueue(id: string): void { this.arrange((list, currentId) => withoutQueued(list, currentId, id)); }
+  clearUpcoming(): void { this.arrange((list, currentId) => withoutUpcoming(list, currentId)); }
+
   /** Whether Next leads anywhere. */
   canGoNext(): boolean {
     const { queue, currentId, repeat } = this.snapshot;
@@ -910,6 +957,8 @@ class PlayerStore {
       tracks: queue.filter((track) => track.nas).map(savedOf),
       current: currentTrack.nas.id,
       position: this.restoringAt ?? (this.finished ? 0 : this.position()),
+      // The order goes with it when every song is kept, so a queue arranged by hand comes back as it was.
+      ...(queue.every((track) => track.nas) && this.order.length === queue.length ? { order: this.order } : {}),
     });
   }
 
@@ -932,6 +981,7 @@ class PlayerStore {
     this.restoringAt = saved.position;
     try {
       this.setQueue(queue, saved.source, index);
+      if (saved.order) this.order = saved.order;
       await this.select(id, false, show ? 'none' : 'replace');
       if (this.snapshot.currentId === id && this.audio.src && saved.position > 1) this.seek(saved.position);
     } finally {

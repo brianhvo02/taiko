@@ -430,14 +430,17 @@ test('each person has their own playlists, shares the ones they choose, and adds
   // A public playlist plays but can't be changed; a collaborative one takes a song from the friend.
   await theirs.locator('.song.list', { hasText: 'For the house' }).click();
   await expect(theirs.getByText("Owner's playlist. You can play it; only they can change it.")).toBeVisible();
-  await expect(theirs.getByRole('button', { name: /^More for / })).toHaveCount(0);
+  await theirs.getByRole('button', { name: /^More for / }).first().click();
+  await expect(theirs.getByRole('button', { name: 'Play next' })).toBeVisible();
+  await expect(theirs.getByRole('button', { name: 'Remove from playlist' })).toHaveCount(0);
+  await friend.keyboard.press('Escape');
   await theirs.getByRole('button', { name: 'All playlists' }).click();
   await friend.goto('/album/Music/Midori%20Vale/Night%20Market');
   await friend.getByRole('button', { name: 'More for 港の灯' }).click();
   const menu = friend.getByRole('group', { name: 'More for 港の灯' });
-  await expect(menu.locator('.menu-pick:not(.menu-favourite)')).toHaveText(["Road tripOwner's"]);
+  await expect(menu.locator('.menu-pick', { hasText: "Owner's" })).toHaveText(["Road tripOwner's"]);
   await expect(menu.getByRole('button', { name: 'Create' })).toBeDisabled();
-  await menu.locator('.menu-pick:not(.menu-favourite)').click();
+  await menu.locator('.menu-pick', { hasText: 'Road trip' }).click();
   await expect(friend.getByRole('status')).toContainText('Added 1 song to Road trip.');
   // The owner's device takes the change up.
   await sync(page);
@@ -501,4 +504,58 @@ test('favourites and history: a heard song is counted, and what is marked is kep
   await page.getByRole('group', { name: 'More for untagged' }).getByRole('button', { name: 'Remove from favourites' }).click();
   await page.goto('/');
   await expect(page.locator('.library .noted')).toHaveCount(1);
+});
+
+test('the queue: play next, add to the end, rearrange, remove, and find it as it was after a reload', async ({ page }) => {
+  await mockCatalog(page);
+  await pair(page, 'Queue test');
+  type Store = { upcoming(): { title: string }[]; getSnapshot(): { currentTrack: { title: string } | null } };
+  const next = () => page.evaluate(() => (window as unknown as { taikoStore: Store }).taikoStore.upcoming().map((track) => track.title));
+  const menuOf = (title: string) => page.getByRole('button', { name: `More for ${title}` });
+
+  // With nothing playing, "Play next" plays the song, alone.
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await menuOf('untagged').click();
+  await page.getByRole('button', { name: 'Play next' }).click();
+  await expect(page.locator('.now-title')).toHaveText('untagged');
+  await page.locator('.play').click();
+  await expect(page.locator('.play')).toHaveText('Play');
+  expect(await next()).toEqual([]);
+
+  // A song for the end, then one to go before it, then the first again: it moves to the end, not listed twice.
+  await page.getByRole('button', { name: 'Library' }).first().click();
+  await menuOf('Paper Lanterns').click();
+  await page.getByRole('button', { name: 'Add to the queue' }).click();
+  await expect(page.locator('.toast')).toContainText('Added Paper Lanterns to the queue.');
+  await menuOf('港の灯').click();
+  await page.getByRole('button', { name: 'Play next' }).click();
+  await expect(page.locator('.toast')).toContainText('港の灯 will play next.');
+  expect(await next()).toEqual(['港の灯', 'Paper Lanterns']);
+  await menuOf('港の灯').click();
+  await page.getByRole('button', { name: 'Add to the queue' }).click();
+  await expect(page.locator('.toast')).toContainText('Moved 港の灯 to the end of the queue.');
+  expect(await next()).toEqual(['Paper Lanterns', '港の灯']);
+
+  // The Queue tab shows it, and each waiting song can be moved or taken out.
+  await page.getByRole('button', { name: 'Songs' }).first().click();
+  const panel = page.getByRole('complementary', { name: 'Songs' });
+  await panel.getByRole('tab', { name: 'Queue' }).click();
+  await expect(panel.locator('.song .song-title')).toHaveText(['untagged', 'Paper Lanterns', '港の灯']);
+  await panel.getByRole('button', { name: 'More for 港の灯' }).click();
+  await panel.getByRole('button', { name: 'Play next' }).click();
+  await expect(panel.locator('.song .song-title')).toHaveText(['untagged', '港の灯', 'Paper Lanterns']);
+
+  // It is the same after a reload, and Next follows it.
+  await page.reload();
+  await expect(page.locator('.now-title')).toHaveText('untagged');
+  expect(await next()).toEqual(['港の灯', 'Paper Lanterns']);
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { taikoStore: Store }).taikoStore.getSnapshot().currentTrack?.title)).toBe('港の灯');
+  expect(await next()).toEqual(['Paper Lanterns']);
+  await page.getByRole('button', { name: 'Songs' }).first().click();
+  await panel.getByRole('tab', { name: 'Queue' }).click();
+  await panel.getByRole('button', { name: 'More for Paper Lanterns' }).click();
+  await panel.getByRole('button', { name: 'Remove from the queue' }).click();
+  await expect(panel.getByText('Nothing after this')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
 });

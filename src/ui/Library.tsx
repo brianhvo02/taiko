@@ -6,7 +6,7 @@ import type { Snapshot } from '../player/store';
 import { sharedKey, store } from '../player/store';
 import type { NasAlbum } from '../shared/api';
 import { otherForms, qualityOf } from './format';
-import { AddToPlaylist, ForgetSongs, HEART, HEART_ON, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { AddToPlaylist, ForgetSongs, HEART, HEART_ON, QueueItems, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /**
  * The library: the albums the NAS has read from its tagged music, their artists, the playlists, and the songs
@@ -154,6 +154,7 @@ function SavedSongs({ snap, songs, source, meta, numbered = false }: { snap: Sna
             text={{ ...text, lead: numbered ? index + 1 : text.lead, meta: [meta?.(index) ?? '', text.meta].filter(Boolean).join(', ') }}
             current={`nas:${song.id}` === snap.currentId}
             onPlay={() => void store.playSaved(songs, source, index)}
+            menu={<RowMenu label={`More for ${song.title}`}>{(close) => <QueueItems song={song} close={close} />}</RowMenu>}
           />
         );
       })}
@@ -365,6 +366,7 @@ function DeviceAlbumPage({ snap, name }: { snap: Snapshot; name: string }) {
             text={{ ...rowText(track, hasLyrics(track)), detail: otherForms(track.title, track.titleRoman, track.titleEnglish) || (track.artist !== artist ? track.artist : '') }}
             current={track.id === snap.currentId}
             onPlay={() => void store.playFrom(tracks, { kind: 'device' }, track.id)}
+            menu={<RowMenu label={`More for ${track.title}`}>{(close) => <AddToPlaylist snap={snap} tracks={[track]} close={close} />}</RowMenu>}
           />
         ))}
       </ul>

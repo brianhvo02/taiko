@@ -15,7 +15,7 @@ export type { Playlist, SavedTrack } from '../shared/playlists';
 
 /** Where a queue came from. */
 export type QueueSource = { kind: 'device' } | { kind: 'folder'; path: string } | { kind: 'playlist'; id: string } | { kind: 'search'; query: string }
-  | { kind: 'favourites' } | { kind: 'history' };
+  | { kind: 'favourites' } | { kind: 'history' } | { kind: 'queue' };
 
 export interface Settings {
   showRoman: boolean;
@@ -40,6 +40,8 @@ export interface Session {
   /** The open song's NAS id. */
   current: string;
   position: number;
+  /** The positions in `tracks` in the order they play, when that isn't the order made afresh from the settings. */
+  order?: number[];
 }
 
 export type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
@@ -91,7 +93,7 @@ function toSource(value: unknown): QueueSource | null {
   if (value.kind === 'folder' && typeof value.path === 'string') return { kind: 'folder', path: value.path };
   if (value.kind === 'playlist' && typeof value.id === 'string') return { kind: 'playlist', id: value.id };
   if (value.kind === 'search' && typeof value.query === 'string') return { kind: 'search', query: value.query };
-  if (value.kind === 'favourites' || value.kind === 'history') return { kind: value.kind };
+  if (value.kind === 'favourites' || value.kind === 'history' || value.kind === 'queue') return { kind: value.kind };
   return null;
 }
 
@@ -216,7 +218,10 @@ export function loadSession(store: Store | null = browserStore()): Session | nul
   const tracks = toSavedTracks(saved.tracks);
   if (!source || !tracks.some((track) => track.id === saved.current)) return null;
   const position = count(saved.position);
-  return { nas: saved.nas, source, tracks, current: saved.current, position: position !== null && position > 0 ? position : 0 };
+  // An order is kept only when it names every song once.
+  const order = Array.isArray(saved.order) && saved.order.length === tracks.length && new Set(saved.order).size === tracks.length
+    && saved.order.every((index) => Number.isInteger(index) && index >= 0 && index < tracks.length) ? { order: saved.order as number[] } : {};
+  return { nas: saved.nas, source, tracks, current: saved.current, position: position !== null && position > 0 ? position : 0, ...order };
 }
 
 export function saveSession(session: Session | null, store: Store | null = browserStore()): void {

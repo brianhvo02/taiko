@@ -52,3 +52,46 @@ export function stepFrom(order: number[], at: number, direction: 1 | -1, repeat:
 
 /** The next setting when the repeat button is pressed: off, everything, one song, off. */
 export const nextRepeat = (repeat: Repeat): Repeat => (repeat === 'off' ? 'all' : repeat === 'all' ? 'one' : 'off');
+
+/* ---------- Changing what is to come ----------
+ * Once the listener arranges the queue by hand, the list itself is put in the order it will play (`inPlayOrder`)
+ * and the order beside it becomes 0, 1, 2…; these work on that list. A song is in a queue once, so adding one that
+ * is already waiting moves it. The song that is playing is never moved or removed.
+ */
+
+/** The queue's songs in the sequence they will play. */
+export function inPlayOrder<T>(queue: T[], order: number[]): T[] {
+  return order.length === queue.length ? order.map((index) => queue[index]) : [...queue];
+}
+
+/** The list with `adding` placed straight after the playing song (`next`) or at the end. */
+export function withQueued<T extends { id: string }>(list: T[], currentId: string, adding: T[], next: boolean): T[] {
+  const seen = new Set([currentId]);
+  const fresh = adding.filter((song) => !seen.has(song.id) && seen.add(song.id));
+  const rest = list.filter((song) => song.id === currentId || !seen.has(song.id));
+  const at = rest.findIndex((song) => song.id === currentId);
+  return next ? [...rest.slice(0, at + 1), ...fresh, ...rest.slice(at + 1)] : [...rest, ...fresh];
+}
+
+/** The list with a waiting song moved one place up or down, or to straight after the playing song. Never past it. */
+export function withMovedInQueue<T extends { id: string }>(list: T[], currentId: string, id: string, to: 'up' | 'down' | 'next'): T[] {
+  const first = list.findIndex((song) => song.id === currentId) + 1;
+  const from = list.findIndex((song) => song.id === id);
+  if (from < first) return list;
+  const target = to === 'next' ? first : to === 'up' ? from - 1 : from + 1;
+  if (target < first || target >= list.length || target === from) return list;
+  const moved = [...list];
+  moved.splice(target, 0, ...moved.splice(from, 1));
+  return moved;
+}
+
+/** The list without a waiting song. */
+export function withoutQueued<T extends { id: string }>(list: T[], currentId: string, id: string): T[] {
+  return id === currentId ? list : list.filter((song) => song.id !== id);
+}
+
+/** The list up to and including the playing song: nothing left to come. */
+export function withoutUpcoming<T extends { id: string }>(list: T[], currentId: string): T[] {
+  const at = list.findIndex((song) => song.id === currentId);
+  return at < 0 ? list : list.slice(0, at + 1);
+}

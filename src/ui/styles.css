@@ -511,8 +511,9 @@ input::placeholder { color: var(--unsung); }
 .menu-pick-name { overflow: hidden; text-overflow: ellipsis; }
 .menu-pick-detail { color: var(--quiet); font-size: var(--small); font-variant-numeric: tabular-nums; }
 /* Naming a new one is a line in the list, not a form bolted under it: the name is written where the name will be. */
-/* The favourite line stands apart from the playlists under it. */
-.menu-favourite { margin-bottom: .3rem; padding-bottom: .6rem; border-bottom: 1px solid var(--rule); border-radius: var(--corner) var(--corner) 0 0; }
+/* What can be done with the song itself, apart from the playlists under it. */
+.menu-part { display: grid; }
+.menu-part + .menu-heading { margin-top: .3rem; padding-top: .6rem; border-top: 1px solid var(--rule); }
 .menu-new { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; align-items: center; gap: .6rem; margin-top: .3rem; padding: .55rem .5rem .35rem; border-top: 1px solid var(--rule); }
 .menu-new input { min-width: 0; width: 100%; padding: .1rem 0 .2rem; background: none; border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; color: var(--hide); font: inherit; }
 .menu-new input::placeholder { color: var(--quiet); }
@@ -559,6 +560,7 @@ input::placeholder { color: var(--unsung); }
 .invite p { color: var(--quiet); }
 .invite-link { width: 100%; min-width: 0; font-size: var(--small); color: var(--hide); background: var(--night); }
 .invite-code span { display: block; margin-top: .2rem; font-family: var(--lyric-face); font-weight: 700; font-size: 1.5rem; letter-spacing: .08em; color: var(--hide); }
+.queue-foot { padding: .75rem 1rem; }
 .songs-forget { flex-basis: 100%; color: var(--quiet); font-size: var(--small); }
 .songs-foot { display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem 1rem; border-top: 1px solid var(--rule); }
 .crumbs { padding: 0 1rem .4rem; color: var(--unsung); font-size: .85rem; overflow-wrap: anywhere; }

@@ -62,27 +62,51 @@ export function RowMenu({ label, children }: { label: string; children: (close: 
 export const HEART = icon(<path d="M12 20.3 4.9 13.4a4.9 4.9 0 0 1 0-7 5 5 0 0 1 7.1 0 5 5 0 0 1 7.1 0 4.9 4.9 0 0 1 0 7L12 20.3Zm0-2.800 5.700-5.500a2.900 2.900 0 0 0 0-4.200 3 3 0 0 0-4.200 0L12 9.200l-1.500-1.400a3 3 0 0 0-4.200 0 2.900 2.900 0 0 0 0 4.200L12 17.500Z" />);
 export const HEART_ON = icon(<path d="M12 20.3 4.9 13.4a4.9 4.9 0 0 1 0-7 5 5 0 0 1 7.1 0 5 5 0 0 1 7.1 0 4.9 4.9 0 0 1 0 7L12 20.3Z" />);
 
+// Lines of a list with an arrow into its top, and into its bottom: where a queued song goes.
+const PLAY_NEXT = icon(<path d="M3 5.500 8 9 3 12.500v-7ZM11 6h10a1 1 0 1 1 0 2H11a1 1 0 1 1 0-2Zm0 5.500h10a1 1 0 1 1 0 2H11a1 1 0 1 1 0-2ZM4 17h17a1 1 0 1 1 0 2H4a1 1 0 1 1 0-2Z" />);
+const PLAY_LAST = icon(<path d="M4 5h17a1 1 0 1 1 0 2H4a1 1 0 0 1 0-2Zm7 5.500h10a1 1 0 1 1 0 2H11a1 1 0 1 1 0-2Zm0 5.500h10a1 1 0 1 1 0 2H11a1 1 0 1 1 0-2ZM3 11.500 8 15l-5 3.500v-7Z" />);
+
 const PLUS = icon(<path d="M12 4.5a1 1 0 0 1 1 1V11h5.5a1 1 0 1 1 0 2H13v5.5a1 1 0 1 1-2 0V13H5.500a1 1 0 1 1 0-2H11V5.500a1 1 0 0 1 1-1Z" />);
 
 const songs = (n: number) => `${n} ${n === 1 ? 'song' : 'songs'}`;
 
 /**
- * A menu's contents for putting songs in a playlist: the listener's own playlists, the ones other people let
- * everyone add to, and a line to name a new one.
+ * A song's menu (or an album's): play it next or last, mark it a favourite, and put it in a playlist: the
+ * listener's own, the ones other people let everyone add to, or a new one named on the last line.
  */
 export function AddToPlaylist({ snap, tracks, close }: { snap: Snapshot; tracks: Track[]; close: () => void }) {
-  const [name, setName] = useState('');
-  const open = snap.sharedPlaylists.filter((playlist) => playlist.access === 'collaborative');
   const one = tracks.length === 1 && tracks[0].nas ? tracks[0] : null;
   const loved = one?.nas ? store.isFavouriteSong(one.nas.id) : false;
+  // Playlists hold NAS songs only; a song from this device can still be queued.
+  const onNas = snap.pairing !== null && tracks.some((track) => track.nas);
   return (
     <>
-      {one && snap.favourites && (
-        <button type="button" className="menu-item menu-pick menu-favourite" onClick={() => { void store.toggleFavouriteSong(one); close(); }}>
-          <span className="menu-pick-lead">{loved ? HEART_ON : HEART}</span>
-          <span className="menu-pick-name">{loved ? 'Remove from favourites' : 'Add to favourites'}</span>
+      <div className="menu-part">
+        <button type="button" className="menu-item menu-pick" onClick={() => { store.enqueue(tracks, true); close(); }}>
+          <span className="menu-pick-lead">{PLAY_NEXT}</span>
+          <span className="menu-pick-name">Play next</span>
         </button>
-      )}
+        <button type="button" className="menu-item menu-pick" onClick={() => { store.enqueue(tracks, false); close(); }}>
+          <span className="menu-pick-lead">{PLAY_LAST}</span>
+          <span className="menu-pick-name">Add to the queue</span>
+        </button>
+        {one && snap.favourites && (
+          <button type="button" className="menu-item menu-pick menu-favourite" onClick={() => { void store.toggleFavouriteSong(one); close(); }}>
+            <span className="menu-pick-lead">{loved ? HEART_ON : HEART}</span>
+            <span className="menu-pick-name">{loved ? 'Remove from favourites' : 'Add to favourites'}</span>
+          </button>
+        )}
+      </div>
+      {onNas && <PlaylistPicks snap={snap} tracks={tracks} close={close} />}
+    </>
+  );
+}
+
+function PlaylistPicks({ snap, tracks, close }: { snap: Snapshot; tracks: Track[]; close: () => void }) {
+  const [name, setName] = useState('');
+  const open = snap.sharedPlaylists.filter((playlist) => playlist.access === 'collaborative');
+  return (
+    <>
       <div className="menu-heading">Add to a playlist</div>
       {snap.playlists.map((playlist) => (
         <button type="button" className="menu-item menu-pick" key={playlist.id} onClick={() => { store.addToPlaylist(playlist.id, tracks); close(); }}>
@@ -130,6 +154,16 @@ export const ACCESS: Record<PlaylistAccess, { choice: string; said: string }> = 
   public: { choice: 'Everyone can play it', said: 'Everyone can play it' },
   collaborative: { choice: 'Everyone can change it', said: 'Everyone can change it' },
 };
+
+/** The two lines that queue a stored song, for menus that aren't the full song menu. */
+export function QueueItems({ song, close }: { song: SavedTrack; close: () => void }) {
+  return (
+    <>
+      <button type="button" className="menu-item" onClick={() => { store.enqueueSaved([song], true); close(); }}>Play next</button>
+      <button type="button" className="menu-item" onClick={() => { store.enqueueSaved([song], false); close(); }}>Add to the queue</button>
+    </>
+  );
+}
 
 export function SongRow({ text, current, onPlay, menu }: { text: RowText; current: boolean; onPlay: () => void; menu?: ReactNode }) {
   return (

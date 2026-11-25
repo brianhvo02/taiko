@@ -4,7 +4,7 @@ import type { Snapshot, SongsTab } from '../player/store';
 import { sharedKey, store } from '../player/store';
 import type { PlaylistAccess } from '../shared/playlists';
 import { canPickFolder, pickFiles } from './format';
-import { ACCESS, AddToPlaylist, FOLDER, ForgetSongs, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { ACCESS, AddToPlaylist, FOLDER, ForgetSongs, NOTE, QueueItems, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /** The paired NAS, folder by folder. A folder of songs plays through as an album. */
 function Folders({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
@@ -95,12 +95,17 @@ function SharedView({ snap, at, wanted, onChosen }: { snap: Snapshot; at: string
             text={{ ...rowText(song), lead: index + 1 }}
             current={`nas:${song.id}` === snap.currentId}
             onPlay={() => { void store.playShared(at, index); onChosen(); }}
-            menu={open && (
+            menu={(
               <RowMenu label={`More for ${song.title}`}>{(close) => (
                 <>
-                  <button type="button" className="menu-item" disabled={index === 0} onClick={() => { store.moveInShared(at, index, -1); close(); }}>Move up</button>
-                  <button type="button" className="menu-item" disabled={index === count - 1} onClick={() => { store.moveInShared(at, index, 1); close(); }}>Move down</button>
-                  <button type="button" className="menu-item" onClick={() => { store.removeFromShared(at, index); close(); }}>Remove from playlist</button>
+                  <QueueItems song={song} close={close} />
+                  {open && (
+                    <>
+                      <button type="button" className="menu-item" disabled={index === 0} onClick={() => { store.moveInShared(at, index, -1); close(); }}>Move up</button>
+                      <button type="button" className="menu-item" disabled={index === count - 1} onClick={() => { store.moveInShared(at, index, 1); close(); }}>Move down</button>
+                      <button type="button" className="menu-item" onClick={() => { store.removeFromShared(at, index); close(); }}>Remove from playlist</button>
+                    </>
+                  )}
                 </>
               )}</RowMenu>
             )}
@@ -167,6 +172,7 @@ function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: stri
             menu={(
               <RowMenu label={`More for ${song.title}`}>{(close) => (
                 <>
+                  <QueueItems song={song} close={close} />
                   <button type="button" className="menu-item" disabled={index === 0} onClick={() => { store.moveInPlaylist(id, index, -1); close(); }}>Move up</button>
                   <button type="button" className="menu-item" disabled={index === count - 1} onClick={() => { store.moveInPlaylist(id, index, 1); close(); }}>Move down</button>
                   <button type="button" className="menu-item" onClick={() => { store.removeFromPlaylist(id, index); close(); }}>Remove from playlist</button>
@@ -232,16 +238,58 @@ function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string;
   );
 }
 
-const TAB_NAMES: Record<SongsTab, string> = { folders: 'Folders', playlists: 'Playlists', device: 'This device' };
+const TAB_NAMES: Record<SongsTab, string> = { queue: 'Queue', folders: 'Folders', playlists: 'Playlists', device: 'This device' };
+
+/** What is playing and what comes after it, in order, for the listener to rearrange. */
+function Queue({ snap }: { snap: Snapshot }) {
+  const now = snap.currentTrack;
+  if (!now) return null;
+  const coming = store.upcoming();
+  return (
+    <>
+      <h3>Playing now</h3>
+      <ul>
+        <SongRow text={{ ...rowText(now), lead: NOTE }} current onPlay={() => store.showLyrics()} />
+      </ul>
+      <h3>{coming.length ? 'Next' : snap.repeat === 'all' && snap.queue.length > 1 ? 'Next: the queue comes round again' : 'Nothing after this'}</h3>
+      {coming.length === 0 && <p className="songs-note">Add songs with "Play next" or "Add to the queue", in the menu at the end of a song's row.</p>}
+      <ul>
+        {coming.map((track, index) => (
+          <SongRow
+            key={track.id}
+            text={{ ...rowText(track), lead: index + 1 }}
+            current={false}
+            onPlay={() => void store.select(track.id)}
+            menu={(
+              <RowMenu label={`More for ${track.title}`}>{(close) => (
+                <>
+                  <button type="button" className="menu-item" disabled={index === 0} onClick={() => { store.moveInQueue(track.id, 'next'); close(); }}>Play next</button>
+                  <button type="button" className="menu-item" disabled={index === 0} onClick={() => { store.moveInQueue(track.id, 'up'); close(); }}>Move up</button>
+                  <button type="button" className="menu-item" disabled={index === coming.length - 1} onClick={() => { store.moveInQueue(track.id, 'down'); close(); }}>Move down</button>
+                  <button type="button" className="menu-item" onClick={() => { store.removeFromQueue(track.id); close(); }}>Remove from the queue</button>
+                </>
+              )}</RowMenu>
+            )}
+          />
+        ))}
+      </ul>
+      {coming.length > 1 && (
+        <div className="actions queue-foot">
+          <button className="plain-button" type="button" onClick={() => store.clearUpcoming()}>Clear what's next</button>
+        </div>
+      )}
+    </>
+  );
+}
 
 /** Every song the player can reach: the NAS folder by folder, the playlists, and the files picked on this device. */
 export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => void }) {
   const [filter, setFilter] = useState('');
   const wanted = filter.trim().toLowerCase();
-  const tabs: SongsTab[] = snap.pairing ? ['folders', 'playlists', ...(snap.tracks.length ? ['device' as const] : [])] : ['device'];
+  const tabs: SongsTab[] = [...(snap.pairing ? ['folders' as const, 'playlists' as const, ...(snap.tracks.length ? ['device' as const] : [])] : ['device' as const]), ...(snap.currentTrack ? ['queue' as const] : [])];
   const tab = tabs.includes(snap.songsTab) ? snap.songsTab : tabs[0];
   const device = snap.tracks.filter((track) => !wanted || `${track.title}\n${track.artist}\n${track.album}`.toLowerCase().includes(wanted));
-  const listed = tab === 'device' ? snap.tracks.length
+  const listed = tab === 'queue' ? 0 : tab === 'device' ? snap.tracks.length
     : tab === 'folders' ? (snap.nasFolder ? snap.nasFolder.folders.length + snap.nasFolder.tracks.length : 0)
       : (snap.playlists.find((playlist) => playlist.id === snap.openPlaylist)?.tracks.length ?? snap.playlists.length);
   // On a phone the panel covers the screen, so choosing a song closes it.
@@ -264,6 +312,7 @@ export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => v
         <input className="songs-filter" type="search" value={filter} onChange={(e) => setFilter(e.currentTarget.value)} placeholder="Filter what's listed" aria-label="Filter the songs and folders listed" />
       )}
       <div className="songs-scroll">
+        {tab === 'queue' && <Queue snap={snap} />}
         {tab === 'folders' && <Folders snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
         {tab === 'playlists' && <Playlists snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
         {tab === 'device' && (
@@ -277,6 +326,7 @@ export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => v
                   text={{ ...rowText(track, hasLyrics(track)), detail: rowText(track).detail || track.fileName }}
                   current={track.id === snap.currentId}
                   onPlay={() => { void store.playFrom(snap.tracks, { kind: 'device' }, track.id); closeIfNarrow(); }}
+                  menu={<RowMenu label={`More for ${track.title}`}>{(close) => <AddToPlaylist snap={snap} tracks={[track]} close={close} />}</RowMenu>}
                 />
               ))}
             </ul>
