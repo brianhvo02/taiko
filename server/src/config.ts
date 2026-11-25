@@ -25,9 +25,12 @@ export interface Config {
   appUrls: string[];
   /** The origins of `appUrls`, the only ones CORS allows besides localhost. */
   appOrigins: string[];
-  /** `LIBRARY_SCAN`: whether the tag-based library is built. Off by default; the folder browser needs no scan. */
-  libraryScan: boolean;
-  /** Minutes between library scans while `libraryScan` is on; 0 scans only at start. */
+  /**
+   * `LIBRARY_SCAN`: the names of the roots the library of albums is built from. Empty (the default, `off`) means no
+   * library; the folder browser reaches every root either way and needs no scan.
+   */
+  scanRoots: string[];
+  /** Minutes between library scans while any root is scanned; 0 scans only at start. */
   scanIntervalMinutes: number;
 }
 
@@ -112,11 +115,24 @@ function parseWholeNumber(env: Env, key: string, fallback: number, min: number, 
   return n;
 }
 
-function parseSwitch(env: Env, key: string, fallback: boolean): boolean {
-  const text = value(env, key).toLowerCase();
-  if (!text) return fallback;
-  if (text !== 'on' && text !== 'off') throw new ConfigError(`${key} must be on or off, got "${value(env, key)}".`);
-  return text === 'on';
+/** `LIBRARY_SCAN`: `off` (or unset), `on` for every root, or the names of the roots to scan, separated by commas. */
+export function parseScanRoots(text: string, roots: LibraryRoot[]): string[] {
+  const all = roots.map((root) => root.name);
+  const word = text.trim().toLowerCase();
+  if (!word || word === 'off') return [];
+  if (word === 'on') return all;
+  const names = [...new Set(text.split(',').map((part) => part.trim()).filter(Boolean))];
+  for (const name of names) {
+    // Matched exactly, as the names are everywhere else.
+    if (!all.includes(name)) {
+      throw new ConfigError(
+        `LIBRARY_SCAN names "${name}", which is not a root in LIBRARY_ROOTS (${all.join(', ')}). ` +
+          'Set it to off, on (every root), or root names separated by commas.',
+      );
+    }
+  }
+  // In the order the roots are configured, whatever order they were named in.
+  return all.filter((name) => names.includes(name));
 }
 
 function parseAppUrls(env: Env): string[] {
@@ -134,16 +150,18 @@ function parseAppUrls(env: Env): string[] {
 export function loadConfig(env: Env, options: { library: boolean } = { library: true }): Config {
   const publicBase = parsePublicBase(env);
   const appUrls = parseAppUrls(env);
+  const roots = options.library ? parseLibraryRoots(value(env, 'LIBRARY_ROOTS')) : [];
   return {
     publicBase: publicBase.href,
     basePath: publicBase.pathname,
-    roots: options.library ? parseLibraryRoots(value(env, 'LIBRARY_ROOTS')) : [],
+    roots,
     dataDir: path.resolve(value(env, 'DATA_DIR') || './data'),
     port: parseWholeNumber(env, 'PORT', DEFAULT_PORT, 1, 65535),
     serverName: value(env, 'SERVER_NAME') || DEFAULT_SERVER_NAME,
     appUrls,
     appOrigins: [...new Set(appUrls.map((url) => new URL(url).origin))],
-    libraryScan: parseSwitch(env, 'LIBRARY_SCAN', false),
+    // The subcommands have no roots to check the names against, and no use for them.
+    scanRoots: options.library ? parseScanRoots(value(env, 'LIBRARY_SCAN'), roots) : [],
     scanIntervalMinutes: parseWholeNumber(env, 'SCAN_INTERVAL_MINUTES', DEFAULT_SCAN_INTERVAL_MINUTES, 0, 525600),
   };
 }

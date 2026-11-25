@@ -8,7 +8,7 @@ import { formatTime } from './format';
 type Results = { kind: 'closed' } | { kind: 'message'; text: string } | { kind: 'songs'; songs: AppleSong[]; country: string };
 
 /** Finds a song in Apple's catalog by name, to name the open song or to read its Apple Music ID. */
-export function SearchBar({ snap }: { snap: Snapshot }) {
+function SearchBar({ snap, onUsed }: { snap: Snapshot; onUsed: () => void }) {
   const [term, setTerm] = useState('');
   const [country, setCountry] = useState(() => (COUNTRIES[browserRegion()] ? browserRegion() : 'us'));
   const [results, setResults] = useState<Results>({ kind: 'closed' });
@@ -54,7 +54,7 @@ export function SearchBar({ snap }: { snap: Snapshot }) {
   return (
     <div className="search" ref={box}>
       <form role="search" onSubmit={search}>
-        <input type="search" value={term} onChange={(e) => setTerm(e.currentTarget.value)} placeholder="Search Apple Music" aria-label="Song title or artist" autoComplete="off" enterKeyHint="search" />
+        <input type="search" value={term} onChange={(e) => setTerm(e.currentTarget.value)} placeholder="Song title or artist" aria-label="Song title or artist" autoComplete="off" enterKeyHint="search" autoFocus />
         <select value={country} aria-label="Country of the catalog to search" onChange={(e) => { countryChosen.current = true; setCountry(e.currentTarget.value); }}>
           {Object.entries(COUNTRIES).map(([code, name]) => <option key={code} value={code}>{name}</option>)}
         </select>
@@ -72,12 +72,31 @@ export function SearchBar({ snap }: { snap: Snapshot }) {
                 <div className="detail">{formatTime(song.trackTimeMillis / 1000)}, Apple Music ID {song.trackId}</div>
               </div>
               {snap.currentId && (
-                <button className="plain-button" type="button" onClick={() => { void store.useSong(song, results.country); setResults({ kind: 'closed' }); }}>Use this song</button>
+                <button className="plain-button" type="button" onClick={() => { void store.useSong(song, results.country); setResults({ kind: 'closed' }); onUsed(); }}>Use this song</button>
               )}
             </div>
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** Names the open song from Apple's catalog, for a file whose tags don't say what it is. */
+export function CatalogDialog({ snap, onClose }: { snap: Snapshot; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return (
+    <div className="scrim">
+      <div className="dialog catalog" role="dialog" aria-modal="true" aria-labelledby="catalog-title">
+        <h2 id="catalog-title">Find this song in Apple Music</h2>
+        <p>Choosing a song names the one that is open, with its cover and its names in Apple's catalog.</p>
+        <SearchBar snap={snap} onUsed={onClose} />
+        <div className="actions"><button className="plain-button" type="button" onClick={onClose}>Close</button></div>
+      </div>
     </div>
   );
 }

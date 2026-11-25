@@ -9,6 +9,7 @@ import { createApp } from './app';
 import { PairingStore, loadOrCreateSecret } from './auth';
 import { findCover } from './cover';
 import { Library } from './library';
+import { TagCache } from './tag-cache';
 import { fakeFlac, removeDir, tempDir, writeFile } from './test-helpers';
 
 interface Reply {
@@ -72,7 +73,7 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/`;
   server.on('request', createApp({
     config: { publicBase: base, basePath: '/api/', serverName: 'Test NAS', appOrigins: [], roots },
-    library: new Library(roots),
+    library: new Library([], new TagCache()),
     pairing,
     secret: loadOrCreateSecret(data),
     now: () => clock,
@@ -109,6 +110,11 @@ describe('album covers', () => {
     expect(await findCover(path.join(music, 'Bare'))).toBeNull();
     expect(await findCover(path.join(music, 'Hollow'))).toBeNull();
     expect(await findCover(path.join(music, 'no such folder'))).toBeNull();
+    // A small copy is given only when asked for; without one, the full picture is.
+    expect(await findCover(path.join(music, 'Fronted'), true)).toMatchObject({ type: 'image/png', size: PNG.length });
+    writeFile(path.join(music, 'Midori Vale', 'Night Market', 'cover.small.jpg'), JPEG.subarray(0, JPEG.length - 1));
+    expect(await findCover(path.join(music, 'Midori Vale', 'Night Market'), true)).toMatchObject({ type: 'image/jpeg', size: JPEG.length - 1 });
+    expect(await findCover(path.join(music, 'Midori Vale', 'Night Market'))).toMatchObject({ type: 'image/jpeg', size: JPEG.length });
   });
 
   it('gives a folder with a cover an address that serves it without the token', async () => {

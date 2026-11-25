@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ConfigError, loadConfig, parseLibraryRoots } from './config';
+import { ConfigError, loadConfig, parseLibraryRoots, parseScanRoots } from './config';
 
 const base = { PUBLIC_BASE: 'https://music.example.com/api/', LIBRARY_ROOTS: 'Music=/library/music' };
 
@@ -16,7 +16,7 @@ describe('loadConfig', () => {
       serverName: 'Taiko NAS',
       appUrls: ['https://taiko-player.pages.dev/'],
       appOrigins: ['https://taiko-player.pages.dev'],
-      libraryScan: false,
+      scanRoots: [],
       scanIntervalMinutes: 360,
     });
   });
@@ -77,17 +77,44 @@ describe('loadConfig', () => {
     expect(parseLibraryRoots('My Music (2)=/x').map((root) => root.name)).toEqual(['My Music (2)']);
   });
 
-  it('reads LIBRARY_SCAN as on or off, off unless set', () => {
-    expect(loadConfig(base).libraryScan).toBe(false);
-    expect(loadConfig({ ...base, LIBRARY_SCAN: '' }).libraryScan).toBe(false);
-    expect(loadConfig({ ...base, LIBRARY_SCAN: 'off' }).libraryScan).toBe(false);
-    expect(loadConfig({ ...base, LIBRARY_SCAN: 'on' }).libraryScan).toBe(true);
-    expect(loadConfig({ ...base, LIBRARY_SCAN: ' ON ' }).libraryScan).toBe(true);
-    for (const value of ['true', '1', 'yes', 'onn']) {
-      expect(() => loadConfig({ ...base, LIBRARY_SCAN: value })).toThrow(/LIBRARY_SCAN must be on or off/);
-    }
-    // The roots are needed either way: the folder browser serves them.
-    expect(() => loadConfig({ PUBLIC_BASE: base.PUBLIC_BASE, LIBRARY_SCAN: 'off' })).toThrow(/LIBRARY_ROOTS is not set/);
+  describe('LIBRARY_SCAN', () => {
+    const three = { ...base, LIBRARY_ROOTS: 'FLAC=/library/flac,Downloads=/library/downloads,Music=/library/music' };
+    const scan = (value?: string): string[] => loadConfig({ ...three, LIBRARY_SCAN: value }).scanRoots;
+
+    it('is off unless set', () => {
+      expect(scan()).toEqual([]);
+      expect(scan('')).toEqual([]);
+      expect(scan('off')).toEqual([]);
+      expect(scan(' OFF ')).toEqual([]);
+    });
+
+    it('scans every root when on', () => {
+      expect(scan('on')).toEqual(['FLAC', 'Downloads', 'Music']);
+      expect(scan(' On ')).toEqual(['FLAC', 'Downloads', 'Music']);
+    });
+
+    it('scans only the roots it names', () => {
+      expect(scan('Music')).toEqual(['Music']);
+      // In the roots' own order, each once, whatever the list's spacing and order.
+      expect(scan(' Music , FLAC,Music,')).toEqual(['FLAC', 'Music']);
+      expect(parseScanRoots('My Music (2)', [{ name: 'My Music (2)', dir: '/x' }, { name: 'Other', dir: '/y' }])).toEqual(['My Music (2)']);
+    });
+
+    it('refuses a name that is not a root, and names it', () => {
+      expect(() => scan('Music,Musik')).toThrow(ConfigError);
+      expect(() => scan('Music,Musik')).toThrow(/LIBRARY_SCAN names "Musik", which is not a root in LIBRARY_ROOTS \(FLAC, Downloads, Music\)/);
+      // Names are matched exactly.
+      expect(() => scan('music')).toThrow(/names "music"/);
+      for (const value of ['true', '1', 'yes', 'onn', 'on,Music']) {
+        expect(() => scan(value)).toThrow(/LIBRARY_SCAN names "/);
+      }
+    });
+
+    it('needs the roots either way, and is left alone by the subcommands', () => {
+      // The folder browser serves the roots even with the library off.
+      expect(() => loadConfig({ PUBLIC_BASE: base.PUBLIC_BASE, LIBRARY_SCAN: 'off' })).toThrow(/LIBRARY_ROOTS is not set/);
+      expect(loadConfig({ PUBLIC_BASE: base.PUBLIC_BASE, LIBRARY_SCAN: 'Musik' }, { library: false }).scanRoots).toEqual([]);
+    });
   });
 
   it('rejects bad numbers and app addresses', () => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { defaultDeviceName, normalizeBase } from '../nas/client';
 import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
+import { Library } from './Library';
 import { canPickFolder, formatTime, pickFiles } from './format';
 
 /**
@@ -136,12 +137,27 @@ function Resume({ snap }: { snap: Snapshot }) {
   );
 }
 
-export function StartScreen({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void }) {
+/**
+ * The first screen. With nothing to list it says what the player does and how to bring music in; once there is
+ * music (a NAS library, or songs picked here) it is the library, with the ways to add more under it.
+ */
+export function StartScreen({ snap, stocked, quietNotice, onShowSongs }: { snap: Snapshot; stocked: boolean; quietNotice: boolean; onShowSongs: () => void }) {
+  const front = snap.page.kind === 'home' && !snap.libraryQuery.trim();
   return (
-    <main className="start">
-      <HeroLine />
-      <p className="lede">Taiko plays your music and fills in each word of the lyrics as it is sung.</p>
-      <Resume snap={snap} />
+    <main className={stocked ? 'start stocked' : 'start'}>
+      {!stocked && <HeroLine />}
+      {!stocked && <p className="lede">Taiko plays your music and fills in each word of the lyrics as it is sung.</p>}
+      {front && <Resume snap={snap} />}
+      {stocked && <Library snap={snap} />}
+      {front && <Ways snap={snap} stocked={stocked} quietNotice={quietNotice} onShowSongs={onShowSongs} />}
+    </main>
+  );
+}
+
+function Ways({ snap, stocked, quietNotice, onShowSongs }: { snap: Snapshot; stocked: boolean; quietNotice: boolean; onShowSongs: () => void }) {
+  return (
+    <>
+      {stocked && <h2 className="ways-name">Add music</h2>}
       <div className="ways">
         <section className="way">
           <h2>Music on this device</h2>
@@ -151,7 +167,7 @@ export function StartScreen({ snap, onShowSongs }: { snap: Snapshot; onShowSongs
             {canPickFolder() && <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles(true), true)}>Choose a folder</button>}
             <span className="hint-text">or drop them anywhere on this page</span>
           </div>
-          {snap.notice && <p className="notice" role="status">{snap.notice}</p>}
+          {snap.notice && !quietNotice && <p className="notice" role="status">{snap.notice}</p>}
           <dl className="formats">
             <dt>Audio</dt>
             <dd>FLAC, MP3, or any format this browser plays</dd>
@@ -161,8 +177,8 @@ export function StartScreen({ snap, onShowSongs }: { snap: Snapshot; onShowSongs
         </section>
         <NasWay snap={snap} onShowSongs={onShowSongs} />
       </div>
-      <p className="fine-print">A song's Apple Music ID and what you type in the search go to Apple, to name the song. Nothing else leaves this device.</p>
-    </main>
+      <p className="fine-print">A song's Apple Music ID, and what you search Apple Music for, go to Apple to name the song. Nothing else leaves this device.</p>
+    </>
   );
 }
 

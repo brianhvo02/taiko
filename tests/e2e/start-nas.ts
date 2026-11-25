@@ -14,24 +14,33 @@ mkdirSync(path.join(NAS.library, 'Empty'), { recursive: true });
 mkdirSync(NAS.data, { recursive: true });
 
 // File names sort "2" before "10"; the tags name the songs.
-writeFileSync(path.join(album, '2 - lanterns.flac'), toneFlac({ seconds: 50, title: 'Paper Lanterns', artist: 'Midori Vale', album: 'Night Market', track: 2 }));
+writeFileSync(path.join(album, '2 - lanterns.flac'), toneFlac({
+  seconds: 50, title: 'Paper Lanterns', artist: 'Midori Vale', album: 'Night Market', track: 2, tags: ['ALBUMARTIST=Midori Vale', 'DATE=2026-10-14'],
+}));
 writeFileSync(path.join(album, '2 - lanterns.json'), lyrics.plain);
 writeFileSync(path.join(album, '2 - lanterns.ja-Latn.json'), lyrics.roman);
 writeFileSync(path.join(album, '2 - lanterns_en.json'), lyrics.english);
 // A song named in Japanese, with its reading, its English name and an Apple Music id in its tags, and no lyrics.
 writeFileSync(path.join(album, '10 - harbour.flac'), toneFlac({
-  seconds: 20, title: '港の灯', artist: '緑の谷', album: '夜市', track: 10,
-  tags: ['TITLESORT=Minato no Akari', 'ARTISTSORT=Midori no Tani', 'TITLE_EN=Harbour Lights', 'ARTIST_EN=Midori Vale', 'APPLE_SONG_ID=9900112244'],
+  seconds: 20, title: '港の灯', artist: '緑の谷', album: 'Night Market', track: 10,
+  tags: ['TITLESORT=Minato no Akari', 'ARTISTSORT=Midori no Tani', 'TITLE_EN=Harbour Lights', 'ARTIST_EN=Midori Vale', 'APPLE_SONG_ID=9900112244', 'ALBUMARTIST=Midori Vale', 'DATE=2026-10-14'],
 }));
 writeFileSync(path.join(album, 'untagged.flac'), toneFlac({ seconds: 5 }));
 writeFileSync(path.join(album, 'cover.png'), COVER_PNG);
 writeFileSync(path.join(album, 'booklet.txt'), 'not a song');
+// A second album for the library: named in Japanese with its reading and English name, and no cover.
+const tide = path.join(NAS.library, 'Tin Harbor', 'Low Tide');
+mkdirSync(tide, { recursive: true });
+writeFileSync(path.join(tide, '1 - shoals.flac'), toneFlac({
+  seconds: 8, title: 'Shoals', artist: 'Tin Harbor', album: '引き潮', track: 1, tags: ['ALBUMSORT=Hikishio', 'ALBUM_EN=Low Tide', 'DATE=2024'],
+}));
 
 Object.assign(process.env, {
   PORT: String(NAS.port),
   PUBLIC_BASE: NAS.base,
   APP_URL: NAS.app,
   LIBRARY_ROOTS: `Music=${NAS.library}`,
+  LIBRARY_SCAN: 'Music',
   DATA_DIR: NAS.data,
   SERVER_NAME: 'Test NAS',
 });

@@ -23,6 +23,9 @@ export interface Track {
   artistEnglish?: string;
   albumEnglish?: string;
   appleSongId?: string;
+  albumArtist?: string;
+  albumArtistRoman?: string;
+  date?: string;
   /** The address of the album's cover picture on the NAS, when its folder has one. */
   cover?: string;
   /**

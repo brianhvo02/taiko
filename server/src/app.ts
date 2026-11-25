@@ -2,44 +2,40 @@
 import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
-  ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, NasTrack, PairResponse, TicketRequest, TicketResponse,
+  ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, PairResponse, ScanResponse, SearchResponse,
+  TicketRequest, TicketResponse,
 } from '../../src/shared/api';
 import { MAX_DEVICE_NAME_LENGTH, RateLimiter, TICKET_LIFETIME_SECONDS, signTicket, verifyTicket } from './auth';
 import type { Device, PairingStore } from './auth';
 import type { Config } from './config';
 import { flacSeek } from './flac-file';
-import { lyricsList } from './library';
+import { nasTrack } from './library';
 import type { Library } from './library';
-import { LibraryPaths, encodeTrackId, listFolder, stemOf } from './paths';
+import { LibraryPaths, byNameNumeric, listFolder } from './paths';
 import type { FolderListing, ResolvedTrack } from './paths';
 import { sendAudioFile } from './ranges';
 import { VERSION } from './version';
 import { TagCache } from './tag-cache';
 import { findCover, sendCover } from './cover';
-import type { Tags } from '../../src/shared/tags';
 
 export const MAX_JSON_BODY_BYTES = 16 * 1024;
 export const PAIR_ATTEMPTS = 10;
 export const PAIR_WINDOW_MS = 10 * 60 * 1000;
+/** A device may ask for a rescan this often; sooner, it is told none was started. */
+export const SCAN_REQUEST_GAP_MS = 10_000;
+export const MAX_SEARCH_CHARS = 200;
 
 export interface AppDeps {
   config: Pick<Config, 'publicBase' | 'basePath' | 'serverName' | 'appOrigins' | 'roots'>;
-  /** The tag-based library; empty, with `scannedAt` null, while the scan is off. */
-  library: Pick<Library, 'tracks' | 'scannedAt'>;
+  /** The albums and songs of the scanned roots; off and empty when `LIBRARY_SCAN` names none. */
+  library: Pick<Library, 'enabled' | 'scanning' | 'scannedAt' | 'albums' | 'search' | 'scan'>;
+  /** The cache the library scan reads tags through, so the browser shares it. Left out: one of the app's own. */
+  tags?: TagCache;
   pairing: PairingStore;
   /** Signs tickets. */
   secret: Buffer;
   now?: () => number;
   log?: (message: string) => void;
-}
-
-/** The other forms of a song's names that its tags carry, leaving out the ones it doesn't have. */
-function otherNames(tags: Tags): Partial<Tags> {
-  const out: Partial<Tags> = {};
-  for (const key of ['titleRoman', 'artistRoman', 'albumRoman', 'titleEnglish', 'artistEnglish', 'albumEnglish', 'appleSongId'] as const) {
-    if (tags[key]) out[key] = tags[key];
-  }
-  return out;
 }
 
 /** An error answered as `{ error: code }` with `status`. */
@@ -50,8 +46,6 @@ class HttpError extends Error {
 }
 
 const LOCAL_ORIGIN = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/;
-const byNameNumeric = (a: { name: string }, b: { name: string }): number =>
-  a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
 /** Whether a browser page at `origin` may call the server: the players of `APP_URL`, and localhost for development. */
 export function originAllowed(origin: string | undefined, appOrigins: readonly string[]): boolean {
@@ -108,7 +102,9 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   const log = deps.log ?? (() => {});
   const pairLimit = new RateLimiter(PAIR_ATTEMPTS, PAIR_WINDOW_MS);
   const paths = new LibraryPaths(config.roots);
-  const tags = new TagCache();
+  const tags = deps.tags ?? new TagCache();
+  /** When each device last asked for a rescan. */
+  const scanAsked = new Map<string, number>();
 
   function requireDevice(req: IncomingMessage): Device {
     const match = /^Bearer\s+(\S+)$/i.exec(req.headers.authorization ?? '');
@@ -129,6 +125,15 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
     return track;
   }
 
+  /**
+   * The address of the cover of the folder at `folderPath` (as the browser names it). Signed until the end of the
+   * day after next, so it stays the same all day and a browser keeps the picture.
+   */
+  function coverUrl(folderPath: string): string {
+    const exp = (Math.floor(now() / 86_400_000) + 2) * 86_400;
+    return `${config.publicBase}cover?path=${encodeURIComponent(folderPath)}&exp=${exp}&sig=${signTicket(secret, `cover:${folderPath}`, exp)}`;
+  }
+
   async function browse(browsePath: string): Promise<BrowseResponse> {
     if (!browsePath) {
       const folders = config.roots.map((root) => ({ name: root.name, path: root.name }));
@@ -147,25 +152,9 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
     // and remembered while the files don't change (tag-cache.ts).
     const files = [...listing.audio].sort(byNameNumeric);
     const read = await tags.readAll(files.map((file) => file.path));
-    const tracks: NasTrack[] = files.map((file, i) => ({
-      id: encodeTrackId(folder.root.name, [...folder.parts, file.name]),
-      title: read[i].title || stemOf(file.name),
-      artist: read[i].artist,
-      album: read[i].album,
-      trackNumber: read[i].trackNumber,
-      discNumber: read[i].discNumber,
-      durationSeconds: read[i].durationSeconds,
-      ...otherNames(read[i]),
-      lyrics: lyricsList(file.lyrics),
-    }));
-    // The cover's address is signed until the end of the day after next, so it stays the same all day.
-    const cover = await findCover(folder.real);
-    const coverExp = (Math.floor(now() / 86_400_000) + 2) * 86_400;
-    const coverUrl = cover
-      ? `${config.publicBase}cover?path=${encodeURIComponent(here.join('/'))}&exp=${coverExp}&sig=${signTicket(secret, `cover:${here.join('/')}`, coverExp)}`
-      : null;
+    const tracks = files.map((file, i) => nasTrack(here, file, read[i]));
     return {
-      cover: coverUrl,
+      cover: (await findCover(folder.real)) ? coverUrl(here.join('/')) : null,
       serverName: config.serverName,
       path: here.join('/'),
       parent: here.slice(0, -1).join('/'),
@@ -227,7 +216,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       const check = verifyTicket(secret, `cover:${coverPath}`, url.searchParams.get('exp') ?? '', url.searchParams.get('sig') ?? '', Math.floor(now() / 1000));
       if (check !== 'ok') throw new HttpError(403, check === 'expired' ? 'expired-ticket' : 'bad-ticket');
       const folder = await paths.resolveFolder(coverPath);
-      const cover = folder ? await findCover(folder.real) : null;
+      const cover = folder ? await findCover(folder.real, url.searchParams.get('size') === 'small') : null;
       if (!cover || !(await sendCover(req, res, cover))) throw new HttpError(404, 'not-found');
       return;
     }
@@ -242,7 +231,38 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
     if (parts.length === 1 && parts[0] === 'library') {
       allow(req, 'GET');
       requireDevice(req);
-      sendJson(req, res, 200, { serverName: config.serverName, scannedAt: library.scannedAt, tracks: library.tracks } satisfies LibraryResponse);
+      // The covers' addresses are made now, not at scan time: they change by the day.
+      sendJson(req, res, 200, {
+        serverName: config.serverName,
+        enabled: library.enabled,
+        scanning: library.scanning,
+        scannedAt: library.scannedAt,
+        albums: library.albums.map(({ hasCover, ...album }) => ({ ...album, cover: hasCover ? `${coverUrl(album.path)}&size=small` : null })),
+      } satisfies LibraryResponse);
+      return;
+    }
+
+    if (parts.length === 2 && parts[0] === 'library' && parts[1] === 'search') {
+      allow(req, 'GET');
+      requireDevice(req);
+      const query = url.searchParams.get('q') ?? '';
+      if (query.length > MAX_SEARCH_CHARS) throw new HttpError(400, 'bad-request');
+      sendJson(req, res, 200, { tracks: library.search(query) } satisfies SearchResponse);
+      return;
+    }
+
+    if (parts.length === 2 && parts[0] === 'library' && parts[1] === 'scan') {
+      allow(req, 'POST');
+      const device = requireDevice(req);
+      // Asked again too soon, a device is told nothing started; whatever scan is running carries on.
+      const at = now();
+      const last = scanAsked.get(device.id);
+      let started = false;
+      if (last === undefined || at - last >= SCAN_REQUEST_GAP_MS) {
+        scanAsked.set(device.id, at);
+        started = library.scan();
+      }
+      sendJson(req, res, 200, { started } satisfies ScanResponse);
       return;
     }
 

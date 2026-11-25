@@ -8,6 +8,7 @@ import { createApp } from './app';
 import { PairingStore, TICKET_LIFETIME_SECONDS, loadOrCreateSecret, signTicket } from './auth';
 import type { LibraryRoot } from './config';
 import { Library } from './library';
+import { TagCache } from './tag-cache';
 import { fakeFlac, removeDir, tempDir, writeFile } from './test-helpers';
 
 const APP_ORIGIN = 'https://player.example.com';
@@ -38,8 +39,10 @@ const id = (text: string): string => Buffer.from(text, 'utf8').toString('base64u
 /** `scan: false` is the server with LIBRARY_SCAN off: the library is never scanned. */
 async function start(basePath: string, options: { scan?: boolean; roots?: LibraryRoot[] } = {}): Promise<Running> {
   const roots = options.roots ?? [{ name: 'main', dir: path.join(dir, 'music') }];
-  const library = new Library(roots);
-  if (options.scan ?? true) await library.scan();
+  const tags = new TagCache();
+  const library = new Library(options.scan ?? true ? roots : [], tags);
+  library.scan();
+  await library.idle();
   const data = path.join(dir, `data${servers.length}`);
   const pairing = new PairingStore(data, () => clock);
   const server = createServer();
@@ -51,6 +54,7 @@ async function start(basePath: string, options: { scan?: boolean; roots?: Librar
   server.on('request', createApp({
     config: { publicBase: base, basePath, serverName: 'Test NAS', appOrigins: [APP_ORIGIN], roots },
     library,
+    tags,
     pairing,
     secret,
     now: () => clock,
@@ -125,8 +129,14 @@ describe('the whole flow', () => {
     const list = library.json<LibraryResponse>();
     expect(list.serverName).toBe('Test NAS');
     expect(typeof list.scannedAt).toBe('string');
-    expect(list.tracks.map((track) => track.title)).toEqual(['Loose Song', 'Paper Lanterns']);
-    const track = list.tracks[1];
+    expect(list).toMatchObject({ enabled: true, scanning: false });
+    // The folder of the tagged song, then the root itself, which holds a song of its own and has no artist.
+    expect(list.albums.map((album) => [album.path, album.title, album.artist, album.trackCount])).toEqual([
+      ['main/Night Market', 'Night Market', 'Midori Vale', 1],
+      ['main', 'main', '', 1],
+    ]);
+    const folder = (await app.call('GET', `browse?path=${encodeURIComponent(list.albums[0].path)}`, { token })).json<BrowseResponse>();
+    const track = folder.tracks[0];
     expect(track.id).toBe(id('main/Night Market/03 Paper Lanterns.flac'));
     expect(track).toMatchObject({ artist: 'Midori Vale', album: 'Night Market', trackNumber: 3, durationSeconds: 10 });
     expect(track.lyrics).toEqual([
@@ -202,7 +212,7 @@ describe('refusals', () => {
 
   beforeAll(async () => {
     token = await pair(app, 'Laptop');
-    track = (await app.call('GET', 'library', { token })).json<LibraryResponse>().tracks[1];
+    track = (await app.call('GET', `browse?path=${encodeURIComponent('main/Night Market')}`, { token })).json<BrowseResponse>().tracks[0];
   });
 
   it('answers 403 bad-code for a wrong code', async () => {
@@ -246,7 +256,7 @@ describe('refusals', () => {
     const exp = url.searchParams.get('exp')!;
     const sig = url.searchParams.get('sig')!;
     const audio = (id: string, query: string): Promise<Reply> => app.call('GET', `tracks/${id}/audio${query}`);
-    const other = (await app.call('GET', 'library', { token })).json<LibraryResponse>().tracks[0];
+    const other = (await app.call('GET', 'browse?path=main', { token })).json<BrowseResponse>().tracks[0];
 
     expect((await audio(track.id, `?exp=${exp}&sig=${sig}`)).status).toBe(200);
     const flipped = (sig[0] === 'a' ? 'b' : 'a') + sig.slice(1);
@@ -336,7 +346,7 @@ describe('another mount point and the pairing limit', () => {
     expect(other.base.endsWith('/taiko/api/')).toBe(true);
     expect((await other.call('GET', 'health')).status).toBe(200);
     const token = await pair(other);
-    const { tracks } = (await other.call('GET', 'library', { token })).json<LibraryResponse>();
+    const { tracks } = (await other.call('GET', 'browse?path=main', { token })).json<BrowseResponse>();
     const ticket = (await other.call('POST', `tracks/${tracks[0].id}/ticket`, { token })).json<TicketResponse>();
     expect(ticket.url).toContain('/taiko/api/tracks/');
     expect((await other.call('GET', ticket.url)).status).toBe(200);
@@ -385,7 +395,9 @@ describe('the folder browser, with the library scan off', () => {
   it('answers an empty library', async () => {
     const reply = await off.call('GET', 'library', { token });
     expect(reply.status).toBe(200);
-    expect(reply.json()).toEqual({ serverName: 'Test NAS', scannedAt: null, tracks: [] });
+    expect(reply.json()).toEqual({ serverName: 'Test NAS', enabled: false, scanning: false, scannedAt: null, albums: [] });
+    expect((await off.call('GET', 'library/search?q=tin', { token })).json()).toEqual({ tracks: [] });
+    expect((await off.call('POST', 'library/scan', { token })).json()).toEqual({ started: false });
   });
 
   it('lists the roots, in the order configured, for an empty or missing path', async () => {

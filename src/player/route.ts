@@ -3,7 +3,10 @@
  * buttons move between them. Songs picked on the device have no path: a file on one device means nothing on
  * another.
  *
- *   /                              the first screen, or a song from this device
+ *   /                              the library
+ *   /playing                       the lyrics of a song from this device
+ *   /album/<folder path>           an album on the NAS
+ *   /artist/<name>                 an artist's albums
  *   /nas/folders                   the NAS's roots
  *   /nas/folders/<folder path>     a folder
  *   /nas/play/<song path>?t=<s>    a song, optionally from a time in seconds
@@ -14,6 +17,9 @@
 
 export type Route =
   | { kind: 'home' }
+  | { kind: 'playing' }
+  | { kind: 'album'; path: string }
+  | { kind: 'artist'; name: string }
   | { kind: 'folders'; path: string }
   | { kind: 'play'; path: string; at: number };
 
@@ -34,6 +40,20 @@ export function parseRoute(pathname: string, search = ''): Route {
     const path = decodeParts(folders[1] ?? '');
     return path === null ? { kind: 'home' } : { kind: 'folders', path };
   }
+  if (pathname === '/playing') return { kind: 'playing' };
+  const album = /^\/album\/(.+)$/.exec(pathname);
+  if (album) {
+    const path = decodeParts(album[1]);
+    return path ? { kind: 'album', path } : { kind: 'home' };
+  }
+  const artist = /^\/artist\/([^/]+)\/?$/.exec(pathname);
+  if (artist) {
+    try {
+      return { kind: 'artist', name: decodeURIComponent(artist[1]) };
+    } catch {
+      return { kind: 'home' };
+    }
+  }
   const play = /^\/nas\/play\/(.+)$/.exec(pathname);
   if (play) {
     const path = decodeParts(play[1]);
@@ -48,6 +68,9 @@ const encodeParts = (path: string) => path.split('/').map(encodeURIComponent).jo
 /** The address of a route. */
 export function routeUrl(route: Route): string {
   if (route.kind === 'folders') return route.path ? `/nas/folders/${encodeParts(route.path)}` : '/nas/folders';
+  if (route.kind === 'playing') return '/playing';
+  if (route.kind === 'album') return `/album/${encodeParts(route.path)}`;
+  if (route.kind === 'artist') return `/artist/${encodeURIComponent(route.name)}`;
   if (route.kind === 'play') return `/nas/play/${encodeParts(route.path)}${route.at > 0 ? `?t=${Math.floor(route.at)}` : ''}`;
   return '/';
 }

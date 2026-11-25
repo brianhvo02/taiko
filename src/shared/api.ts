@@ -14,7 +14,9 @@
  *   DELETE me                  paired  -> 204                   (forgets this device)
  *   GET    browse?path=        paired  -> BrowseResponse        (a folder's contents; an empty path lists the roots)
  *   GET    cover?path=&exp=&sig=       -> a folder's cover picture, at the address `browse` gave for it
- *   GET    library             paired  -> LibraryResponse       (the tag-based library; empty while LIBRARY_SCAN is off)
+ *   GET    library             paired  -> LibraryResponse       (the albums in the scanned roots; see LIBRARY_SCAN)
+ *   GET    library/search?q=   paired  -> SearchResponse        (songs in the scanned roots matching every word of q)
+ *   POST   library/scan        paired  -> ScanResponse          (starts a rescan now, unless one is running)
  *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
  *   GET    tracks/:id/lyrics/:index  paired -> the lyrics file's text, as stored
  *   GET    tracks/:id/audio?exp=&sig=  -> the audio file's bytes, with Range support
@@ -93,6 +95,10 @@ export interface NasTrack {
   artistEnglish?: string;
   albumEnglish?: string;
   appleSongId?: string;
+  /** The album's artist (ALBUMARTIST), its reading (ALBUMARTISTSORT), and the release date as tagged (DATE). */
+  albumArtist?: string;
+  albumArtistRoman?: string;
+  date?: string;
   /** Lyrics files found beside the audio file. Several versions of one song are combined by the player. */
   lyrics: NasLyricsFile[];
 }
@@ -124,11 +130,58 @@ export interface BrowseResponse {
   cover: string | null;
 }
 
+/**
+ * An album in the library: one folder that directly holds songs, in a root the server scans (LIBRARY_SCAN names the
+ * roots; the others are reached through the folder browser only). Its songs come from `browse` on its `path`.
+ */
+export interface NasAlbum {
+  /** The album's folder, as the folder browser names it. */
+  path: string;
+  /** The ALBUM tag most of its songs carry; the folder's name when none has one. */
+  title: string;
+  titleRoman?: string;
+  titleEnglish?: string;
+  /**
+   * The ALBUMARTIST tag most of its songs carry; failing that the ARTIST they all share; '' when they have neither
+   * in common (a compilation).
+   */
+  artist: string;
+  artistRoman?: string;
+  artistEnglish?: string;
+  /** The DATE tag as written (a year, or a full date), from the songs that carry the album's title; '' when untagged. */
+  date: string;
+  trackCount: number;
+  /** The songs' lengths added up, or null when any is unknown. */
+  durationSeconds: number | null;
+  /**
+   * The address of the folder's cover picture, signed like the one `browse` gives, with `size=small`: the folder's
+   * small copy (cover.small.jpg) when it has one, for a page of many albums. Null when the folder has no picture.
+   */
+  cover: string | null;
+  /** The newest modified time among its songs, in milliseconds since 1970: when the album was added or last changed. */
+  addedAt: number;
+}
+
 export interface LibraryResponse {
   serverName: string;
-  /** ISO time of the last finished scan, or null while the first one runs. */
+  /** Whether this server keeps a library at all. False when LIBRARY_SCAN is off: only the folder browser is there. */
+  enabled: boolean;
+  /** Whether a scan is running now. */
+  scanning: boolean;
+  /** ISO time of the last finished scan, or null before the first one finishes. */
   scannedAt: string | null;
+  /** Sorted by artist, then date, then title. */
+  albums: NasAlbum[];
+}
+
+/** Songs found by `library/search`, best matches first, at most 50. Each is as `browse` would list it. */
+export interface SearchResponse {
   tracks: NasTrack[];
+}
+
+export interface ScanResponse {
+  /** False when a scan was already running (it carries on), or the library is off. */
+  started: boolean;
 }
 
 /**

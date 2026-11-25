@@ -16,7 +16,7 @@ test('pairs from an invite link, browses the folders and plays a song with its l
 
   await expect(folders).toHaveText(['Music']);
   await folders.first().click();
-  await expect(folders).toHaveText(['Empty', 'Midori Vale']);
+  await expect(folders).toHaveText(['Empty', 'Midori Vale', 'Tin Harbor']);
   await folders.nth(1).click();
   await expect(folders).toHaveText(['Night Market']);
   await folders.first().click();

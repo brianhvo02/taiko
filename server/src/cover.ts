@@ -7,6 +7,8 @@ import { pipeline } from 'node:stream';
 const NAMES = /^(cover|folder|front)\.(jpe?g|png|webp)$/i;
 const TYPES: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
 const RANK = ['cover', 'folder', 'front'];
+/** A smaller copy of the picture, for a page of many albums: cover.small.jpg beside cover.jpg. */
+const SMALL_NAMES = /^(cover|folder|front)\.small\.(jpe?g|png|webp)$/i;
 
 /** A picture larger than this is not an album cover; it is left out. */
 export const MAX_COVER_BYTES = 30 * 1024 * 1024;
@@ -20,16 +22,19 @@ export interface Cover {
 /**
  * The cover picture in a folder, if it has one: "cover" before "folder" before "front". Only a regular file
  * counts (never a link), and it is served as it is, at its own size; the server has nothing to resize it with.
+ * Asked for a small one, it gives the folder's small copy (cover.small.jpg) when whoever tagged the album left
+ * one, and the full picture otherwise.
  */
-export async function findCover(dir: string): Promise<Cover | null> {
+export async function findCover(dir: string, small = false): Promise<Cover | null> {
   let names: string[];
   try {
     names = await readdir(dir);
   } catch {
     return null;
   }
-  const rank = (name: string) => RANK.indexOf(name.slice(0, name.lastIndexOf('.')).toLowerCase());
-  const candidates = names.filter((name) => NAMES.test(name)).sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1));
+  const rank = (name: string) => RANK.indexOf(name.slice(0, name.indexOf('.')).toLowerCase());
+  const ordered = (wanted: RegExp) => names.filter((name) => wanted.test(name)).sort((a, b) => rank(a) - rank(b) || (a < b ? -1 : 1));
+  const candidates = [...(small ? ordered(SMALL_NAMES) : []), ...ordered(NAMES)];
   for (const name of candidates) {
     const file = path.join(dir, name);
     try {

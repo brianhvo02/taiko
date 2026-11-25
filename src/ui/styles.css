@@ -94,7 +94,7 @@ input::placeholder { color: var(--unsung); }
   z-index: 20;
 }
 
-/* Top strip: the name and the catalog search. It has no edge; the lyrics fade out beneath it. */
+/* Top strip: the name, the two views and the library's search. It has no edge; the lyrics fade out beneath it. */
 .top {
   position: fixed;
   inset: 0 0 auto 0;
@@ -108,19 +108,24 @@ input::placeholder { color: var(--unsung); }
   font-size: .9rem;
 }
 .brand { font-family: var(--lyric-face); font-weight: 700; font-size: var(--large); color: inherit; text-decoration: none; white-space: nowrap; }
-.search { position: relative; flex: 1; min-width: 0; max-width: 34rem; }
+/* The view that is showing is underlined in brass, as the open tab of a list is. */
+.views { display: flex; gap: 1.1rem; }
+.view { background: none; border: 0; border-bottom: 2px solid transparent; padding: .3rem 0; color: var(--quiet); cursor: pointer; }
+.view:hover { color: var(--hide); }
+.view[aria-current="page"] { color: var(--hide); border-bottom-color: var(--brass); }
+.top .library-search { flex: 1; min-width: 0; max-width: 24rem; margin-left: auto; background: none; }
+.top .library-search::placeholder { color: var(--quiet); }
+/* Apple's catalog, searched from a dialog to name the open song. */
+.dialog.catalog { width: min(36rem, 100%); max-height: calc(100dvh - 2rem); overflow: auto; }
+.search { min-width: 0; }
 .search form { display: flex; gap: .5rem; }
 .search input[type="search"] { flex: 1; }
-.search input[type="search"], .search select { background: none; }
-.search input::placeholder { color: var(--quiet); }
+.search input[type="search"], .search select { background: var(--night); }
 .search-results {
-  position: absolute;
-  top: calc(100% + .5rem);
-  left: 0;
-  right: 0;
-  max-height: min(60vh, 30rem);
+  margin-top: .75rem;
+  max-height: min(50vh, 26rem);
   overflow: auto;
-  background: var(--night-raised);
+  background: var(--night);
   border: 1px solid var(--rule);
   border-radius: var(--corner);
 }
@@ -195,6 +200,60 @@ input::placeholder { color: var(--unsung); }
 .resume h2 { font-size: var(--body); font-weight: 500; }
 .resume p { color: var(--quiet); }
 
+/*
+ * The library. The covers are the only pictures in the player, so they sit straight on the night with no frame;
+ * names are set in the lyric face only where they head a page.
+ */
+.start.stocked { align-content: start; max-width: 86rem; }
+.has-bar .start { padding-bottom: calc(var(--bar-height) + 3rem); }
+/* What the player has to say sits just above the bar, clear of the page's own controls. */
+.has-bar .toast { bottom: calc(var(--bar-height) + 1.25rem); }
+.library { display: grid; gap: 2.25rem; min-width: 0; }
+.library section, .shelf { display: grid; gap: 1.25rem; min-width: 0; }
+.library h1 { font-family: var(--lyric-face); font-weight: 700; font-size: clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem); line-height: 1.2; overflow-wrap: anywhere; }
+.library h2, .ways-name { font-family: var(--lyric-face); font-weight: 700; font-size: var(--large); line-height: 1.3; }
+.library-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 2rem; }
+.library-head .tabs { padding: 0; border-bottom: 0; }
+.library-sort { margin-left: auto; background: none; font-size: .9rem; }
+.library-note, .library-foot { color: var(--quiet); max-width: 44rem; }
+.library-foot { font-size: var(--small); color: var(--unsung); }
+.library-foot .text-button { color: var(--quiet); }
+.library .crumbs { padding: 0; }
+.tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 1.75rem 1.25rem; }
+.tile { display: grid; gap: .1rem; width: 100%; padding: 0; background: none; border: 0; text-align: left; cursor: pointer; line-height: 1.35; }
+.cover { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 3px; background: var(--night-raised); }
+/* An album with no picture shows the first character of its name, as a spine would. */
+.cover.blank { display: grid; place-items: center; border: 1px solid var(--rule); color: var(--unsung); font-family: var(--lyric-face); font-weight: 700; font-size: 2.5rem; container-type: inline-size; }
+.tile .cover { margin-bottom: .5rem; transition: opacity .15s; }
+.tile:hover .cover { opacity: .82; }
+.tile-title { font-weight: 500; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.tile-detail { color: var(--quiet); font-size: var(--small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-detail:empty { display: none; }
+/* Artists and playlists are names, so they are lists of names, in columns when there is room. */
+.names { list-style: none; margin: 0; padding: 0; columns: 3 17rem; column-gap: 2.5rem; max-width: 76rem; }
+.names li { break-inside: avoid; }
+.name-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 .7rem; width: 100%; padding: .5rem 0; background: none; border: 0; border-bottom: 1px solid var(--rule); text-align: left; cursor: pointer; line-height: 1.35; }
+.name-row.with-lead { grid-template-columns: 1.5rem minmax(0, 1fr); align-items: center; }
+.name-row-lead { grid-row: 1 / span 2; display: grid; place-items: center; color: var(--quiet); }
+.name-row-lead svg { width: 1.15rem; height: 1.15rem; fill: currentColor; }
+.name-row-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.name-row:hover .name-row-title { text-decoration: underline; text-underline-offset: .2em; }
+.name-row-detail { color: var(--quiet); font-size: var(--small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.with-lead .name-row-title, .with-lead .name-row-detail { grid-column: 2; }
+/* An album's page: its sleeve, then its songs. */
+.sleeve { display: grid; grid-template-columns: minmax(8rem, 15rem) minmax(0, 1fr); gap: 1.25rem 2rem; align-items: end; }
+.sleeve .cover.blank { font-size: 4rem; }
+.sleeve-text { display: grid; gap: .35rem; min-width: 0; }
+.sleeve-other, .sleeve-facts { color: var(--quiet); }
+.sleeve-facts { font-size: var(--small); }
+.sleeve-artist { font-size: var(--large); }
+.sleeve .actions { margin-top: .75rem; gap: .5rem; }
+.sleeve .menu { right: auto; left: 0; }
+.library .menu { background: var(--night-raised); }
+.songlist { list-style: none; margin: 0 -.85rem; padding: 0; max-width: 60rem; }
+.songlist .song { border-radius: var(--corner); }
+.ways-name { margin-bottom: -1rem; }
+
 /* Pairing confirmation */
 .scrim { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 1rem; background: rgb(8 12 28 / .78); }
 .dialog { display: grid; gap: 1rem; width: min(28rem, 100%); padding: 1.5rem; background: var(--night-raised); border: 1px solid var(--rule); border-radius: .6rem; }
@@ -261,7 +320,7 @@ input::placeholder { color: var(--unsung); }
   position: fixed;
   left: var(--gutter);
   right: var(--gutter);
-  top: calc(var(--top-height) + 2rem);
+  bottom: 1.25rem;
   z-index: 4;
   max-width: 44rem;
   padding: .6rem .9rem;
@@ -469,7 +528,7 @@ input::placeholder { color: var(--unsung); }
 /* On a wide screen the open Songs panel sits beside the player, not over its controls. */
 @media (min-width: 44.01rem) {
   .songs-open .bar { right: min(24rem, 100%); }
-  .songs-open .lyrics, .songs-open .no-lyrics { margin-right: min(24rem, 100%); }
+  .songs-open .lyrics, .songs-open .no-lyrics, .songs-open .start { margin-right: min(24rem, 100%); }
 }
 
 @media (max-width: 60rem) {
@@ -483,12 +542,16 @@ input::placeholder { color: var(--unsung); }
   .top { gap: .6rem; }
   .brand { font-size: 1.1rem; }
   .brand span { display: none; }
+  .views { gap: .8rem; }
   .search select { max-width: 5.5rem; }
   /* The keyboard's search key submits; the button would push the field off a phone's screen. */
   .search form button { display: none; }
   /* 16px text stops phones zooming the page when a field is tapped. */
-  .search input[type="search"], .search select, .songs-filter { font-size: 1rem; }
-  .search-results { position: fixed; left: .75rem; right: .75rem; top: var(--top-height); }
+  .search input[type="search"], .search select, .songs-filter, .library-search { font-size: 1rem; }
+  .tiles { grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr)); gap: 1.5rem 1rem; }
+  .sleeve { grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .sleeve .cover { max-width: 13rem; }
+  .library-sort { margin-left: 0; }
   .result { grid-template-columns: 2.75rem minmax(0, 1fr); }
   .result button { grid-column: 2; justify-self: start; }
   .start { gap: 2rem; }
@@ -522,5 +585,5 @@ input::placeholder { color: var(--unsung); }
   .song { padding-block: .7rem; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .line, .translation, .transport .play { transition: none; }
+  .line, .translation, .transport .play, .tile .cover { transition: none; }
 }

@@ -25,13 +25,18 @@ export interface Tags {
   artistEnglish?: string;
   albumEnglish?: string;
   appleSongId?: string;
+  /** The album's artist (ALBUMARTIST), its reading (ALBUMARTISTSORT), and the release date as tagged (DATE). */
+  albumArtist?: string;
+  albumArtistRoman?: string;
+  date?: string;
 }
 
 /** How much of a file's start to hand to `readTags`. Tags sit before the audio, ahead of any large cover picture. */
 export const TAG_HEAD_BYTES = 256 * 1024;
 
 type Field = 'title' | 'artist' | 'album' | 'trackNumber' | 'discNumber'
-  | 'titleRoman' | 'artistRoman' | 'albumRoman' | 'titleEnglish' | 'artistEnglish' | 'albumEnglish' | 'appleSongId';
+  | 'titleRoman' | 'artistRoman' | 'albumRoman' | 'titleEnglish' | 'artistEnglish' | 'albumEnglish' | 'appleSongId'
+  | 'albumArtist' | 'albumArtistRoman' | 'date';
 
 const VORBIS_FIELDS: Record<string, Field> = {
   TITLE: 'title',
@@ -46,12 +51,16 @@ const VORBIS_FIELDS: Record<string, Field> = {
   ARTIST_EN: 'artistEnglish',
   ALBUM_EN: 'albumEnglish',
   APPLE_SONG_ID: 'appleSongId',
+  ALBUMARTIST: 'albumArtist',
+  ALBUMARTISTSORT: 'albumArtistRoman',
+  DATE: 'date',
 };
 
 const ID3_FIELDS: Record<string, Field> = {
   TIT2: 'title', TPE1: 'artist', TALB: 'album', TRCK: 'trackNumber', TPOS: 'discNumber',
   TT2: 'title', TP1: 'artist', TAL: 'album', TRK: 'trackNumber', TPA: 'discNumber',
   TSOT: 'titleRoman', TSOP: 'artistRoman', TSOA: 'albumRoman',
+  TPE2: 'albumArtist', TSO2: 'albumArtistRoman', TDRC: 'date', TYER: 'date',
 };
 
 const utf8 = new TextDecoder('utf-8');

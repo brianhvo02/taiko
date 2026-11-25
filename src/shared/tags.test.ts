@@ -28,6 +28,7 @@ function flac(comments: string[], last = true): Uint8Array {
 
 describe('readTags', () => {
   it('reads Vorbis comments and the length from a FLAC file', () => {
+    expect(readTags(flac(['ALBUMARTIST=Midori Vale', 'ALBUMARTISTSORT=Vale Midori', 'DATE=2026-10-14']))).toMatchObject({ albumArtist: 'Midori Vale', albumArtistRoman: 'Vale Midori', date: '2026-10-14' });
     const tags = readTags(flac(['title=Paper Lanterns', 'ARTIST=Midori Vale', 'Album=Night Market', 'TRACKNUMBER=3/12', 'DISCNUMBER=1']));
     expect(tags).toEqual({ title: 'Paper Lanterns', artist: 'Midori Vale', album: 'Night Market', trackNumber: 3, discNumber: 1, durationSeconds: 10 });
   });

@@ -2,7 +2,7 @@
  * The player's side of the NAS server (see `src/shared/api.ts` for the contract). A device pairs once with a code
  * from the owner's invite link; the token it gets back is kept in this browser's storage.
  */
-import type { ApiError, BrowseResponse, PairRequest, PairResponse, TicketRequest, TicketResponse } from '../shared/api';
+import type { ApiError, BrowseResponse, LibraryResponse, PairRequest, PairResponse, ScanResponse, SearchResponse, TicketRequest, TicketResponse } from '../shared/api';
 
 export interface Pairing {
   /** The server's API base, ending in `/api/`. */
@@ -112,6 +112,27 @@ export async function pair(link: PairLink, deviceName: string): Promise<Pairing>
 /** Lists one folder on the NAS; an empty path lists its roots. */
 export async function fetchFolder(pairing: Pairing, path: string): Promise<BrowseResponse> {
   return (await request(pairing.base, `browse?path=${encodeURIComponent(path)}`, {}, pairing.token)).json() as Promise<BrowseResponse>;
+}
+
+/** The NAS's album library. A server from before it kept one answers without these fields; that reads as "off". */
+export async function fetchLibrary(pairing: Pairing): Promise<LibraryResponse> {
+  const library = (await (await request(pairing.base, 'library', {}, pairing.token)).json()) as Partial<LibraryResponse>;
+  return {
+    serverName: library.serverName ?? pairing.serverName,
+    enabled: library.enabled === true,
+    scanning: library.scanning === true,
+    scannedAt: library.scannedAt ?? null,
+    albums: Array.isArray(library.albums) ? library.albums : [],
+  };
+}
+
+export async function searchLibrary(pairing: Pairing, query: string): Promise<SearchResponse> {
+  return (await request(pairing.base, `library/search?q=${encodeURIComponent(query)}`, {}, pairing.token)).json() as Promise<SearchResponse>;
+}
+
+/** Asks the NAS to read its library again now. */
+export async function startScan(pairing: Pairing): Promise<ScanResponse> {
+  return (await request(pairing.base, 'library/scan', { method: 'POST' }, pairing.token)).json() as Promise<ScanResponse>;
 }
 
 const PATH_KEY = 'taiko:nas-path';

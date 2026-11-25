@@ -90,6 +90,10 @@ export interface FolderListing {
   audio: AudioEntry[];
 }
 
+/** File-name order as people expect it: numbers in order ("2" before "10"), case ignored. The order songs are listed in. */
+export const byNameNumeric = (a: { name: string }, b: { name: string }): number =>
+  a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+
 const byName = (a: FolderEntry, b: FolderEntry): number => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
 
 /**

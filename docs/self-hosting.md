@@ -23,7 +23,7 @@ What the player uses from a file's tags:
 
 A picture named `cover`, `folder` or `front` (JPEG, PNG or WebP) in a folder is shown as that album's cover. It is served at its own size, since the server has nothing to resize it with, so a very large cover costs every device that opens the folder.
 
-A library sorted by artist and album across all folders is in the server but on hold: `LIBRARY_SCAN=on` turns its scan on, and the player has no screen for it yet.
+The player's first screen is a library of albums and artists. It is built only from the roots you name in `LIBRARY_SCAN` (`on` for every root, or root names separated by commas; `off` by default), so name the roots whose folders are tagged albums: `Artist/Album/songs`, with `ALBUM`, `ALBUMARTIST` and `DATE` tags and a `cover.jpg`. A folder that directly holds songs is one album. Roots left out are still browsed and played by folder. A `cover.small.jpg` beside `cover.jpg` (about 600 pixels wide) is used for the page of albums, which otherwise loads every cover at full size.
 
 Lyrics are found beside a song, by name: `Song.flac` takes `Song.json`, `Song.ttml`, `Song.lrc`, and versions such as `Song.ja-Latn.json` or `Song_en.json`. The player combines the versions.
 

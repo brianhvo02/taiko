@@ -10,7 +10,9 @@ import type { Track } from '../library/tracks';
 import { mergeInto, sameSong, serialize } from '../lyrics/merge';
 import { openLyrics, songFromDoc } from '../lyrics/ttml';
 import type { LyricsSource, Song } from '../lyrics/ttml';
-import { NasError, clearPairing, fetchFolder, fetchLyrics, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath } from '../nas/client';
+import {
+  NasError, clearPairing, fetchFolder, fetchLibrary, fetchLyrics, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath, searchLibrary, startScan,
+} from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
 import {
@@ -23,7 +25,7 @@ import { folderOf, parseRoute, routeUrl } from './route';
 import type { Route } from './route';
 import { flacStartAt, readFlacIndex, streamHeader } from '../shared/flac';
 import type { FlacIndex, Reader } from '../shared/flac';
-import type { NasFolder } from '../shared/api';
+import type { NasAlbum, NasFolder } from '../shared/api';
 
 /** One folder of the paired NAS, as the browser shows it. */
 export interface NasListing {
@@ -37,6 +39,24 @@ export interface NasListing {
 }
 
 export type SongsTab = 'folders' | 'playlists' | 'device';
+
+/** What the library is showing: its front page, an artist, an album on the NAS, or an album of this device's songs. */
+export type LibraryPage = { kind: 'home' } | { kind: 'artist'; name: string } | { kind: 'album'; path: string } | { kind: 'deviceAlbum'; name: string };
+
+/** The NAS's album library. 'off' when the NAS keeps none (only its folders can be browsed). */
+export interface LibraryState {
+  state: 'idle' | 'loading' | 'ready' | 'off' | 'error';
+  albums: NasAlbum[];
+  scanning: boolean;
+}
+
+/** The songs of the NAS album that is open in the library. */
+export interface AlbumView {
+  path: string;
+  state: 'loading' | 'ready' | 'missing';
+  tracks: Track[];
+  cover: string | null;
+}
 
 export interface Snapshot {
   /** The songs picked on this device. */
@@ -63,6 +83,14 @@ export interface Snapshot {
   nasState: 'idle' | 'loading' | 'ready' | 'error';
   /** The NAS folder the browser is showing. */
   nasFolder: NasListing | null;
+  /** Which of the two main views shows: the library, or the open song's lyrics. */
+  view: 'library' | 'lyrics';
+  page: LibraryPage;
+  library: LibraryState;
+  album: AlbumView | null;
+  /** What is typed in the library's search, and the NAS songs found for it. */
+  libraryQuery: string;
+  searchTracks: Track[];
   /** Whether the Songs panel is open. */
   songsOpen: boolean;
   /** Which of the panel's lists is showing. */
@@ -103,6 +131,7 @@ class PlayerStore {
   private snapshot: Snapshot = {
     tracks: [], queue: [], currentId: null, currentTrack: null, song: null, lyricsLoading: false, lyricsNames: [], songInfo: null, usInfo: null,
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
+    view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
     playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, resume: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
   };
@@ -114,6 +143,9 @@ class PlayerStore {
   private waitingLyrics: File[] = [];
   private loadRun = 0;
   private browseRun = 0;
+  private albumRun = 0;
+  private libraryTimer = 0;
+  private searchTimer = 0;
   /** The queue positions in the order they play (queue.ts): as listed, or shuffled. */
   private order: number[] = [];
   /** Each song's lyric timing nudge, kept between visits. */
@@ -193,6 +225,7 @@ class PlayerStore {
       this.offerResume();
       if (this.snapshot.pairing) void this.openFolder(loadLastPath());
     }
+    if (this.snapshot.pairing) void this.loadLibrary();
     // Where the listener is gets saved as they go, and when the page is put away.
     setInterval(() => { if (!this.audio.paused) this.saveSessionNow(); }, 5000);
     this.audio.addEventListener('pause', () => this.saveSessionNow());
@@ -249,22 +282,51 @@ class PlayerStore {
     else history.replaceState(null, '', url);
   }
 
-  /** The address of the NAS song that is open, or of the first screen when the song is from this device. */
+  /** The address of the lyrics view for the open song: its place on the NAS, or /playing for a song from this device. */
   private playRoute(): Route {
-    const id = this.snapshot.currentTrack?.nas?.id;
-    const path = id ? pathOfTrackId(id) : null;
-    return path ? { kind: 'play', path, at: 0 } : { kind: 'home' };
+    const track = this.snapshot.currentTrack;
+    const path = track?.nas ? pathOfTrackId(track.nas.id) : null;
+    return path ? { kind: 'play', path, at: 0 } : track ? { kind: 'playing' } : { kind: 'home' };
+  }
+
+  /** The address of what the library is showing. A device album has none of its own. */
+  private libraryRoute(): Route {
+    const { page } = this.snapshot;
+    return page.kind === 'album' ? { kind: 'album', path: page.path } : page.kind === 'artist' ? { kind: 'artist', name: page.name } : { kind: 'home' };
+  }
+
+  /** The address of the view that is showing. */
+  private viewRoute(): Route {
+    return this.snapshot.view === 'lyrics' ? this.playRoute() : this.libraryRoute();
   }
 
   /** Goes where an address says: from a link, or from the browser's back and forward buttons. */
   private async applyRoute(route: Route): Promise<void> {
     if (route.kind === 'home') {
-      this.set({ songsOpen: false });
+      this.set({ songsOpen: false, view: 'library', page: { kind: 'home' } });
+      return;
+    }
+    if (route.kind === 'playing') {
+      // Only this visit's own songs have lyrics here; a reload has none, and lands on the library.
+      if (this.snapshot.currentTrack && !this.snapshot.currentTrack.nas) this.set({ songsOpen: false, view: 'lyrics' });
+      else {
+        this.set({ songsOpen: false, view: 'library', page: { kind: 'home' } });
+        this.writeRoute({ kind: 'home' }, 'replace');
+      }
+      return;
+    }
+    if (route.kind === 'artist') {
+      this.set({ songsOpen: false, view: 'library', page: { kind: 'artist', name: route.name }, libraryQuery: '' });
       return;
     }
     if (!this.snapshot.pairing) {
-      this.set({ songsOpen: false, notice: "This link is for a NAS this device isn't paired with. Ask its owner to send you an invite." });
+      this.set({ songsOpen: false, view: 'library', page: { kind: 'home' }, notice: "This link is for a NAS this device isn't paired with. Ask its owner to send you an invite." });
       this.writeRoute({ kind: 'home' }, 'replace');
+      return;
+    }
+    if (route.kind === 'album') {
+      this.set({ songsOpen: false });
+      await this.openAlbum(route.path);
       return;
     }
     if (route.kind === 'folders') {
@@ -277,7 +339,7 @@ class PlayerStore {
     }
     const id = `nas:${trackIdOf(route.path)}`;
     if (this.snapshot.currentId === id) {
-      this.set({ songsOpen: false });
+      this.set({ songsOpen: false, view: 'lyrics' });
       return;
     }
     // The song's folder becomes the list it plays from, as if it had been chosen there.
@@ -297,7 +359,112 @@ class PlayerStore {
     if (route.at > 0 && this.snapshot.currentId === id) this.seek(route.at);
   }
 
-  /** Opens the Songs panel; on a paired device its address becomes the NAS folder it shows. */
+  /* ---------- The library: albums and artists, from the NAS's scanned roots and this device's songs ---------- */
+
+  /** Shows the library's front page. */
+  showHome(): void {
+    this.set({ view: 'library', page: { kind: 'home' }, libraryQuery: '', searchTracks: [], songsOpen: false });
+    this.writeRoute({ kind: 'home' }, 'push');
+  }
+
+  /** Goes back to the library, where it was left. */
+  showLibrary(): void {
+    this.set({ view: 'library', songsOpen: false });
+    this.writeRoute(this.libraryRoute(), 'push');
+  }
+
+  /** Shows the lyrics of the song that is open. */
+  showLyrics(): void {
+    if (!this.snapshot.currentTrack) return;
+    this.set({ view: 'lyrics', songsOpen: false });
+    this.writeRoute(this.playRoute(), 'push');
+  }
+
+  showArtist(name: string): void {
+    this.set({ view: 'library', page: { kind: 'artist', name }, libraryQuery: '', searchTracks: [], songsOpen: false });
+    this.writeRoute({ kind: 'artist', name }, 'push');
+  }
+
+  /** Shows an album made of songs from this device (they are grouped by their album tag). */
+  showDeviceAlbum(name: string): void {
+    this.set({ view: 'library', page: { kind: 'deviceAlbum', name }, libraryQuery: '', searchTracks: [], songsOpen: false });
+  }
+
+  /** Shows an album on the NAS, as a step the browser's back button can undo. */
+  async showAlbum(path: string): Promise<void> {
+    this.writeRoute({ kind: 'album', path }, 'push');
+    await this.openAlbum(path);
+  }
+
+  private async openAlbum(path: string): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    const run = ++this.albumRun;
+    this.set({ view: 'library', page: { kind: 'album', path }, libraryQuery: '', searchTracks: [], album: { path, state: 'loading', tracks: [], cover: null } });
+    try {
+      const folder = await fetchFolder(pairing, path);
+      if (run !== this.albumRun) return;
+      this.set({ album: { path, state: 'ready', cover: folder.cover ?? null, tracks: folder.tracks.map((track) => trackFromNas(track, folder.cover ?? null)) } });
+    } catch (error) {
+      if (run !== this.albumRun) return;
+      if (error instanceof NasError && error.status === 404) this.set({ album: { path, state: 'missing', tracks: [], cover: null } });
+      else {
+        this.set({ album: { path, state: 'missing', tracks: [], cover: null } });
+        this.nasFailed(error, "Can't open that album. Try again in a moment.");
+      }
+    }
+  }
+
+  /** Reads the NAS's library; while the NAS is still scanning, looks again shortly. */
+  async loadLibrary(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    clearTimeout(this.libraryTimer);
+    if (this.snapshot.library.state === 'idle') this.set({ library: { ...this.snapshot.library, state: 'loading' } });
+    try {
+      const library = await fetchLibrary(pairing);
+      if (this.snapshot.pairing !== pairing) return;
+      this.set({ library: { state: library.enabled ? 'ready' : 'off', albums: library.albums, scanning: library.scanning } });
+      if (library.scanning) this.libraryTimer = window.setTimeout(() => void this.loadLibrary(), 2500);
+    } catch (error) {
+      if (this.snapshot.pairing !== pairing) return;
+      this.set({ library: { ...this.snapshot.library, state: 'error', scanning: false } });
+      if (error instanceof NasError && error.status === 401) this.nasFailed(error, '');
+    }
+  }
+
+  /** Asks the NAS to read its library again, for an album that was just added. */
+  async rescanLibrary(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    this.set({ library: { ...this.snapshot.library, scanning: true } });
+    try {
+      await startScan(pairing);
+    } catch {
+      // The library is read again below either way; a NAS that can't be reached shows there.
+    }
+    await this.loadLibrary();
+  }
+
+  /** Searches the library as the listener types: albums and artists at once here, songs from the NAS a moment later. */
+  setLibraryQuery(libraryQuery: string): void {
+    const wasLyrics = this.snapshot.view === 'lyrics';
+    this.set({ libraryQuery, view: 'library', songsOpen: false, ...(libraryQuery.trim() ? {} : { searchTracks: [] }) });
+    if (wasLyrics) this.writeRoute(this.libraryRoute(), 'push');
+    clearTimeout(this.searchTimer);
+    const query = libraryQuery.trim();
+    const pairing = this.snapshot.pairing;
+    if (query.length < 2 || !pairing || this.snapshot.library.state !== 'ready') return;
+    this.searchTimer = window.setTimeout(async () => {
+      try {
+        const found = await searchLibrary(pairing, query);
+        if (this.snapshot.libraryQuery.trim() === query) this.set({ searchTracks: found.tracks.map((track) => trackFromNas(track)) });
+      } catch {
+        // The albums and artists found here still show.
+      }
+    }, 250);
+  }
+
   /** Opens the Songs panel, on the list asked for or the one it showed last. */
   openSongs(tab?: SongsTab): void {
     const { pairing, tracks } = this.snapshot;
@@ -321,12 +488,12 @@ class PlayerStore {
   setSongsTab(songsTab: SongsTab): void {
     this.set({ songsTab });
     if (songsTab === 'folders') this.showFolders();
-    else this.writeRoute(this.playRoute(), 'replace');
+    else this.writeRoute(this.viewRoute(), 'replace');
   }
 
   closeSongs(): void {
     this.set({ songsOpen: false });
-    this.writeRoute(this.playRoute(), 'push');
+    this.writeRoute(this.viewRoute(), 'push');
   }
 
   /** Opens a NAS folder the listener chose, as a step the browser's back button can undo. */
@@ -433,13 +600,13 @@ class PlayerStore {
     this.set({
       currentId: id, currentTrack: track, queue, song: null, lyricsLoading: true, lyricsNames: [], songInfo: known?.song ?? null, usInfo: known?.us ?? null,
       duration: track.durationSeconds ?? 0, notice: '', offset: this.offsets.get(offsetKey(track)) ?? 0,
+      // Choosing a song shows its lyrics. Going on to the next song by itself leaves the listener where they are.
+      ...(history === 'replace' ? {} : { view: 'lyrics' as const }),
     });
     this.saveSessionNow();
     // A NAS song has an address. A song from this device doesn't, so it only clears another song's address.
-    if (history !== 'none') {
-      if (track.nas) this.writeRoute(this.playRoute(), history);
-      else if (parseRoute(location.pathname).kind === 'play') this.writeRoute({ kind: 'home' }, 'replace');
-    }
+    // A song that follows on by itself while the library is showing leaves the library's address alone.
+    if (history === 'push' || (history === 'replace' && this.snapshot.view === 'lyrics')) this.writeRoute(this.playRoute(), history);
     this.updateMediaSession();
     try {
       // A song from a playlist or a saved session is looked up again first: its lyrics files and cover may have changed.
@@ -861,6 +1028,7 @@ class PlayerStore {
       clearPairing();
       this.set({
         pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, resume: null, songsTab: 'device',
+        library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [],
         notice: 'This device is no longer paired with the NAS. Ask its owner for a new invite.',
       });
       this.writeRoute({ kind: 'home' }, 'replace');
@@ -919,6 +1087,7 @@ class PlayerStore {
     try {
       const pairing = await pair(link, deviceName);
       this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null, playlists: loadPlaylists(pairing.base), openPlaylist: null, songsTab: 'folders' });
+      void this.loadLibrary();
       await this.openFolder('');
     } catch (error) {
       this.set({ pairError: (error instanceof NasError && NAS_MESSAGES[error.code]) || "Pairing didn't finish. Check the address and try again." });
@@ -939,6 +1108,7 @@ class PlayerStore {
     }
     this.set({
       pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, resume: null, songsTab: 'device',
+      library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [], view: 'library',
       ...(playingFromNas ? { currentId: null, currentTrack: null, queue: [], song: null, lyricsNames: [], songInfo: null, usInfo: null } : {}),
     });
     this.writeRoute({ kind: 'home' }, 'replace');

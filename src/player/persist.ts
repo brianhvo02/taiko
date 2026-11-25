@@ -19,7 +19,7 @@ export interface Playlist {
 }
 
 /** Where a queue came from. */
-export type QueueSource = { kind: 'device' } | { kind: 'folder'; path: string } | { kind: 'playlist'; id: string };
+export type QueueSource = { kind: 'device' } | { kind: 'folder'; path: string } | { kind: 'playlist'; id: string } | { kind: 'search'; query: string };
 
 export interface Settings {
   showRoman: boolean;
@@ -99,7 +99,7 @@ export function toSavedTrack(value: unknown): SavedTrack | null {
     discNumber: count(value.discNumber),
     durationSeconds: count(value.durationSeconds),
   };
-  for (const key of ['titleRoman', 'artistRoman', 'albumRoman', 'titleEnglish', 'artistEnglish', 'albumEnglish', 'appleSongId'] as const) {
+  for (const key of ['titleRoman', 'artistRoman', 'albumRoman', 'titleEnglish', 'artistEnglish', 'albumEnglish', 'appleSongId', 'albumArtist', 'albumArtistRoman', 'date'] as const) {
     if (typeof value[key] === 'string' && value[key]) track[key] = value[key] as string;
   }
   return track;
@@ -112,6 +112,7 @@ function toSource(value: unknown): QueueSource | null {
   if (!isObject(value)) return null;
   if (value.kind === 'folder' && typeof value.path === 'string') return { kind: 'folder', path: value.path };
   if (value.kind === 'playlist' && typeof value.id === 'string') return { kind: 'playlist', id: value.id };
+  if (value.kind === 'search' && typeof value.query === 'string') return { kind: 'search', query: value.query };
   return null;
 }
 

@@ -82,7 +82,7 @@ const fillOf = (value: number, max: number) => `${max > 0 ? Math.min(100, (value
  * The player's bar: the song on the left, the transport over the seek bar in the middle, and on the right the
  * options, the Songs list and the volume. On a phone the three stack.
  */
-export function TransportBar({ snap }: { snap: Snapshot }) {
+export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong: () => void }) {
   const seekRef = useRef<HTMLInputElement>(null);
   const elapsedRef = useRef<HTMLOutputElement>(null);
   const optionsRef = useRef<HTMLDivElement>(null);
@@ -225,6 +225,7 @@ export function TransportBar({ snap }: { snap: Snapshot }) {
                 <button className="plain-button" type="button" title="Save the combined lyrics as one file" onClick={() => store.downloadLyrics()}>Download lyrics</button>
               )}
               <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Add lyrics or music</button>
+              <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); onFindSong(); }}>Find this song in Apple Music</button>
               {volume && <div className="extras-volume">{volume}</div>}
             </div>
           )}

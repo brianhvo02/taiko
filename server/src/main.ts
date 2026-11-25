@@ -14,6 +14,7 @@ import { createApp } from './app';
 import { DEFAULT_CODE_DAYS, PairingStore, loadOrCreateSecret } from './auth';
 import { loadConfig } from './config';
 import { Library } from './library';
+import { TagCache } from './tag-cache';
 import { VERSION } from './version';
 
 const USAGE = `Usage:
@@ -33,8 +34,11 @@ function serve(): void {
   const secret = loadOrCreateSecret(config.dataDir);
   const pairing = new PairingStore(config.dataDir);
   pairing.listDevices(); // A damaged store stops the start, with a message, instead of failing every request.
-  const library = new Library(config.roots, log);
-  const server = createServer(createApp({ config, library, pairing, secret, log }));
+  // One cache of tags for the scan and the folder browser, so opening a scanned album reads no file again.
+  const tags = new TagCache();
+  // Only the roots LIBRARY_SCAN names go into the library; every root stays reachable through the folder browser.
+  const library = new Library(config.roots.filter((root) => config.scanRoots.includes(root.name)), tags, log);
+  const server = createServer(createApp({ config, library, tags, pairing, secret, log }));
 
   server.on('error', (error: NodeJS.ErrnoException) => {
     console.error(error.code === 'EADDRINUSE' ? `taiko-server: port ${config.port} is already in use. Set PORT to a free one.` : `taiko-server: ${error.message}`);
@@ -44,16 +48,15 @@ function serve(): void {
   server.listen(config.port, () => {
     const roots = config.roots.map((root) => `${root.name}=${root.dir}`).join(', ');
     const started = `taiko-server ${VERSION} on port ${config.port}, serving ${config.publicBase}; roots: ${roots}`;
-    if (!config.libraryScan) {
-      // The folder browser reads a folder when asked, so nothing is scanned and `GET library` stays empty.
-      log(`${started}; library scan off (LIBRARY_SCAN)`);
+    if (!library.enabled) {
+      // The folder browser reads a folder when asked, so nothing is scanned and `GET library` says it is off.
+      log(`${started}; library off (LIBRARY_SCAN)`);
       return;
     }
-    // Listening starts before the scan, so a paired device gets "still scanning" (scannedAt null) rather than no answer.
-    library.scan().then(
-      () => log(`${started}; library scan on, ${library.tracks.length} tracks`),
-      (error) => log(`library: the first scan failed: ${String(error)}`),
-    );
+    log(`${started}; library from: ${config.scanRoots.join(', ')}`);
+    // Listening starts before the scan, so a paired device is told "scanning" rather than given no answer. The
+    // library logs what each scan found ("library: N albums, M songs") when that differs from the scan before.
+    library.scan();
     library.startRescans(config.scanIntervalMinutes);
   });
 

@@ -11,6 +11,7 @@ import { createApp } from './app';
 import { PairingStore, loadOrCreateSecret } from './auth';
 import { fileReader, flacSeek } from './flac-file';
 import { Library } from './library';
+import { TagCache } from './tag-cache';
 import { FLAC_BLOCK, FLAC_RATE, removeDir, seekableFlac, tempDir, writeFile } from './test-helpers';
 import { open } from 'node:fs/promises';
 
@@ -83,7 +84,7 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/`;
   server.on('request', createApp({
     config: { publicBase: base, basePath: '/api/', serverName: 'Test NAS', appOrigins: [], roots },
-    library: new Library(roots),
+    library: new Library([], new TagCache()),
     pairing,
     secret: loadOrCreateSecret(data),
   }));

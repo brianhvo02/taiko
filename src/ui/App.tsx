@@ -1,7 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { store } from '../player/store';
 import { LyricsView } from './LyricsView';
-import { SearchBar } from './SearchBar';
+import { CatalogDialog } from './SearchBar';
 import { SongsPanel } from './SongsPanel';
 import { PairDialog, StartScreen } from './StartScreen';
 import { TransportBar } from './TransportBar';
@@ -11,8 +11,12 @@ export function App() {
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const songsOpen = snap.songsOpen;
   const [dragging, setDragging] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const track = snap.currentTrack;
-  const playing = track !== null;
+  const lyricsShown = track !== null && snap.view === 'lyrics';
+  // The library takes the first screen over once there is something in it, or a NAS that may have something.
+  const stocked = snap.tracks.length > 0 || snap.page.kind !== 'home' || snap.libraryQuery.trim() !== ''
+    || (snap.pairing !== null && (snap.library.albums.length > 0 || snap.library.scanning || snap.library.state === 'idle' || snap.library.state === 'loading'));
 
   // Files dropped anywhere on the page are added.
   useEffect(() => {
@@ -57,19 +61,36 @@ export function App() {
     document.title = track ? `${snap.songInfo?.trackName ?? track.title} - Taiko` : 'Taiko';
   }, [track, snap.songInfo]);
 
-  const classes = ['app', dragging && 'dragging', !snap.showRoman && 'no-roman', !snap.showTranslation && 'no-translation', songsOpen && 'songs-open']
+  const classes = ['app', dragging && 'dragging', !snap.showRoman && 'no-roman', !snap.showTranslation && 'no-translation', songsOpen && 'songs-open', track && 'has-bar']
     .filter(Boolean).join(' ');
 
   return (
     <div className={classes}>
       <header className="top">
-        <a className="brand" href="/" aria-label="Taiko"><span lang="ja">太鼓</span> Taiko</a>
-        <SearchBar snap={snap} />
+        <a className="brand" href="/" aria-label="Taiko" onClick={(e) => { e.preventDefault(); store.showHome(); }}><span lang="ja">太鼓</span> Taiko</a>
+        {track && (
+          <nav className="views" aria-label="Views">
+            <button type="button" className="view" aria-current={lyricsShown ? undefined : 'page'} onClick={() => (lyricsShown ? store.showLibrary() : store.showHome())}>Library</button>
+            <button type="button" className="view" aria-current={lyricsShown ? 'page' : undefined} onClick={() => store.showLyrics()}>Lyrics</button>
+          </nav>
+        )}
+        {stocked && (
+          <input
+            className="library-search"
+            type="search"
+            value={snap.libraryQuery}
+            onChange={(e) => store.setLibraryQuery(e.currentTarget.value)}
+            placeholder="Search your library"
+            aria-label="Search your library"
+            autoComplete="off"
+            enterKeyHint="search"
+          />
+        )}
       </header>
 
-      {!playing && <StartScreen snap={snap} onShowSongs={() => store.openSongs('folders')} />}
+      {!lyricsShown && <StartScreen snap={snap} stocked={stocked} quietNotice={track !== null || stocked} onShowSongs={() => store.openSongs('folders')} />}
 
-      {playing && (
+      {lyricsShown && (
         <>
           {snap.song && <LyricsView song={snap.song} />}
           {snap.song && !snap.song.wordTimed && <p className="timing-note">These lyrics are timed by line, not by word</p>}
@@ -84,14 +105,15 @@ export function App() {
               )}
             </main>
           )}
-          {snap.notice && (
-            <p className="toast notice" role="status">
-              {snap.notice} <button className="text-button" type="button" onClick={() => store.dismissNotice()}>Dismiss</button>
-            </p>
-          )}
-          <TransportBar snap={snap} />
         </>
       )}
+      {snap.notice && (track !== null || stocked) && (
+        <p className="toast notice" role="status">
+          {snap.notice} <button className="text-button" type="button" onClick={() => store.dismissNotice()}>Dismiss</button>
+        </p>
+      )}
+      {track && <TransportBar snap={snap} onFindSong={() => setCatalogOpen(true)} />}
+      {catalogOpen && <CatalogDialog snap={snap} onClose={() => setCatalogOpen(false)} />}
 
       {songsOpen && <SongsPanel snap={snap} onClose={() => store.closeSongs()} />}
       <PairDialog snap={snap} />

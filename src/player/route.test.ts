@@ -7,7 +7,7 @@ describe('routes', () => {
   const awkward = 'Downloads/[2026.10.14] 夜市 #1 100%?／Night Market/01. 紙の灯籠.flac';
 
   it('reads the first screen from anything that is not a NAS path', () => {
-    for (const path of ['/', '', '/index.html', '/nas/play', '/nas/play/', '/nasty', '/nas/other/x', '/nas/folders/%E0%A4%A']) {
+    for (const path of ['/', '', '/index.html', '/nas/play', '/nas/play/', '/nasty', '/nas/other/x', '/nas/folders/%E0%A4%A', '/album', '/album/', '/artist/', '/artist/%E0%A4%A', '/playing/x']) {
       expect(parseRoute(path), path).toEqual({ kind: 'home' });
     }
   });
@@ -23,6 +23,9 @@ describe('routes', () => {
   it('writes an address that reads back as the same place, whatever the names hold', () => {
     const routes: Route[] = [
       { kind: 'home' },
+      { kind: 'playing' },
+      { kind: 'album', path: folderOf(awkward) },
+      { kind: 'artist', name: 'Official髭男dism / 100%?' },
       { kind: 'folders', path: '' },
       { kind: 'folders', path: folderOf(awkward) },
       { kind: 'play', path: awkward, at: 0 },
