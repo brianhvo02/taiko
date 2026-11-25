@@ -8,6 +8,7 @@ import type { TicketResponse } from '../../src/shared/api';
 import { parseFrameHeader, readFlacIndex, streamHeader } from '../../src/shared/flac';
 import type { Reader } from '../../src/shared/flac';
 import { createApp } from './app';
+import { PlaylistStore } from './playlists';
 import { PairingStore, loadOrCreateSecret } from './auth';
 import { fileReader, flacSeek } from './flac-file';
 import { Library } from './library';
@@ -86,6 +87,7 @@ beforeAll(async () => {
     config: { publicBase: base, basePath: '/api/', serverName: 'Test NAS', appOrigins: [], roots },
     library: new Library([], new TagCache()),
     pairing,
+    playlists: new PlaylistStore(data),
     secret: loadOrCreateSecret(data),
   }));
   token = pairing.redeem(pairing.createCode().code, 'Phone')!.token;

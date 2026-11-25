@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BrowseResponse, LibraryResponse, NasTrack, PairResponse, TicketResponse } from '../../src/shared/api';
 import { createApp } from './app';
+import { PlaylistStore } from './playlists';
 import { PairingStore, TICKET_LIFETIME_SECONDS, loadOrCreateSecret, signTicket } from './auth';
 import type { LibraryRoot } from './config';
 import { Library } from './library';
@@ -56,6 +57,7 @@ async function start(basePath: string, options: { scan?: boolean; roots?: Librar
     library,
     tags,
     pairing,
+    playlists: new PlaylistStore(data),
     secret,
     now: () => clock,
   }));
@@ -334,7 +336,7 @@ describe('CORS', () => {
     });
     expect(reply.status).toBe(204);
     expect(reply.headers['access-control-allow-origin']).toBe(APP_ORIGIN);
-    expect(reply.headers['access-control-allow-methods']).toBe('GET, HEAD, POST, DELETE, OPTIONS');
+    expect(reply.headers['access-control-allow-methods']).toBe('GET, HEAD, POST, PUT, DELETE, OPTIONS');
     expect(reply.headers['access-control-allow-headers']).toBe('authorization, content-type, range');
     expect(reply.body).toHaveLength(0);
   });
@@ -498,5 +500,44 @@ describe('the folder browser, with the library scan off', () => {
     const good = id('Shelf/Tin Harbor/Low Tide/2 - b.flac');
     expect((await off.call('GET', `tracks/${good}/audio?exp=${exp}&sig=${signTicket(off.secret, good, exp)}`)).status).toBe(200);
     expect((await off.call('GET', `tracks/${good}/audio?exp=${exp}&sig=${signTicket(off.secret, id('Shelf/Tin Harbor/Low Tide/10 - a.flac'), exp)}`)).status).toBe(403);
+  });
+});
+
+describe('playlists shared by the paired devices', () => {
+  const song = (name: string) => ({ id: name, title: name, artist: 'Midori Vale', album: '', trackNumber: null, discNumber: null, durationSeconds: 10 });
+
+  it('keeps one set for every device, and refuses a change made from an older version', async () => {
+    const shared = await start('/api/');
+    const phone = await pair(shared, 'Phone');
+    const tablet = await pair(shared, 'Tablet');
+    expect((await shared.call('GET', 'playlists')).status).toBe(401);
+    expect((await shared.call('GET', 'playlists', { token: phone })).json()).toEqual({ version: 0, playlists: [] });
+
+    const first = [{ id: 'p1', name: 'Evening', tracks: [song('a'), song('b')] }];
+    const saved = await shared.call('PUT', 'playlists', { token: phone, body: { base: 0, playlists: first } });
+    expect(saved.status).toBe(200);
+    expect(saved.json()).toEqual({ version: 1, playlists: first });
+    // The other device sees it, and what it sends from the version it saw is kept.
+    expect((await shared.call('GET', 'playlists', { token: tablet })).json()).toEqual({ version: 1, playlists: first });
+    const second = [...first, { id: 'p2', name: 'Morning', tracks: [] }];
+    expect((await shared.call('PUT', 'playlists', { token: tablet, body: { base: 1, playlists: second } })).json()).toEqual({ version: 2, playlists: second });
+
+    // The phone, still at version 1, is told to look again; nothing is changed.
+    const late = await shared.call('PUT', 'playlists', { token: phone, body: { base: 1, playlists: [] } });
+    expect(late.status).toBe(409);
+    expect(late.json()).toEqual({ error: 'conflict' });
+    expect((await shared.call('GET', 'playlists', { token: phone })).json()).toEqual({ version: 2, playlists: second });
+  });
+
+  it('stores playlists only, and refuses what is not a set of them', async () => {
+    const shared = await start('/api/');
+    const token = await pair(shared);
+    const extra = await shared.call('PUT', 'playlists', { token, body: { base: 0, playlists: [{ id: 'p1', name: 'Evening', owner: 'x', tracks: [{ ...song('a'), cover: 'http://elsewhere/' }] }] } });
+    expect(extra.json()).toEqual({ version: 1, playlists: [{ id: 'p1', name: 'Evening', tracks: [song('a')] }] });
+    for (const body of [{ playlists: [] }, { base: -1, playlists: [] }, { base: 1, playlists: 'all' }, { base: 1, playlists: [{ id: 'p1' }] }, { base: 1, playlists: [{ id: 'p', name: 'n'.repeat(81), tracks: [] }] }]) {
+      expect((await shared.call('PUT', 'playlists', { token, body })).status).toBe(400);
+    }
+    expect((await shared.call('POST', 'playlists', { token, body: {} })).status).toBe(405);
+    expect((await shared.call('GET', 'playlists', { token })).json()).toMatchObject({ version: 1 });
   });
 });

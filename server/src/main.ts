@@ -11,6 +11,7 @@
  */
 import { createServer } from 'node:http';
 import { createApp } from './app';
+import { PlaylistStore } from './playlists';
 import { DEFAULT_CODE_DAYS, PairingStore, loadOrCreateSecret } from './auth';
 import { loadConfig } from './config';
 import { Library } from './library';
@@ -38,7 +39,7 @@ function serve(): void {
   const tags = new TagCache();
   // Only the roots LIBRARY_SCAN names go into the library; every root stays reachable through the folder browser.
   const library = new Library(config.roots.filter((root) => config.scanRoots.includes(root.name)), tags, log);
-  const server = createServer(createApp({ config, library, tags, pairing, secret, log }));
+  const server = createServer(createApp({ config, library, tags, pairing, playlists: new PlaylistStore(config.dataDir), secret, log }));
 
   server.on('error', (error: NodeJS.ErrnoException) => {
     console.error(error.code === 'EADDRINUSE' ? `taiko-server: port ${config.port} is already in use. Set PORT to a free one.` : `taiko-server: ${error.message}`);

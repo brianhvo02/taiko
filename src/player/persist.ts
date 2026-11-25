@@ -3,20 +3,15 @@
  * the listener was. All of it is in localStorage, read defensively: anything missing or misshapen falls back to a
  * default instead of breaking the player, and a browser with no storage simply forgets.
  *
- * Only NAS songs are kept. A song picked from the device is a file the browser can't hold on to, so it can't be in
- * a playlist or come back after a reload.
+ * Only NAS songs are kept here. Songs picked from the device are kept as files elsewhere (library/kept.ts); they
+ * can't be in a playlist or a saved session.
  */
-import type { NasTrack } from '../shared/api';
+import { toPlaylists, toSavedTracks } from '../shared/playlists';
+import type { Playlist, PlaylistSync, SavedTrack } from '../shared/playlists';
 import type { Repeat } from './queue';
 
-/** A NAS song as it is stored: what the folder browser said about it, without its lyrics list or cover address. */
-export type SavedTrack = Omit<NasTrack, 'lyrics'>;
-
-export interface Playlist {
-  id: string;
-  name: string;
-  tracks: SavedTrack[];
-}
+export { toSavedTrack } from '../shared/playlists';
+export type { Playlist, SavedTrack } from '../shared/playlists';
 
 /** Where a queue came from. */
 export type QueueSource = { kind: 'device' } | { kind: 'folder'; path: string } | { kind: 'playlist'; id: string } | { kind: 'search'; query: string };
@@ -52,6 +47,7 @@ export const KEYS = {
   settings: 'taiko:settings',
   offsets: 'taiko:offsets',
   playlists: 'taiko:playlists',
+  playlistSync: 'taiko:playlist-sync',
   session: 'taiko:session',
 } as const;
 
@@ -86,29 +82,7 @@ function write(key: string, value: unknown, store: Store | null): void {
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
-const text = (value: unknown): string => (typeof value === 'string' ? value : '');
 const count = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
-
-/** A stored song, or null when what was stored isn't one. */
-export function toSavedTrack(value: unknown): SavedTrack | null {
-  if (!isObject(value) || typeof value.id !== 'string' || !value.id || typeof value.title !== 'string') return null;
-  const track: SavedTrack = {
-    id: value.id,
-    title: value.title,
-    artist: text(value.artist),
-    album: text(value.album),
-    trackNumber: count(value.trackNumber),
-    discNumber: count(value.discNumber),
-    durationSeconds: count(value.durationSeconds),
-  };
-  for (const key of ['titleRoman', 'artistRoman', 'albumRoman', 'titleEnglish', 'artistEnglish', 'albumEnglish', 'appleSongId', 'albumArtist', 'albumArtistRoman', 'date'] as const) {
-    if (typeof value[key] === 'string' && value[key]) track[key] = value[key] as string;
-  }
-  return track;
-}
-
-const toTracks = (value: unknown): SavedTrack[] =>
-  (Array.isArray(value) ? value : []).map(toSavedTrack).filter((track): track is SavedTrack => track !== null);
 
 function toSource(value: unknown): QueueSource | null {
   if (!isObject(value)) return null;
@@ -162,12 +136,21 @@ export function saveOffset(offsets: Map<string, number>, key: string, seconds: n
 
 export function loadPlaylists(nas: string, store: Store | null = browserStore()): Playlist[] {
   const saved = read(KEYS.playlists, store);
-  const lists = isObject(saved) ? saved[nas] : null;
-  if (!Array.isArray(lists)) return [];
-  return lists.flatMap((value): Playlist[] => {
-    if (!isObject(value) || typeof value.id !== 'string' || !value.id || typeof value.name !== 'string') return [];
-    return [{ id: value.id, name: value.name, tracks: toTracks(value.tracks) }];
-  });
+  return toPlaylists(isObject(saved) ? saved[nas] : null);
+}
+
+/** What this device remembers about sharing its playlists with a NAS (see `reconcile`). */
+export function loadPlaylistSync(nas: string, store: Store | null = browserStore()): PlaylistSync {
+  const saved = read(KEYS.playlistSync, store);
+  const entry = isObject(saved) ? saved[nas] : null;
+  const ids = (value: unknown): string[] => (Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : []);
+  if (!isObject(entry)) return { version: null, dirty: [], deleted: [] };
+  return { version: typeof entry.version === 'number' && Number.isFinite(entry.version) ? entry.version : null, dirty: ids(entry.dirty), deleted: ids(entry.deleted) };
+}
+
+export function savePlaylistSync(nas: string, sync: PlaylistSync, store: Store | null = browserStore()): void {
+  const saved = read(KEYS.playlistSync, store);
+  write(KEYS.playlistSync, { ...(isObject(saved) ? saved : {}), [nas]: sync }, store);
 }
 
 export function savePlaylists(nas: string, playlists: Playlist[], store: Store | null = browserStore()): void {
@@ -205,7 +188,7 @@ export function loadSession(store: Store | null = browserStore()): Session | nul
   const saved = read(KEYS.session, store);
   if (!isObject(saved) || typeof saved.nas !== 'string' || typeof saved.current !== 'string') return null;
   const source = toSource(saved.source);
-  const tracks = toTracks(saved.tracks);
+  const tracks = toSavedTracks(saved.tracks);
   if (!source || !tracks.some((track) => track.id === saved.current)) return null;
   const position = count(saved.position);
   return { nas: saved.nas, source, tracks, current: saved.current, position: position !== null && position > 0 ? position : 0 };

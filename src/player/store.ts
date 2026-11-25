@@ -13,12 +13,13 @@ import { mergeInto, sameSong, serialize } from '../lyrics/merge';
 import { openLyrics, songFromDoc } from '../lyrics/ttml';
 import type { LyricsSource, Song } from '../lyrics/ttml';
 import {
-  NasError, clearPairing, fetchFolder, fetchLibrary, fetchLyrics, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath, searchLibrary, startScan,
+  NasError, clearPairing, fetchFolder, fetchLibrary, fetchLyrics, fetchPlaylists, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath, searchLibrary, sendPlaylists, startScan,
 } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
+import { noteChanges, reconcile } from '../shared/playlists';
 import {
-  cleanName, loadOffsets, loadPlaylists, loadSession, loadSettings, saveOffset, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
+  cleanName, loadOffsets, loadPlaylistSync, loadPlaylists, loadSession, loadSettings, saveOffset, savePlaylistSync, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
 } from './persist';
 import type { Playlist, QueueSource, SavedTrack, Session } from './persist';
 import { makeOrder, nextRepeat, stepFrom } from './queue';
@@ -109,6 +110,8 @@ export interface Snapshot {
   playlists: Playlist[];
   /** The playlist open in the panel, or null for the list of them. */
   openPlaylist: string | null;
+  /** Whether the playlists are shared through the NAS with every device paired with it. */
+  playlistsShared: boolean;
   /** Where the listener was last time, offered on the first screen. */
   /** From 0 to 1. */
   volume: number;
@@ -136,7 +139,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -178,6 +181,10 @@ class PlayerStore {
   /** The song played to its end. The element's own `ended` can't be trusted for a stream cut by an exact seek. */
   private finished = false;
   private resumeAfterSeek = false;
+  /** Counts changes to the playlists made on this device, so a sync can tell one happened while it ran. */
+  private playlistEdits = 0;
+  private syncing = false;
+  private syncTimer: ReturnType<typeof setTimeout> | undefined;
   /** While a saved session is being restored, the moment it is going back to. */
   private restoringAt: number | null = null;
   /** The object URL of the cut stream now playing, for a file on this device. */
@@ -240,6 +247,9 @@ class PlayerStore {
     if (saved && route.kind !== 'play') void this.restoreSession(saved, false);
     if (this.snapshot.pairing) void this.loadLibrary();
     void this.restoreKept();
+    void this.syncPlaylists();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void this.syncPlaylists(); });
+    addEventListener('online', () => void this.syncPlaylists());
     // Where the listener is gets saved as they go, and when the page is put away.
     setInterval(() => { if (!this.audio.paused) this.saveSessionNow(); }, 5000);
     this.audio.addEventListener('pause', () => this.saveSessionNow());
@@ -886,8 +896,59 @@ class PlayerStore {
   /* ---------- Playlists (persist.ts) ---------- */
 
   private setPlaylists(playlists: Playlist[]): void {
+    const pairing = this.snapshot.pairing;
+    // What was made, changed or deleted is noted, so the NAS can be told, now or on a later visit.
+    if (pairing) savePlaylistSync(pairing.base, noteChanges(this.snapshot.playlists, playlists, loadPlaylistSync(pairing.base)));
+    this.playlistEdits++;
     this.set({ playlists });
-    if (this.snapshot.pairing) savePlaylists(this.snapshot.pairing.base, playlists);
+    if (pairing) savePlaylists(pairing.base, playlists);
+    clearTimeout(this.syncTimer);
+    this.syncTimer = setTimeout(() => void this.syncPlaylists(), 600);
+  }
+
+  /**
+   * Brings this device's playlists and the NAS's together (see `reconcile`): the NAS's set is shared by every
+   * paired device. Runs at the start of a visit, when the page comes back into view, and after a change here. A
+   * NAS that can't be reached, or one from before it kept playlists, leaves them as they are on this device.
+   */
+  async syncPlaylists(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing || this.syncing) return;
+    this.syncing = true;
+    try {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const remote = await fetchPlaylists(pairing);
+        if (this.snapshot.pairing !== pairing) return;
+        if (!remote) {
+          this.set({ playlistsShared: false });
+          return;
+        }
+        const edits = this.playlistEdits;
+        const merged = reconcile(this.snapshot.playlists, remote.playlists, loadPlaylistSync(pairing.base));
+        let version = remote.version;
+        if (merged.push) {
+          const sent = await sendPlaylists(pairing, { base: remote.version, playlists: merged.playlists });
+          if (this.snapshot.pairing !== pairing) return;
+          // Another device changed them in between: look again.
+          if (!sent) continue;
+          version = sent.version;
+        }
+        // A change made here while this was under way stays noted, and goes round again.
+        if (edits !== this.playlistEdits) {
+          savePlaylistSync(pairing.base, { ...loadPlaylistSync(pairing.base), version });
+          continue;
+        }
+        savePlaylistSync(pairing.base, { version, dirty: [], deleted: [] });
+        savePlaylists(pairing.base, merged.playlists);
+        const open = this.snapshot.openPlaylist;
+        this.set({ playlists: merged.playlists, playlistsShared: true, ...(open && !merged.playlists.some((playlist) => playlist.id === open) ? { openPlaylist: null } : {}) });
+        return;
+      }
+    } catch {
+      // The NAS can't be reached just now. The playlists stay as they are here, and what changed stays noted.
+    } finally {
+      this.syncing = false;
+    }
   }
 
   private changePlaylist(id: string, change: (playlist: Playlist) => Playlist): void {
@@ -1090,7 +1151,7 @@ class PlayerStore {
     if (error instanceof NasError && error.status === 401) {
       clearPairing();
       this.set({
-        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, songsTab: 'device',
+        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, songsTab: 'device',
         library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [],
         notice: 'This device is no longer paired with the NAS. Ask its owner for a new invite.',
       });
@@ -1150,6 +1211,7 @@ class PlayerStore {
     try {
       const pairing = await pair(link, deviceName);
       this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null, playlists: loadPlaylists(pairing.base), openPlaylist: null, songsTab: 'folders' });
+      void this.syncPlaylists();
       void this.loadLibrary();
       await this.openFolder('');
     } catch (error) {
@@ -1170,7 +1232,7 @@ class PlayerStore {
       this.audio.load();
     }
     this.set({
-      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, songsTab: 'device',
+      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, songsTab: 'device',
       library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [], view: 'library',
       ...(playingFromNas ? { currentId: null, currentTrack: null, queue: [], song: null, lyricsNames: [], songInfo: null, usInfo: null } : {}),
     });

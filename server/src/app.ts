@@ -3,14 +3,16 @@ import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, PairResponse, ScanResponse, SearchResponse,
-  TicketRequest, TicketResponse,
+  PlaylistsResponse, TicketRequest, TicketResponse,
 } from '../../src/shared/api';
+import { acceptPlaylists } from '../../src/shared/playlists';
 import { MAX_DEVICE_NAME_LENGTH, RateLimiter, TICKET_LIFETIME_SECONDS, signTicket, verifyTicket } from './auth';
 import type { Device, PairingStore } from './auth';
 import type { Config } from './config';
 import { flacSeek } from './flac-file';
 import { nasTrack } from './library';
 import type { Library } from './library';
+import type { PlaylistStore } from './playlists';
 import { LibraryPaths, byNameNumeric, listFolder } from './paths';
 import type { FolderListing, ResolvedTrack } from './paths';
 import { sendAudioFile } from './ranges';
@@ -19,6 +21,8 @@ import { TagCache } from './tag-cache';
 import { findCover, sendCover } from './cover';
 
 export const MAX_JSON_BODY_BYTES = 16 * 1024;
+/** The playlists arrive whole, so their body may be far larger than any other. */
+export const MAX_PLAYLISTS_BODY_BYTES = 8 * 1024 * 1024;
 export const PAIR_ATTEMPTS = 10;
 export const PAIR_WINDOW_MS = 10 * 60 * 1000;
 /** A device may ask for a rescan this often; sooner, it is told none was started. */
@@ -32,6 +36,8 @@ export interface AppDeps {
   /** The cache the library scan reads tags through, so the browser shares it. Left out: one of the app's own. */
   tags?: TagCache;
   pairing: PairingStore;
+  /** The playlists the paired devices share. */
+  playlists: PlaylistStore;
   /** Signs tickets. */
   secret: Buffer;
   now?: () => number;
@@ -68,13 +74,13 @@ function sendError(req: IncomingMessage, res: ServerResponse, status: number, co
 }
 
 /** The request's JSON object. `optional` takes no body at all (or only white space) as `{}`. */
-async function readJsonBody(req: IncomingMessage, optional = false): Promise<Record<string, unknown>> {
-  if (Number(req.headers['content-length'] ?? 0) > MAX_JSON_BODY_BYTES) throw new HttpError(413, 'too-large');
+async function readJsonBody(req: IncomingMessage, optional = false, limit = MAX_JSON_BODY_BYTES): Promise<Record<string, unknown>> {
+  if (Number(req.headers['content-length'] ?? 0) > limit) throw new HttpError(413, 'too-large');
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > MAX_JSON_BODY_BYTES) throw new HttpError(413, 'too-large');
+    if (size > limit) throw new HttpError(413, 'too-large');
     chunks.push(chunk);
   }
   const text = Buffer.concat(chunks).toString('utf8');
@@ -266,6 +272,23 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       return;
     }
 
+    if (parts.length === 1 && parts[0] === 'playlists') {
+      allow(req, 'GET', 'PUT');
+      const device = requireDevice(req);
+      if (req.method !== 'PUT') {
+        sendJson(req, res, 200, deps.playlists.read() satisfies PlaylistsResponse);
+        return;
+      }
+      const body = await readJsonBody(req, false, MAX_PLAYLISTS_BODY_BYTES);
+      const playlists = acceptPlaylists(body.playlists);
+      if (typeof body.base !== 'number' || !Number.isSafeInteger(body.base) || body.base < 0 || !playlists) throw new HttpError(400, 'bad-request');
+      const saved = deps.playlists.replace(body.base, playlists);
+      if (!saved) throw new HttpError(409, 'conflict');
+      log(`playlists changed by "${device.name}": now ${saved.playlists.length}, version ${saved.version}`);
+      sendJson(req, res, 200, saved satisfies PlaylistsResponse);
+      return;
+    }
+
     if (parts.length === 3 && parts[0] === 'tracks' && parts[2] === 'ticket') {
       allow(req, 'POST');
       requireDevice(req);
@@ -334,7 +357,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
     }
     if (req.method === 'OPTIONS') {
       if (allowed) {
-        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, DELETE, OPTIONS');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, DELETE, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'authorization, content-type, range');
         res.setHeader('Access-Control-Max-Age', '600');
         // Chrome asks this before a public page may call a server on a private address (a NAS reached over the LAN).

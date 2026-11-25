@@ -2,7 +2,8 @@
  * The player's side of the NAS server (see `src/shared/api.ts` for the contract). A device pairs once with a code
  * from the owner's invite link; the token it gets back is kept in this browser's storage.
  */
-import type { ApiError, BrowseResponse, LibraryResponse, PairRequest, PairResponse, ScanResponse, SearchResponse, TicketRequest, TicketResponse } from '../shared/api';
+import { toPlaylists } from '../shared/playlists';
+import type { ApiError, BrowseResponse, LibraryResponse, PairRequest, PairResponse, PlaylistsResponse, PlaylistsUpdate, ScanResponse, SearchResponse, TicketRequest, TicketResponse } from '../shared/api';
 
 export interface Pairing {
   /** The server's API base, ending in `/api/`. */
@@ -133,6 +134,28 @@ export async function searchLibrary(pairing: Pairing, query: string): Promise<Se
 /** Asks the NAS to read its library again now. */
 export async function startScan(pairing: Pairing): Promise<ScanResponse> {
   return (await request(pairing.base, 'library/scan', { method: 'POST' }, pairing.token)).json() as Promise<ScanResponse>;
+}
+
+/** The playlists the NAS keeps for every paired device. Null from a server that doesn't keep any yet. */
+export async function fetchPlaylists(pairing: Pairing): Promise<PlaylistsResponse | null> {
+  try {
+    const reply = (await (await request(pairing.base, 'playlists', {}, pairing.token)).json()) as Partial<PlaylistsResponse>;
+    return typeof reply.version === 'number' ? { version: reply.version, playlists: toPlaylists(reply.playlists) } : null;
+  } catch (error) {
+    if (error instanceof NasError && (error.status === 404 || error.status === 405)) return null;
+    throw error;
+  }
+}
+
+/** Sends the playlists as changed from version `base`. Null when the NAS's have changed since: look again. */
+export async function sendPlaylists(pairing: Pairing, update: PlaylistsUpdate): Promise<PlaylistsResponse | null> {
+  try {
+    const init = { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(update) };
+    return (await (await request(pairing.base, 'playlists', init, pairing.token)).json()) as PlaylistsResponse;
+  } catch (error) {
+    if (error instanceof NasError && error.status === 409) return null;
+    throw error;
+  }
 }
 
 const PATH_KEY = 'taiko:nas-path';

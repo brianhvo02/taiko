@@ -5,7 +5,7 @@ import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
 import type { NasAlbum } from '../shared/api';
 import { otherForms } from './format';
-import { AddToPlaylist, ForgetSongs, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { AddToPlaylist, ForgetSongs, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /**
  * The library: the albums the NAS has read from its tagged music, their artists, the playlists, and the songs
@@ -359,7 +359,7 @@ function Home({ snap }: { snap: Snapshot }) {
           {shelf === 'artists' && <ArtistList artists={artists} />}
           {shelf === 'playlists' && (
             <>
-              {snap.playlists.length === 0 && <p className="library-note">No playlists yet. Add a song or an album to a new one from the button at the end of its row. Playlists are kept in this browser.</p>}
+              {snap.playlists.length === 0 && <p className="library-note">No playlists yet. Add a song or an album to a new one from the button at the end of its row. {playlistsKept(snap)}</p>}
               <ul className="names">
                 {snap.playlists.map((playlist) => (
                   <li key={playlist.id}>
@@ -371,6 +371,7 @@ function Home({ snap }: { snap: Snapshot }) {
                   </li>
                 ))}
               </ul>
+              {snap.playlists.length > 0 && <p className="library-foot">{playlistsKept(snap)}</p>}
             </>
           )}
 

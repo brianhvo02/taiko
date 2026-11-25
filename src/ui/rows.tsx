@@ -87,6 +87,10 @@ export function ForgetSongs({ className = 'actions' }: { className?: string }) {
   );
 }
 
+/** Where the playlists live: on the NAS for every paired device when it keeps them, else in this browser alone. */
+export const playlistsKept = (snap: Snapshot): string =>
+  snap.playlistsShared ? `Playlists are shared with every device paired with ${snap.pairing?.serverName ?? 'the NAS'}.` : 'Playlists are kept in this browser.';
+
 export function SongRow({ text, current, onPlay, menu }: { text: RowText; current: boolean; onPlay: () => void; menu?: ReactNode }) {
   return (
     <li className="song-row">

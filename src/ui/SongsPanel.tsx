@@ -3,7 +3,7 @@ import { smallCover } from '../library/tracks';
 import type { Snapshot, SongsTab } from '../player/store';
 import { store } from '../player/store';
 import { canPickFolder, pickFiles } from './format';
-import { AddToPlaylist, FOLDER, ForgetSongs, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { AddToPlaylist, FOLDER, ForgetSongs, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /** The paired NAS, folder by folder. A folder of songs plays through as an album. */
 function Folders({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
@@ -126,7 +126,7 @@ function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: stri
   );
 }
 
-/** The playlists kept in this browser for the paired NAS. */
+/** The paired NAS's playlists: shared through it when it keeps them, else kept in this browser. */
 function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; onChosen: () => void }) {
   const [name, setName] = useState('');
   if (snap.openPlaylist && snap.playlists.some((playlist) => playlist.id === snap.openPlaylist)) {
@@ -135,7 +135,7 @@ function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string;
   const shown = snap.playlists.filter((playlist) => !wanted || playlist.name.toLowerCase().includes(wanted));
   return (
     <>
-      {snap.playlists.length === 0 && <p className="songs-note">No playlists yet. Name one below, or add a song to a new one from its folder. Playlists are kept in this browser.</p>}
+      {snap.playlists.length === 0 && <p className="songs-note">No playlists yet. Name one below, or add a song to a new one from its folder. {playlistsKept(snap)}</p>}
       <ul>
         {shown.map((playlist) => (
           <li className="song-row" key={playlist.id}>
@@ -151,6 +151,7 @@ function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string;
         <input type="text" value={name} onChange={(e) => setName(e.currentTarget.value)} placeholder="New playlist" aria-label="Name for a new playlist" maxLength={80} />
         <button className="plain-button" type="submit">Create playlist</button>
       </form>
+      {snap.playlists.length > 0 && <p className="songs-note">{playlistsKept(snap)}</p>}
     </>
   );
 }

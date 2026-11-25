@@ -7,6 +7,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BrowseResponse, LibraryResponse, SearchResponse, TicketResponse } from '../../src/shared/api';
 import { MAX_SEARCH_CHARS, SCAN_REQUEST_GAP_MS, createApp } from './app';
+import { PlaylistStore } from './playlists';
 import type { AppDeps } from './app';
 import { PairingStore, loadOrCreateSecret } from './auth';
 import { Library } from './library';
@@ -44,7 +45,7 @@ async function start(library: AppDeps['library'], tags?: TagCache): Promise<Runn
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/`;
   server.on('request', createApp({
     config: { publicBase: base, basePath: '/api/', serverName: 'Test NAS', appOrigins: [], roots },
-    library, tags, pairing, secret: loadOrCreateSecret(data), now: () => clock,
+    library, tags, pairing, playlists: new PlaylistStore(data), secret: loadOrCreateSecret(data), now: () => clock,
   }));
   const call: Running['call'] = (method, route, token) => new Promise((resolve, reject) => {
     const req = request(route.startsWith('http') ? route : base + route, { method, headers: token ? { authorization: `Bearer ${token}` } : {} }, (res) => {

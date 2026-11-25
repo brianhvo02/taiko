@@ -179,7 +179,61 @@ test('playlists: make one from a song, add to it, reorder, play through, and fin
   await expect(panel.getByText('No playlists yet.')).toBeVisible();
   await page.reload();
   await page.getByRole('button', { name: 'Playlists' }).click();
-  await expect(panel.getByText('No playlists yet.')).toBeVisible();
+  // The NAS has been told too, so no other device is left with it.
+  await expect(panel.getByText('No playlists yet.')).toContainText('Playlists are shared with every device paired with Test NAS.');
+});
+
+test('playlists are shared through the NAS: what one device makes, changes and deletes reaches another', async ({ page, browser }) => {
+  await pair(page, 'First device');
+  // A second browser with the same pairing: the NAS allows only so many pairings in ten minutes, and the playlists
+  // are one set for the whole NAS whichever device asks.
+  const pairing = await page.evaluate(() => localStorage.getItem('taiko:nas') ?? '');
+  const other = await (await browser.newContext()).newPage();
+  await other.addInitScript((saved) => localStorage.setItem('taiko:nas', saved), pairing);
+  const open = async (on: Page) => {
+    await on.goto('/');
+    await on.getByRole('button', { name: 'Playlists' }).click();
+    return on.getByRole('complementary', { name: 'Songs' });
+  };
+
+  const names = (on: Page) => on.evaluate(() => (window as unknown as { taikoStore: { getSnapshot(): { playlists: { name: string }[] } } }).taikoStore.getSnapshot().playlists.map((playlist) => playlist.name).sort());
+  const sync = (on: Page) => on.evaluate(() => (window as unknown as { taikoStore: { syncPlaylists(): Promise<void> } }).taikoStore.syncPlaylists());
+
+  // Made on the first device, it is on the second at its next visit.
+  let first = await open(page);
+  await first.getByLabel('Name for a new playlist').fill('Shared walk');
+  await first.getByRole('button', { name: 'Create playlist' }).click();
+  await first.getByRole('button', { name: 'All playlists' }).click().catch(() => undefined);
+  await expect(first.getByText('Playlists are shared with every device paired with Test NAS.')).toBeVisible();
+  // The change is sent a moment after it is made; the test waits for that instead of the moment.
+  await page.waitForTimeout(700);
+  await sync(page);
+  let second = await open(other);
+  await expect(second.locator('.song.list')).toContainText(['Shared walk']);
+
+  // Renamed on the second, and one more made there while the first makes one of its own: all three end up on both.
+  await second.locator('.song.list', { hasText: 'Shared walk' }).click();
+  await second.getByRole('button', { name: 'Rename' }).click();
+  await second.getByLabel('Playlist name').fill('Renamed walk');
+  await second.getByRole('button', { name: 'Save' }).click();
+  await page.evaluate(() => (window as unknown as { taikoStore: { createPlaylist(name: string): void } }).taikoStore.createPlaylist('From the first'));
+  await other.evaluate(() => (window as unknown as { taikoStore: { createPlaylist(name: string): void } }).taikoStore.createPlaylist('From the second'));
+  await expect.poll(async () => { await sync(page); await sync(other); return [await names(page), await names(other)]; })
+    .toEqual([['From the first', 'From the second', 'Renamed walk'], ['From the first', 'From the second', 'Renamed walk']]);
+
+  // Deleted on the first, they are gone from the second.
+  for (const name of ['From the first', 'From the second', 'Renamed walk']) {
+    await page.evaluate((wanted) => {
+      const store = (window as unknown as { taikoStore: { getSnapshot(): { playlists: { id: string; name: string }[] }; deletePlaylist(id: string): void } }).taikoStore;
+      store.deletePlaylist(store.getSnapshot().playlists.find((playlist) => playlist.name === wanted)!.id);
+    }, name);
+  }
+  await expect.poll(async () => { await sync(page); await sync(other); return [await names(page), await names(other)]; }).toEqual([[], []]);
+  first = await open(page);
+  await expect(first.getByText('No playlists yet.')).toBeVisible();
+  second = await open(other);
+  await expect(second.getByText('No playlists yet.')).toBeVisible();
+  await other.context().close();
 });
 
 test('comes back to where the listener left off, with the queue, the moment and the song\'s lyric timing', async ({ page }) => {

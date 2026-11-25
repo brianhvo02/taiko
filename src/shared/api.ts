@@ -5,7 +5,7 @@
  * Every route lives under the server's PUBLIC_BASE, which ends in `/api/`. Routes marked "paired" need
  * `Authorization: Bearer <token>`, the token a device got from `POST pair`. A failure answers with a JSON
  * `ApiError` and a matching status (400, 401, 403, 404, 405, 413, 416, 429, 500). Codes the player acts on:
- * `bad-code` (403, pairing), `too-many-attempts` (429, pairing), `unauthorized` (401: the device is no longer
+ * `bad-code` (403, pairing), `too-many-attempts` (429, pairing), `conflict` (409, playlists), `unauthorized` (401: the device is no longer
  * paired), `bad-ticket` and `expired-ticket` (403, audio).
  *
  *   GET    health                      -> HealthResponse
@@ -17,6 +17,9 @@
  *   GET    library             paired  -> LibraryResponse       (the albums in the scanned roots; see LIBRARY_SCAN)
  *   GET    library/search?q=   paired  -> SearchResponse        (songs in the scanned roots matching every word of q)
  *   POST   library/scan        paired  -> ScanResponse          (starts a rescan now, unless one is running)
+ *   GET    playlists           paired  -> PlaylistsResponse     (the playlists every paired device shares)
+ *   PUT    playlists           paired  PlaylistsUpdate -> PlaylistsResponse  (409 `conflict` when they changed
+ *          since `base`: read them again, bring the two together and send again; 400 when they are too many or long)
  *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
  *   GET    tracks/:id/lyrics/:index  paired -> the lyrics file's text, as stored
  *   GET    tracks/:id/audio?exp=&sig=  -> the audio file's bytes, with Range support
@@ -28,9 +31,23 @@
  * server that works without the token until it expires.
  */
 
+import type { Playlist } from './playlists';
+
 export interface ApiError {
   /** A stable code such as `bad-code`, `unauthorized`, `not-found`, `bad-request`. */
   error: string;
+}
+
+/** The playlists shared by every device paired with the server, and the version they are at. */
+export interface PlaylistsResponse {
+  version: number;
+  playlists: Playlist[];
+}
+
+/** The whole set of playlists, as changed from version `base`. */
+export interface PlaylistsUpdate {
+  base: number;
+  playlists: Playlist[];
 }
 
 export interface HealthResponse {

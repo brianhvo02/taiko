@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BrowseResponse } from '../../src/shared/api';
 import { createApp } from './app';
+import { PlaylistStore } from './playlists';
 import { PairingStore, loadOrCreateSecret } from './auth';
 import { findCover } from './cover';
 import { Library } from './library';
@@ -75,6 +76,7 @@ beforeAll(async () => {
     config: { publicBase: base, basePath: '/api/', serverName: 'Test NAS', appOrigins: [], roots },
     library: new Library([], new TagCache()),
     pairing,
+    playlists: new PlaylistStore(data),
     secret: loadOrCreateSecret(data),
     now: () => clock,
   }));
