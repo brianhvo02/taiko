@@ -58,6 +58,10 @@ export function RowMenu({ label, children }: { label: string; children: (close: 
   );
 }
 
+// A heart: an outline for "not yet", filled for a favourite.
+export const HEART = icon(<path d="M12 20.3 4.9 13.4a4.9 4.9 0 0 1 0-7 5 5 0 0 1 7.1 0 5 5 0 0 1 7.1 0 4.9 4.9 0 0 1 0 7L12 20.3Zm0-2.800 5.700-5.500a2.900 2.900 0 0 0 0-4.200 3 3 0 0 0-4.200 0L12 9.200l-1.500-1.400a3 3 0 0 0-4.200 0 2.900 2.900 0 0 0 0 4.200L12 17.500Z" />);
+export const HEART_ON = icon(<path d="M12 20.3 4.9 13.4a4.9 4.9 0 0 1 0-7 5 5 0 0 1 7.1 0 5 5 0 0 1 7.1 0 4.9 4.9 0 0 1 0 7L12 20.3Z" />);
+
 const PLUS = icon(<path d="M12 4.5a1 1 0 0 1 1 1V11h5.5a1 1 0 1 1 0 2H13v5.5a1 1 0 1 1-2 0V13H5.500a1 1 0 1 1 0-2H11V5.500a1 1 0 0 1 1-1Z" />);
 
 const songs = (n: number) => `${n} ${n === 1 ? 'song' : 'songs'}`;
@@ -69,8 +73,16 @@ const songs = (n: number) => `${n} ${n === 1 ? 'song' : 'songs'}`;
 export function AddToPlaylist({ snap, tracks, close }: { snap: Snapshot; tracks: Track[]; close: () => void }) {
   const [name, setName] = useState('');
   const open = snap.sharedPlaylists.filter((playlist) => playlist.access === 'collaborative');
+  const one = tracks.length === 1 && tracks[0].nas ? tracks[0] : null;
+  const loved = one?.nas ? store.isFavouriteSong(one.nas.id) : false;
   return (
     <>
+      {one && snap.favourites && (
+        <button type="button" className="menu-item menu-pick menu-favourite" onClick={() => { void store.toggleFavouriteSong(one); close(); }}>
+          <span className="menu-pick-lead">{loved ? HEART_ON : HEART}</span>
+          <span className="menu-pick-name">{loved ? 'Remove from favourites' : 'Add to favourites'}</span>
+        </button>
+      )}
       <div className="menu-heading">Add to a playlist</div>
       {snap.playlists.map((playlist) => (
         <button type="button" className="menu-item menu-pick" key={playlist.id} onClick={() => { store.addToPlaylist(playlist.id, tracks); close(); }}>

@@ -209,7 +209,7 @@ input::placeholder { color: var(--unsung); }
 .library h1 { font-family: var(--lyric-face); font-weight: 700; font-size: clamp(1.75rem, 1.3rem + 1.8vw, 2.5rem); line-height: 1.2; overflow-wrap: anywhere; }
 .library h2, .ways-name { font-family: var(--lyric-face); font-weight: 700; font-size: var(--large); line-height: 1.3; }
 .library-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 2rem; }
-.library-head .tabs { padding: 0; border-bottom: 0; }
+.library-head .tabs { padding: 0; border-bottom: 0; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .library-sort { margin-left: auto; background: none; font-size: .9rem; }
 .library-note, .library-foot { color: var(--quiet); max-width: 44rem; }
 .library-foot { font-size: var(--small); color: var(--unsung); }
@@ -217,6 +217,13 @@ input::placeholder { color: var(--unsung); }
 .library .crumbs { padding: 0; }
 /* A row of albums to scroll along: the same tiles, kept to one line. */
 .tiles.strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 9.5rem; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: .75rem; scrollbar-width: thin; }
+/* A part of the favourites or the history: its name, then what is in it. */
+.noted { display: grid; gap: .9rem; }
+.noted + .noted { margin-top: 1.5rem; }
+.noted h2 { font-size: var(--body); font-weight: 500; color: var(--quiet); }
+/* A button that leads with a small picture of what it does. */
+.plain-button.with-icon { display: inline-flex; align-items: center; gap: .45rem; }
+.plain-button.with-icon svg { width: 1.05rem; height: 1.05rem; fill: currentColor; }
 .recent h2 { font-size: var(--body); font-weight: 500; color: var(--quiet); margin-bottom: .9rem; }
 .tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 1.75rem 1.25rem; }
 .tile { display: grid; gap: .1rem; width: 100%; padding: 0; background: none; border: 0; text-align: left; cursor: pointer; line-height: 1.35; }
@@ -356,7 +363,11 @@ input::placeholder { color: var(--unsung); }
 .now-title { font-weight: 500; }
 .now .credit-line { display: flex; align-items: baseline; gap: .6rem; font-size: var(--small); min-height: 1.35em; }
 .now .credit { color: var(--quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.now .credit:empty { display: none; }
 /* How the audio is stored: a fact about the song, said quietly. */
+/* The heart beside the open song: an outline until it is a favourite, then filled in the drumhead's colour. */
+.now-zone .favourite { flex: none; margin-left: auto; color: var(--unsung); }
+.now-zone .favourite[aria-pressed="true"] { color: var(--hide); }
 .quality { flex: none; color: var(--unsung); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .now a { color: inherit; text-decoration: none; }
 .now a:hover { text-decoration: underline; text-underline-offset: .2em; }
@@ -500,6 +511,8 @@ input::placeholder { color: var(--unsung); }
 .menu-pick-name { overflow: hidden; text-overflow: ellipsis; }
 .menu-pick-detail { color: var(--quiet); font-size: var(--small); font-variant-numeric: tabular-nums; }
 /* Naming a new one is a line in the list, not a form bolted under it: the name is written where the name will be. */
+/* The favourite line stands apart from the playlists under it. */
+.menu-favourite { margin-bottom: .3rem; padding-bottom: .6rem; border-bottom: 1px solid var(--rule); border-radius: var(--corner) var(--corner) 0 0; }
 .menu-new { display: grid; grid-template-columns: 1.1rem minmax(0, 1fr) auto; align-items: center; gap: .6rem; margin-top: .3rem; padding: .55rem .5rem .35rem; border-top: 1px solid var(--rule); }
 .menu-new input { min-width: 0; width: 100%; padding: .1rem 0 .2rem; background: none; border: 0; border-bottom: 1px solid var(--rule); border-radius: 0; color: var(--hide); font: inherit; }
 .menu-new input::placeholder { color: var(--quiet); }

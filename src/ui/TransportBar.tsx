@@ -43,6 +43,8 @@ const ICONS = {
       <path d="M11.3 9.6a.900.9 0 0 1 1.6.560v4.24a.900.9 0 1 1-1.8 0v-2.33l-.300.19a.900.9 0 0 1-.960-1.52l1.46-.940Z" />
     </>
   ),
+  heart: <path d="M12 20.3 4.9 13.4a4.9 4.9 0 0 1 0-7 5 5 0 0 1 7.1 0 5 5 0 0 1 7.1 0 4.9 4.9 0 0 1 0 7L12 20.3Zm0-2.8 5.7-5.5a2.9 2.9 0 0 0 0-4.2 3 3 0 0 0-4.2 0L12 9.2l-1.5-1.4a3 3 0 0 0-4.2 0 2.9 2.9 0 0 0 0 4.2L12 17.5Z" />,
+  heartOn: <path d="M12 20.3 4.9 13.4a4.9 4.9 0 0 1 0-7 5 5 0 0 1 7.1 0 5 5 0 0 1 7.1 0 4.9 4.9 0 0 1 0 7L12 20.3Z" />,
   // A screen with a triangle rising into it: where the sound can be sent.
   airplay: <path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-1.6l-1.7-2H19V6H5v9h3.3l-1.7 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm7 9.4 5.1 6.1a.3.3 0 0 1-.23.5H7.13a.3.3 0 0 1-.23-.5L12 13.4Z" />,
   songs: <path d="M4 6.5a1.25 1.25 0 1 1 2.5 0 1.25 1.25 0 0 1-2.5 0ZM9 5.5h10a1 1 0 1 1 0 2H9a1 1 0 0 1 0-2ZM4 12a1.25 1.25 0 1 1 2.5 0A1.25 1.25 0 0 1 4 12Zm5-1h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm-5 6.5a1.25 1.25 0 1 1 2.5 0 1.25 1.25 0 0 1-2.5 0Zm5-1h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Z" />,
@@ -157,6 +159,7 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
   );
 
   const quality = snap.currentTrack ? qualityOf(snap.currentTrack) : '';
+  const loved = snap.currentTrack?.nas ? (snap.favourites?.songs.some((song) => song.track.id === snap.currentTrack?.nas?.id) ?? false) : false;
 
   return (
     <footer className="bar">
@@ -172,6 +175,9 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
             {quality && <span className="quality" title="How this song's audio is stored">{quality}</span>}
           </div>
         </div>
+        {snap.favourites && snap.currentTrack?.nas && (
+          <IconButton icon={loved ? 'heartOn' : 'heart'} label={loved ? 'Remove from favourites' : 'Add to favourites'} className="favourite" pressed={loved} onClick={() => void store.toggleFavouriteSong(snap.currentTrack!)} />
+        )}
       </div>
 
       <div className="center-zone">

@@ -3,7 +3,8 @@
  * from the owner's invite link; the token it gets back is kept in this browser's storage.
  */
 import { toPlaylists } from '../shared/playlists';
-import type { InviteResponse, MeResponse, NasUser, SharedPlaylistsResponse } from '../shared/api';
+import type { FavouritesResponse, HistoryResponse, InviteResponse, MeResponse, NasUser, PlayCountsResponse, SharedPlaylistsResponse } from '../shared/api';
+import { trackIdOf } from '../shared/api';
 import type { SavedTrack, SharedPlaylist } from '../shared/playlists';
 import type { ApiError, BrowseResponse, LibraryResponse, MovedRequest, MovedResponse, PairRequest, PairResponse, PlaylistsResponse, PlaylistsUpdate, ScanResponse, SearchResponse, TicketRequest, TicketResponse } from '../shared/api';
 
@@ -158,6 +159,56 @@ export async function sendPlaylists(pairing: Pairing, update: PlaylistsUpdate): 
     return (await (await request(pairing.base, 'playlists', init, pairing.token)).json()) as PlaylistsResponse;
   } catch (error) {
     if (error instanceof NasError && error.status === 409) return null;
+    throw error;
+  }
+}
+
+const NOT_KEPT = (error: unknown): boolean => error instanceof NasError && (error.status === 404 || error.status === 405);
+const json = (method: string, body: unknown): RequestInit => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+/** The user's favourite songs and albums. Null from a server that keeps none. */
+export async function fetchFavourites(pairing: Pairing): Promise<FavouritesResponse | null> {
+  try {
+    const reply = (await (await request(pairing.base, 'favourites', {}, pairing.token)).json()) as Partial<FavouritesResponse>;
+    return { songs: Array.isArray(reply.songs) ? reply.songs : [], albums: Array.isArray(reply.albums) ? reply.albums : [] };
+  } catch (error) {
+    if (NOT_KEPT(error)) return null;
+    throw error;
+  }
+}
+
+/** Marks a song as a favourite, or takes the mark away. */
+export async function setFavouriteSong(pairing: Pairing, track: SavedTrack, on: boolean): Promise<void> {
+  await request(pairing.base, `favourites/songs/${track.id}`, on ? json('PUT', { track }) : { method: 'DELETE' }, pairing.token);
+}
+
+/** Marks an album (its folder) as a favourite, or takes the mark away. */
+export async function setFavouriteAlbum(pairing: Pairing, album: { path: string; title: string; artist: string }, on: boolean): Promise<void> {
+  await request(pairing.base, `favourites/albums/${trackIdOf(album.path)}`, on ? json('PUT', { title: album.title, artist: album.artist }) : { method: 'DELETE' }, pairing.token);
+}
+
+/** Tells the NAS the user heard a song, at `at` when that was earlier. */
+export async function reportPlay(pairing: Pairing, track: SavedTrack, at?: string): Promise<void> {
+  await request(pairing.base, 'plays', json('POST', at ? { track, at } : { track }), pairing.token);
+}
+
+/** The user's listening: latest plays, most played, albums played lately. Null from a server that keeps none. */
+export async function fetchHistory(pairing: Pairing): Promise<HistoryResponse | null> {
+  try {
+    return (await (await request(pairing.base, 'history', {}, pairing.token)).json()) as HistoryResponse;
+  } catch (error) {
+    if (NOT_KEPT(error)) return null;
+    throw error;
+  }
+}
+
+/** How often the user has played each of some songs. */
+export async function fetchPlayCounts(pairing: Pairing, ids: string[]): Promise<Record<string, number>> {
+  if (!ids.length) return {};
+  try {
+    return ((await (await request(pairing.base, 'plays/counts', json('POST', { ids }), pairing.token)).json()) as PlayCountsResponse).counts ?? {};
+  } catch (error) {
+    if (NOT_KEPT(error)) return {};
     throw error;
   }
 }

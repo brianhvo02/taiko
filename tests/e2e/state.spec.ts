@@ -435,9 +435,9 @@ test('each person has their own playlists, shares the ones they choose, and adds
   await friend.goto('/album/Music/Midori%20Vale/Night%20Market');
   await friend.getByRole('button', { name: 'More for 港の灯' }).click();
   const menu = friend.getByRole('group', { name: 'More for 港の灯' });
-  await expect(menu.locator('.menu-pick')).toHaveText(["Road tripOwner's"]);
+  await expect(menu.locator('.menu-pick:not(.menu-favourite)')).toHaveText(["Road tripOwner's"]);
   await expect(menu.getByRole('button', { name: 'Create' })).toBeDisabled();
-  await menu.locator('.menu-pick').click();
+  await menu.locator('.menu-pick:not(.menu-favourite)').click();
   await expect(friend.getByRole('status')).toContainText('Added 1 song to Road trip.');
   // The owner's device takes the change up.
   await sync(page);
@@ -460,4 +460,45 @@ test('each person has their own playlists, shares the ones they choose, and adds
   await expect(friend.getByText('This device is no longer paired with the NAS.')).toBeVisible();
   await friend.context().close();
   await tablet.context().close();
+});
+
+test('favourites and history: a heard song is counted, and what is marked is kept for the person', async ({ page }) => {
+  await mockCatalog(page);
+  await pair(page, 'Listening test');
+  await page.getByRole('tab', { name: 'History' }).click();
+  await expect(page.getByText('Nothing played yet.')).toBeVisible();
+  await page.getByRole('tab', { name: 'Favourites' }).click();
+  await expect(page.getByText('No favourites yet.')).toBeVisible();
+
+  // The five-second song, heard past its half: one play. The album is marked, and the song from the bar.
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await page.getByRole('button', { name: 'Add to favourites', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'In your favourites' })).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('.library .songlist .song', { hasText: 'untagged' }).click();
+  await page.locator('.bar').getByRole('button', { name: 'Add to favourites' }).click();
+  await expect(page.locator('.bar').getByRole('button', { name: 'Remove from favourites' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => (window as unknown as { taikoStore: { getSnapshot(): { history: { total: number } | null } } }).taikoStore.getSnapshot().history?.total), { timeout: 15_000 }).toBe(1);
+
+  // Back in the library: played lately, counted on its album, and listed in the history.
+  await page.goto('/');
+  await page.getByRole('tab', { name: 'Albums' }).click();
+  await expect(page.getByRole('region', { name: 'Recently played' }).locator('.tile-title')).toHaveText(['Night Market']);
+  await page.getByRole('tab', { name: 'History' }).click();
+  const history = page.locator('.library .noted');
+  await expect(history.first().locator('.song')).toHaveText([/untagged.*1 play/]);
+  await expect(history.nth(1).locator('.song-title')).toHaveText(['untagged']);
+  await page.getByRole('tab', { name: 'Favourites' }).click();
+  await expect(page.locator('.library .noted').first().locator('.tile-title')).toHaveText(['Night Market']);
+  await expect(page.locator('.library .noted').nth(1).locator('.song-title')).toHaveText(['untagged']);
+  // The shelf is remembered, and the favourites are the NAS's: a reload brings both back.
+  await page.reload();
+  await expect(page.locator('.library .noted').nth(1).locator('.song-title')).toHaveText(['untagged']);
+  await page.locator('.library .noted').first().locator('.tile').click();
+  await expect(page.locator('.library .songlist .song', { hasText: 'untagged' })).toContainText('1 play');
+
+  // A favourite is taken away from a song's own menu.
+  await page.getByRole('button', { name: 'More for untagged' }).click();
+  await page.getByRole('group', { name: 'More for untagged' }).getByRole('button', { name: 'Remove from favourites' }).click();
+  await page.goto('/');
+  await expect(page.locator('.library .noted')).toHaveCount(1);
 });

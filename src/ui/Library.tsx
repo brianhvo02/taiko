@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Track } from '../library/tracks';
+import type { QueueSource, SavedTrack } from '../player/persist';
 import type { Snapshot } from '../player/store';
 import { sharedKey, store } from '../player/store';
 import type { NasAlbum } from '../shared/api';
 import { otherForms, qualityOf } from './format';
-import { AddToPlaylist, ForgetSongs, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
+import { AddToPlaylist, ForgetSongs, HEART, HEART_ON, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /**
  * The library: the albums the NAS has read from its tagged music, their artists, the playlists, and the songs
@@ -109,6 +110,117 @@ function sharedQuality(tracks: Track[]): string {
   return first && tracks.every((track) => qualityOf(track) === first) ? first : '';
 }
 
+/** A favourite or a played album as a tile: the library's cover and names when it is in the library, else what was noted. */
+function NotedAlbums({ snap, albums, className }: { snap: Snapshot; albums: { path: string; title: string; artist: string }[]; className?: string }) {
+  return (
+    <ul className={className ?? 'tiles'}>
+      {albums.map((album) => {
+        const known = snap.library.albums.find((candidate) => candidate.path === album.path);
+        return (
+          <Tile
+            key={album.path}
+            cover={known?.cover}
+            title={known?.title ?? (album.title || album.path.split('/').pop() || '')}
+            detail={known ? artistOf(known) : album.artist}
+            onOpen={() => void store.showAlbum(album.path)}
+          />
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The albums the listener played lately, in a row above the library. */
+function RecentlyPlayed({ snap }: { snap: Snapshot }) {
+  const albums = snap.history?.albums ?? [];
+  if (!albums.length) return null;
+  return (
+    <section className="recent" aria-label="Recently played">
+      <h2>Recently played</h2>
+      <NotedAlbums snap={snap} albums={albums} className="tiles strip" />
+    </section>
+  );
+}
+
+/** A list of songs the NAS keeps for the listener (favourites, history), which play as a queue. */
+function SavedSongs({ snap, songs, source, meta, numbered = false }: { snap: Snapshot; songs: SavedTrack[]; source: QueueSource; meta?: (index: number) => string; numbered?: boolean }) {
+  return (
+    <ul className="songlist">
+      {songs.map((song, index) => {
+        const text = rowText(song);
+        return (
+          <SongRow
+            key={`${song.id}:${index}`}
+            text={{ ...text, lead: numbered ? index + 1 : text.lead, meta: [meta?.(index) ?? '', text.meta].filter(Boolean).join(', ') }}
+            current={`nas:${song.id}` === snap.currentId}
+            onPlay={() => void store.playSaved(songs, source, index)}
+          />
+        );
+      })}
+    </ul>
+  );
+}
+
+/** The listener's favourites: albums, then songs, newest first. */
+function Favourites({ snap }: { snap: Snapshot }) {
+  const favourites = snap.favourites;
+  if (!favourites) return null;
+  if (!favourites.albums.length && !favourites.songs.length) {
+    return <p className="library-note">No favourites yet. Mark a song with the heart beside it while it plays, or an album from its page. They are yours alone, on every device you add.</p>;
+  }
+  const songs = [...favourites.songs].reverse().map((song) => song.track);
+  return (
+    <>
+      {favourites.albums.length > 0 && (
+        <section className="noted">
+          <h2>Albums</h2>
+          <NotedAlbums snap={snap} albums={[...favourites.albums].reverse()} />
+        </section>
+      )}
+      {songs.length > 0 && (
+        <section className="noted">
+          <h2>Songs</h2>
+          <div className="actions"><button className="plain-button primary-button" type="button" onClick={() => void store.playSaved(songs, { kind: 'favourites' }, 0)}>Play</button></div>
+          <SavedSongs snap={snap} songs={songs} source={{ kind: 'favourites' }} />
+        </section>
+      )}
+    </>
+  );
+}
+
+/** When something was played, said the way a person would: the time today, the day this week, the date before that. */
+function whenPlayed(iso: string, now = Date.now()): string {
+  const at = new Date(iso);
+  const days = Math.floor((new Date(now).setHours(0, 0, 0, 0) - new Date(at).setHours(0, 0, 0, 0)) / 86_400_000);
+  const time = at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (days <= 0) return time;
+  if (days === 1) return `yesterday, ${time}`;
+  if (days < 7) return at.toLocaleDateString([], { weekday: 'long' });
+  return at.toLocaleDateString([], { day: 'numeric', month: 'short', ...(days > 300 ? { year: 'numeric' } : {}) });
+}
+
+/** The listener's history: what they play most, and what they played lately. */
+function History({ snap }: { snap: Snapshot }) {
+  const history = snap.history;
+  if (!history) return <p className="library-note">Reading your history</p>;
+  if (!history.total) {
+    return <p className="library-note">Nothing played yet. A song joins your history once you have heard half of it, or four minutes. Your history is yours alone.</p>;
+  }
+  return (
+    <>
+      <section className="noted">
+        <h2>Most played</h2>
+        <SavedSongs snap={snap} songs={history.top.map((entry) => entry.track)} source={{ kind: 'history' }} numbered meta={(index) => count(history.top[index].count, 'play')} />
+      </section>
+      <section className="noted">
+        <h2>Played lately</h2>
+        <SavedSongs snap={snap} songs={history.plays.map((play) => play.track)} source={{ kind: 'history' }} meta={(index) => whenPlayed(history.plays[index].at)} />
+        <p className="library-foot">{count(history.total, 'play')} in all{history.total > history.plays.length ? `; the latest ${history.plays.length} are listed` : ''}.</p>
+      </section>
+    </>
+  );
+}
+
 /** The albums added most lately, in a row to scroll along, above a library big enough to lose them in. */
 function RecentlyAdded({ albums }: { albums: NasAlbum[] }) {
   if (albums.length <= RECENT_SHOWN) return null;
@@ -191,6 +303,7 @@ function AlbumPage({ snap, path }: { snap: Snapshot; path: string }) {
   const seconds = known?.durationSeconds ?? null;
   const play = (id?: string) => void store.playFrom(tracks, { kind: 'folder', path }, id);
   const discs = new Set(tracks.map((track) => track.discNumber ?? 1)).size > 1;
+  const loved = snap.favourites?.albums.some((album) => album.path === path) ?? false;
 
   return (
     <>
@@ -203,6 +316,11 @@ function AlbumPage({ snap, path }: { snap: Snapshot; path: string }) {
         facts={[yearOf(known?.date ?? tracks[0]?.date ?? ''), tracks.length ? count(tracks.length, 'song') : '', lengthOf(seconds), sharedQuality(tracks)]}
       >
         <button className="plain-button primary-button" type="button" disabled={!tracks.length} onClick={() => play()}>Play</button>
+        {snap.favourites && tracks.length > 0 && (
+          <button className="plain-button with-icon" type="button" aria-pressed={loved} onClick={() => void store.toggleFavouriteAlbum({ path, title, artist })}>
+            {loved ? HEART_ON : HEART}{loved ? 'In your favourites' : 'Add to favourites'}
+          </button>
+        )}
         {tracks.length > 0 && <RowMenu label="More for this album">{(close) => <AddToPlaylist snap={snap} tracks={tracks} close={close} />}</RowMenu>}
       </Sleeve>
       {(!view || view.state === 'loading') && <p className="library-note">Opening the album</p>}
@@ -213,10 +331,12 @@ function AlbumPage({ snap, path }: { snap: Snapshot; path: string }) {
           // On its own album a song needs no album name; its artist only when it isn't the album's.
           const detail = otherForms(track.title, track.titleRoman, track.titleEnglish) || (track.artist !== artist ? track.artist : '');
           const lead = discs && track.trackNumber ? `${track.discNumber ?? 1}-${track.trackNumber}` : text.lead;
+          const plays = track.nas ? snap.playCounts[track.nas.id] ?? 0 : 0;
+          const meta = [plays ? count(plays, 'play') : '', text.meta].filter(Boolean).join(', ');
           return (
             <SongRow
               key={track.id}
-              text={{ ...text, detail, lead }}
+              text={{ ...text, detail, lead, meta }}
               current={track.id === snap.currentId}
               onPlay={() => play(track.id)}
               menu={<RowMenu label={`More for ${track.title}`}>{(close) => <AddToPlaylist snap={snap} tracks={[track]} close={close} />}</RowMenu>}
@@ -306,13 +426,13 @@ function Results({ snap, query }: { snap: Snapshot; query: string }) {
   );
 }
 
-type Shelf = 'albums' | 'artists' | 'playlists';
+type Shelf = 'albums' | 'artists' | 'playlists' | 'favourites' | 'history';
 const SHELF_KEY = 'taiko:library-shelf';
 
 function loadShelf(): Shelf {
   try {
     const saved = localStorage.getItem(SHELF_KEY);
-    return saved === 'artists' || saved === 'playlists' ? saved : 'albums';
+    return saved === 'artists' || saved === 'playlists' || saved === 'favourites' || saved === 'history' ? saved : 'albums';
   } catch {
     return 'albums';
   }
@@ -324,7 +444,11 @@ function Home({ snap }: { snap: Snapshot }) {
   const { library } = snap;
   const artists = artistsOf(library.albums);
   const device = deviceAlbums(snap.tracks);
-  const shelves: [Shelf, string][] = snap.pairing ? [['albums', 'Albums'], ['artists', 'Artists'], ['playlists', 'Playlists']] : [];
+  const shelves: [Shelf, string][] = snap.pairing
+    ? [['albums', 'Albums'], ['artists', 'Artists'], ['playlists', 'Playlists'], ...(snap.favourites ? [['favourites', 'Favourites'], ['history', 'History']] as [Shelf, string][] : [])]
+    : [];
+  // A shelf remembered from a NAS that kept favourites isn't one this NAS has.
+  const shown: Shelf = shelves.some(([name]) => name === shelf) ? shelf : 'albums';
   const reading = library.state === 'loading' || library.state === 'idle' || library.scanning;
 
   const chooseShelf = (value: Shelf) => {
@@ -352,32 +476,35 @@ function Home({ snap }: { snap: Snapshot }) {
             <h1>Library</h1>
             <div className="tabs" role="tablist" aria-label="What to list">
               {shelves.map(([name, label]) => (
-                <button key={name} type="button" role="tab" aria-selected={name === shelf} className={name === shelf ? 'tab current' : 'tab'} onClick={() => chooseShelf(name)}>{label}</button>
+                <button key={name} type="button" role="tab" aria-selected={name === shown} className={name === shown ? 'tab current' : 'tab'} onClick={() => chooseShelf(name)}>{label}</button>
               ))}
             </div>
-            {shelf === 'albums' && library.albums.length > 1 && (
+            {shown === 'albums' && library.albums.length > 1 && (
               <select className="library-sort" value={sort} aria-label="Order of the albums" onChange={(e) => chooseSort(e.currentTarget.value as Sort)}>
                 {Object.entries(SORTS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             )}
           </header>
 
-          {shelf !== 'playlists' && library.state === 'off' && (
+          {shown !== 'playlists' && library.state === 'off' && (
             <p className="library-note">
               {snap.pairing.serverName} keeps no album library, so its music is listed by folder. <button className="text-button" type="button" onClick={() => store.openSongs('folders')}>Open its folders</button>
             </p>
           )}
-          {shelf !== 'playlists' && library.state === 'error' && (
+          {shown !== 'playlists' && library.state === 'error' && (
             <p className="library-note">The library didn't load. <button className="text-button" type="button" onClick={() => void store.loadLibrary()}>Try again</button></p>
           )}
-          {shelf !== 'playlists' && library.state === 'ready' && library.albums.length === 0 && !library.scanning && (
+          {shown !== 'playlists' && library.state === 'ready' && library.albums.length === 0 && !library.scanning && (
             <p className="library-note">The NAS has found no albums yet. Albums are folders of tagged songs in the music it was set to read.</p>
           )}
 
-          {shelf === 'albums' && sort !== 'added' && <RecentlyAdded albums={library.albums} />}
-          {shelf === 'albums' && <AlbumTiles albums={sorted(library.albums, sort)} />}
-          {shelf === 'artists' && <ArtistList artists={artists} />}
-          {shelf === 'playlists' && (
+          {shown === 'albums' && <RecentlyPlayed snap={snap} />}
+          {shown === 'albums' && sort !== 'added' && <RecentlyAdded albums={library.albums} />}
+          {shown === 'albums' && <AlbumTiles albums={sorted(library.albums, sort)} />}
+          {shown === 'artists' && <ArtistList artists={artists} />}
+          {shown === 'favourites' && <Favourites snap={snap} />}
+          {shown === 'history' && <History snap={snap} />}
+          {shown === 'playlists' && (
             <>
               {snap.playlists.length === 0 && snap.sharedPlaylists.length === 0 && <p className="library-note">No playlists yet. Add a song or an album to a new one from the button at the end of its row. {playlistsKept(snap)}</p>}
               <ul className="names">
@@ -404,7 +531,7 @@ function Home({ snap }: { snap: Snapshot }) {
             </>
           )}
 
-          {shelf !== 'playlists' && library.state !== 'off' && (
+          {shown !== 'playlists' && library.state !== 'off' && (
             <p className="library-foot">
               {reading ? `Reading the music on ${snap.pairing.serverName}` : (
                 <>

@@ -14,7 +14,8 @@ export { toSavedTrack } from '../shared/playlists';
 export type { Playlist, SavedTrack } from '../shared/playlists';
 
 /** Where a queue came from. */
-export type QueueSource = { kind: 'device' } | { kind: 'folder'; path: string } | { kind: 'playlist'; id: string } | { kind: 'search'; query: string };
+export type QueueSource = { kind: 'device' } | { kind: 'folder'; path: string } | { kind: 'playlist'; id: string } | { kind: 'search'; query: string }
+  | { kind: 'favourites' } | { kind: 'history' };
 
 export interface Settings {
   showRoman: boolean;
@@ -48,6 +49,7 @@ export const KEYS = {
   offsets: 'taiko:offsets',
   playlists: 'taiko:playlists',
   playlistSync: 'taiko:playlist-sync',
+  plays: 'taiko:plays',
   session: 'taiko:session',
 } as const;
 
@@ -89,6 +91,7 @@ function toSource(value: unknown): QueueSource | null {
   if (value.kind === 'folder' && typeof value.path === 'string') return { kind: 'folder', path: value.path };
   if (value.kind === 'playlist' && typeof value.id === 'string') return { kind: 'playlist', id: value.id };
   if (value.kind === 'search' && typeof value.query === 'string') return { kind: 'search', query: value.query };
+  if (value.kind === 'favourites' || value.kind === 'history') return { kind: value.kind };
   return null;
 }
 
@@ -156,6 +159,28 @@ export function savePlaylistSync(nas: string, sync: PlaylistSync, store: Store |
 export function savePlaylists(nas: string, playlists: Playlist[], store: Store | null = browserStore()): void {
   const saved = read(KEYS.playlists, store);
   write(KEYS.playlists, { ...(isObject(saved) ? saved : {}), [nas]: playlists }, store);
+}
+
+/* ---------- Plays the NAS hasn't been told of yet, per NAS ---------- */
+
+export interface PendingPlay {
+  track: SavedTrack;
+  at: string;
+}
+
+export function loadPendingPlays(nas: string, store: Store | null = browserStore()): PendingPlay[] {
+  const saved = read(KEYS.plays, store);
+  const list = isObject(saved) ? saved[nas] : null;
+  return (Array.isArray(list) ? list : []).flatMap((entry): PendingPlay[] => {
+    const track = isObject(entry) ? toSavedTracks([entry.track])[0] : undefined;
+    return track && isObject(entry) && typeof entry.at === 'string' ? [{ track, at: entry.at }] : [];
+  });
+}
+
+/** Keeps the latest few hundred; older ones that never got through are let go. */
+export function savePendingPlays(nas: string, plays: PendingPlay[], store: Store | null = browserStore()): void {
+  const saved = read(KEYS.plays, store);
+  write(KEYS.plays, { ...(isObject(saved) ? saved : {}), [nas]: plays.slice(-500) }, store);
 }
 
 /** A playlist's name as kept: trimmed, with a fallback for an empty one, and not endless. */

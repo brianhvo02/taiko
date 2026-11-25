@@ -104,6 +104,9 @@ export function invite(user = ''): string {
  */
 export function clearSharedPlaylists(): void {
   rmSync(`${NAS.data}/playlists.json`, { force: true });
+  // What the test before marked and heard goes too.
+  rmSync(`${NAS.data}/favourites.json`, { force: true });
+  rmSync(`${NAS.data}/history`, { recursive: true, force: true });
 }
 
 export async function pair(page: Page, deviceName = 'Test browser', user = ''): Promise<void> {

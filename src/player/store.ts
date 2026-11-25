@@ -13,15 +13,15 @@ import { mergeInto, sameSong, serialize } from '../lyrics/merge';
 import { openLyrics, songFromDoc } from '../lyrics/ttml';
 import type { LyricsSource, Song } from '../lyrics/ttml';
 import {
-  NasError, clearPairing, fetchFolder, fetchLibrary, fetchLyrics, fetchMoved, fetchPlaylists, fetchSharedPlaylists, fetchTicket, fetchUser, forget, loadLastPath, loadPairing, makeInvite, pair, parsePairLink, saveLastPath, savePairing, searchLibrary, sendPlaylists, sendSharedTracks, startScan,
+  NasError, clearPairing, fetchFolder, fetchLibrary, fetchFavourites, fetchHistory, fetchLyrics, fetchMoved, fetchPlayCounts, fetchPlaylists, fetchSharedPlaylists, fetchTicket, fetchUser, forget, loadLastPath, loadPairing, makeInvite, pair, parsePairLink, reportPlay, saveLastPath, savePairing, searchLibrary, sendPlaylists, sendSharedTracks, setFavouriteAlbum, setFavouriteSong, startScan,
 } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
 import { noteChanges, reconcile } from '../shared/playlists';
 import type { PlaylistAccess, SharedPlaylist } from '../shared/playlists';
-import type { InviteResponse, NasUser } from '../shared/api';
+import type { FavouritesResponse, HistoryResponse, InviteResponse, NasUser } from '../shared/api';
 import {
-  cleanName, loadOffsets, loadPlaylistSync, loadPlaylists, loadSession, loadSettings, saveOffset, savePlaylistSync, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
+  cleanName, loadOffsets, loadPendingPlays, loadPlaylistSync, loadPlaylists, loadSession, loadSettings, saveOffset, savePendingPlays, savePlaylistSync, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
 } from './persist';
 import type { Playlist, QueueSource, SavedTrack, Session } from './persist';
 import { makeOrder, nextRepeat, stepFrom } from './queue';
@@ -121,6 +121,12 @@ export interface Snapshot {
   openShared: string | null;
   /** An invite just made for another device of this user, while it is shown. */
   deviceInvite: InviteResponse | null;
+  /** The user's favourite songs and albums; null when the NAS keeps none (or there is no NAS). */
+  favourites: FavouritesResponse | null;
+  /** The user's listening, as the NAS last gave it; null until it is read, or when the NAS keeps none. */
+  history: HistoryResponse | null;
+  /** How often the user has played the songs of the album that is open. */
+  playCounts: Record<string, number>;
   /** Where the listener was last time, offered on the first screen. */
   /** From 0 to 1. */
   volume: number;
@@ -150,7 +156,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), canAirplay: false, pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), canAirplay: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -193,10 +199,15 @@ class PlayerStore {
   private finished = false;
   /** Whether the open song's own stream has been given to the audio element (see `songEnded`). */
   private streamLoaded = false;
+  /** Seconds of the open song really heard (not skipped over), where the last sample was taken, and whether the NAS was told. */
+  private heard = 0;
+  private heardFrom = -1;
+  private playTold = false;
   private resumeAfterSeek = false;
   /** Counts changes to the playlists made on this device, so a sync can tell one happened while it ran. */
   private playlistEdits = 0;
   private syncing = false;
+  private sendingPlays = false;
   private syncTimer: ReturnType<typeof setTimeout> | undefined;
   /** While a saved session is being restored, the moment it is going back to. */
   private restoringAt: number | null = null;
@@ -226,6 +237,7 @@ class PlayerStore {
     });
     this.audio.addEventListener('timeupdate', () => {
       if (Date.now() - this.positionTold > 1000) this.tellPosition();
+      this.noteHeard();
       // A second look at the clock, at the first time reported while playing, in case the browser only shows the
       // song's time once it plays. Only where a stream's own time couldn't have got that far yet.
       if (this.clockChecked || this.audio.currentTime <= 0) return;
@@ -268,12 +280,13 @@ class PlayerStore {
     void this.syncPlaylists().then(() => this.repointStored());
     void this.refreshUser();
     void this.loadShared();
+    void this.loadListening();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
       void this.syncPlaylists();
       void this.loadShared();
     });
-    addEventListener('online', () => void this.syncPlaylists());
+    addEventListener('online', () => { void this.syncPlaylists(); void this.sendPendingPlays(); });
     // Where the listener is gets saved as they go, and when the page is put away.
     setInterval(() => { if (!this.audio.paused) this.saveSessionNow(); }, 5000);
     this.audio.addEventListener('pause', () => this.saveSessionNow());
@@ -306,7 +319,10 @@ class PlayerStore {
     const { queue, currentId, repeat } = this.snapshot;
     const at = queue.findIndex((track) => track.id === currentId);
     if (repeat === 'one') {
-      // The same song again, from its start.
+      // The same song again, from its start: a new hearing of it.
+      this.heard = 0;
+      this.heardFrom = -1;
+      this.playTold = false;
       this.resumeAfterSeek = true;
       this.seek(0);
       if (!this.exact) this.audio.play().catch(() => {});
@@ -463,7 +479,10 @@ class PlayerStore {
     try {
       const folder = await fetchFolder(pairing, path);
       if (run !== this.albumRun) return;
-      this.set({ album: { path, state: 'ready', cover: folder.cover ?? null, tracks: folder.tracks.map((track) => trackFromNas(track, folder.cover ?? null)) } });
+      this.set({ album: { path, state: 'ready', cover: folder.cover ?? null, tracks: folder.tracks.map((track) => trackFromNas(track, folder.cover ?? null)) }, playCounts: {} });
+      if (this.snapshot.favourites) {
+        void fetchPlayCounts(pairing, folder.tracks.map((track) => track.id)).then((playCounts) => { if (run === this.albumRun) this.set({ playCounts }); }).catch(() => {});
+      }
     } catch (error) {
       if (run !== this.albumRun) return;
       if (error instanceof NasError && error.status === 404) this.set({ album: { path, state: 'missing', tracks: [], cover: null } });
@@ -670,6 +689,9 @@ class PlayerStore {
     const known = this.identified.get(id);
     this.source = null;
     this.streamLoaded = false;
+    this.heard = 0;
+    this.heardFrom = -1;
+    this.playTold = false;
     this.audio.pause();
     this.resetStream();
     this.set({
@@ -1104,6 +1126,113 @@ class PlayerStore {
     this.changePlaylist(id, ({ access: _was, ...playlist }) => (access === 'private' ? playlist : { ...playlist, access }));
   }
 
+  /* ---------- Favourites and listening history (per user, on the NAS) ---------- */
+
+  /** Reads the user's favourites and history, and sends any plays that couldn't be sent before. */
+  async loadListening(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    try {
+      const favourites = await fetchFavourites(pairing);
+      if (this.snapshot.pairing !== pairing) return;
+      this.set({ favourites });
+      if (!favourites) return;
+      await this.sendPendingPlays();
+      await this.loadHistory();
+    } catch {
+      // Read again on the next visit.
+    }
+  }
+
+  async loadHistory(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing || !this.snapshot.favourites) return;
+    try {
+      const history = await fetchHistory(pairing);
+      if (this.snapshot.pairing === pairing) this.set({ history });
+    } catch {
+      // What was shown stays.
+    }
+  }
+
+  isFavouriteSong(id: string): boolean {
+    return this.snapshot.favourites?.songs.some((song) => song.track.id === id) ?? false;
+  }
+
+  /** Marks a NAS song as a favourite or takes the mark away: shown at once, and put back if the NAS refuses. */
+  async toggleFavouriteSong(song: Track | SavedTrack): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    const before = this.snapshot.favourites;
+    const track = 'origin' in song ? (song.nas ? savedOf(song) : null) : song;
+    if (!pairing || !before || !track) return;
+    const on = !before.songs.some((entry) => entry.track.id === track.id);
+    this.set({ favourites: { ...before, songs: on ? [...before.songs, { track, addedAt: new Date().toISOString() }] : before.songs.filter((entry) => entry.track.id !== track.id) } });
+    try {
+      await setFavouriteSong(pairing, track, on);
+    } catch {
+      this.set({ favourites: before, notice: "Can't change your favourites just now. Try again in a moment." });
+    }
+  }
+
+  async toggleFavouriteAlbum(album: { path: string; title: string; artist: string }): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    const before = this.snapshot.favourites;
+    if (!pairing || !before) return;
+    const on = !before.albums.some((entry) => entry.path === album.path);
+    this.set({ favourites: { ...before, albums: on ? [...before.albums, { ...album, addedAt: new Date().toISOString() }] : before.albums.filter((entry) => entry.path !== album.path) } });
+    try {
+      await setFavouriteAlbum(pairing, album, on);
+    } catch {
+      this.set({ favourites: before, notice: "Can't change your favourites just now. Try again in a moment." });
+    }
+  }
+
+  /** Plays songs stored on the NAS for the user (favourites, history) as a queue, from the one at `index`. */
+  async playSaved(tracks: SavedTrack[], source: QueueSource, index: number): Promise<void> {
+    const list = tracks.map(fromSaved);
+    await this.playFrom(list, source, list[index]?.id);
+  }
+
+  /**
+   * Counts how much of the open song has really been heard: time that passed while it played, not time jumped
+   * over. At half the song, or four minutes, the NAS is told once that the user played it.
+   */
+  private noteHeard(): void {
+    const track = this.snapshot.currentTrack;
+    if (this.audio.paused || !track?.nas || !this.snapshot.favourites || this.playTold) return;
+    const at = this.position();
+    const step = at - this.heardFrom;
+    if (this.heardFrom >= 0 && step > 0 && step < 2) this.heard += step;
+    this.heardFrom = at;
+    const length = this.snapshot.duration;
+    if (this.heard < (length > 0 ? Math.min(length / 2, 240) : 240)) return;
+    this.playTold = true;
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    savePendingPlays(pairing.base, [...loadPendingPlays(pairing.base), { track: savedOf(track), at: new Date().toISOString() }]);
+    void this.sendPendingPlays().then(() => this.loadHistory());
+  }
+
+  /** Sends the plays the NAS hasn't been told of. One that fails stays for the next try. */
+  private async sendPendingPlays(): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing || this.sendingPlays) return;
+    this.sendingPlays = true;
+    try {
+      for (let pending = loadPendingPlays(pairing.base); pending.length; pending = loadPendingPlays(pairing.base)) {
+        try {
+          await reportPlay(pairing, pending[0].track, pending[0].at);
+        } catch (error) {
+          // A play the NAS won't take (not one it couldn't be reached for) is dropped, so it can't block the rest.
+          if (!(error instanceof NasError) || error.status === 0 || error.status === 401 || error.status >= 500) return;
+        }
+        savePendingPlays(pairing.base, loadPendingPlays(pairing.base).slice(1));
+      }
+    } finally {
+      this.sendingPlays = false;
+    }
+  }
+
   /* ---------- Users, and the playlists they share ---------- */
 
   /** Asks the NAS whose device this is; the name may have changed since pairing. */
@@ -1363,7 +1492,7 @@ class PlayerStore {
     if (error instanceof NasError && error.status === 401) {
       clearPairing();
       this.set({
-        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, songsTab: 'device',
+        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, songsTab: 'device',
         library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [],
         notice: 'This device is no longer paired with the NAS. Ask its owner for a new invite.',
       });
@@ -1422,9 +1551,10 @@ class PlayerStore {
     if (!link) return;
     try {
       const pairing = await pair(link, deviceName);
-      this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null, playlists: loadPlaylists(pairing.base), openPlaylist: null, user: pairing.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, songsTab: 'folders' });
+      this.set({ pairing, pendingPair: null, pairError: '', nasFolder: null, playlists: loadPlaylists(pairing.base), openPlaylist: null, user: pairing.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, songsTab: 'folders' });
       void this.syncPlaylists().then(() => this.repointStored());
       void this.loadShared();
+      void this.loadListening();
       void this.loadLibrary();
       await this.openFolder('');
     } catch (error) {
@@ -1445,7 +1575,7 @@ class PlayerStore {
       this.audio.load();
     }
     this.set({
-      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, songsTab: 'device',
+      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, songsTab: 'device',
       library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [], view: 'library',
       ...(playingFromNas ? { currentId: null, currentTrack: null, queue: [], song: null, lyricsNames: [], songInfo: null, usInfo: null } : {}),
     });
