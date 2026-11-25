@@ -35,11 +35,11 @@ function NasBrowser({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string
     <>
       <h3>From {snap.pairing?.serverName}</h3>
       <nav className="crumbs" aria-label="Folder">
-        <button className="text-button" type="button" onClick={() => void store.openFolder('')} disabled={segments.length === 0}>All folders</button>
+        <button className="text-button" type="button" onClick={() => void store.browse('')} disabled={segments.length === 0}>All folders</button>
         {segments.map((name, i) => (
           <span key={i}>
             <span aria-hidden="true"> / </span>
-            <button className="text-button" type="button" onClick={() => void store.openFolder(segments.slice(0, i + 1).join('/'))} disabled={i === segments.length - 1}>{name}</button>
+            <button className="text-button" type="button" onClick={() => void store.browse(segments.slice(0, i + 1).join('/'))} disabled={i === segments.length - 1}>{name}</button>
           </span>
         ))}
       </nav>
@@ -49,7 +49,7 @@ function NasBrowser({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string
       <ul className={snap.nasState === 'loading' ? 'busy' : undefined}>
         {folders.map((entry) => (
           <li key={entry.path}>
-            <button type="button" className="song folder" onClick={() => void store.openFolder(entry.path)}>
+            <button type="button" className="song folder" onClick={() => void store.browse(entry.path)}>
               <span className="song-title">{entry.name}</span>
               <span className="song-meta">Folder</span>
             </button>

@@ -26,6 +26,10 @@ When a lyrics file carries an Apple Music song ID, Taiko asks Apple's public cat
 
 The NAS server runs in Docker next to your music, behind your own HTTPS address. A paired device browses your music folders, streams the audio and gets the lyrics files that sit beside the songs. A device pairs with it once, through an invite link the owner makes. See [docs/self-hosting.md](docs/self-hosting.md).
 
+### Links
+
+Every NAS folder and every NAS song has its own address, shown in the address bar while you browse or play: `/nas/folders/Music/Some Artist/Some Album`, `/nas/play/Music/Some Artist/Some Album/01 song.flac`. Send one to someone paired with the same NAS and it opens there; add `?t=95` to a song's link to open it at 1:35. The browser's back and forward buttons move between folders and songs. A device that isn't paired is told to ask the owner for an invite. Songs picked on the device have no address.
+
 ## Develop
 
 | Command | What it does |

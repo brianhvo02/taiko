@@ -134,6 +134,23 @@ export interface TicketResponse {
   totalSeconds: number | null;
 }
 
+/** The id of the track at a path (`<root name>/<folders>/<file>`): its base64url, without padding. */
+export function trackIdOf(path: string): string {
+  let binary = '';
+  for (const byte of new TextEncoder().encode(path)) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** The path a track id names, or null when it isn't one. */
+export function pathOfTrackId(id: string): string | null {
+  try {
+    const binary = atob(id.replace(/-/g, '+').replace(/_/g, '/'));
+    return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+  } catch {
+    return null;
+  }
+}
+
 /** The file extensions the server lists and the player accepts as audio. */
 export const AUDIO_EXTENSIONS = ['flac', 'mp3', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'wav'] as const;
 

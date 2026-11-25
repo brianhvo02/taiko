@@ -121,10 +121,18 @@ export async function sendAudioFile(req: IncomingMessage, res: ServerResponse, f
     if (head.length) res.write(head);
     const from = bodyStart + Math.max(start, prefix.length) - prefix.length;
     const to = bodyStart + end - prefix.length;
-    // Streamed, never held in memory. The stream closes the handle when it ends or fails; a listener hanging up
-    // mid-song ends it too.
+    // Streamed, never held in memory. The handle is closed here, by name, when the stream ends or fails or the
+    // listener hangs up (every exact seek abandons the stream before it). Leaving that to the stream lost handles
+    // when a response was dropped before it was read, and Node 25 and later treat a lost handle as a crash.
     handedOver = true;
-    pipeline(handle.createReadStream({ start: from, end: to }), res, () => {});
+    const file = handle;
+    const stream = file.createReadStream({ start: from, end: to, autoClose: false });
+    const finish = (): void => {
+      stream.destroy();
+      void file.close().catch(() => {});
+    };
+    res.once('close', finish);
+    pipeline(stream, res, finish);
     return 'sent';
   } finally {
     if (!handedOver) await handle.close().catch(() => {});

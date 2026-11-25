@@ -12,7 +12,9 @@ import { openLyrics, songFromDoc } from '../lyrics/ttml';
 import type { LyricsSource, Song } from '../lyrics/ttml';
 import { NasError, clearPairing, fetchFolder, fetchLyrics, fetchTicket, forget, loadLastPath, loadPairing, pair, parsePairLink, saveLastPath } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
-import { lyricsBelongTo } from '../shared/api';
+import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
+import { folderOf, parseRoute, routeUrl } from './route';
+import type { Route } from './route';
 import { flacStartAt, readFlacIndex, streamHeader } from '../shared/flac';
 import type { FlacIndex, Reader } from '../shared/flac';
 import type { NasFolder } from '../shared/api';
@@ -51,6 +53,8 @@ export interface Snapshot {
   nasState: 'idle' | 'loading' | 'ready' | 'error';
   /** The NAS folder the browser is showing. */
   nasFolder: NasListing | null;
+  /** Whether the Songs panel is open. */
+  songsOpen: boolean;
   /** An invite link waiting for the person to confirm it. */
   pendingPair: PairLink | null;
   pairError: string;
@@ -67,7 +71,7 @@ class PlayerStore {
   private snapshot: Snapshot = {
     tracks: [], queue: [], currentId: null, currentTrack: null, song: null, lyricsLoading: false, lyricsNames: [], songInfo: null, usInfo: null,
     playing: false, duration: 0, offset: 0, showRoman: true, showTranslation: true, notice: '',
-    pairing: loadPairing(), nasState: 'idle', nasFolder: null, pendingPair: null, pairError: '',
+    pairing: loadPairing(), nasState: 'idle', nasFolder: null, songsOpen: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -143,7 +147,11 @@ class PlayerStore {
       history.replaceState(null, '', location.pathname + location.search);
       this.set({ pendingPair: link });
     }
-    if (this.snapshot.pairing) void this.openFolder(loadLastPath());
+    // The address bar says where to start: a NAS folder or song from a link, else the first screen.
+    addEventListener('popstate', () => void this.applyRoute(parseRoute(location.pathname, location.search)));
+    const route = parseRoute(location.pathname, location.search);
+    if (route.kind !== 'home') void this.applyRoute(route);
+    else if (this.snapshot.pairing) void this.openFolder(loadLastPath());
     this.wireMediaSession();
   }
 
@@ -176,6 +184,81 @@ class PlayerStore {
   position(): number {
     if (this.pendingSeek !== null) return this.pendingSeek;
     return this.clockIsAbsolute ? this.audio.currentTime : this.streamStart + this.audio.currentTime;
+  }
+
+  /* ---------- Paths in the address bar (route.ts) ---------- */
+
+  private writeRoute(route: Route, how: 'push' | 'replace'): void {
+    const url = routeUrl(route);
+    if (url === location.pathname + location.search) return;
+    if (how === 'push') history.pushState(null, '', url);
+    else history.replaceState(null, '', url);
+  }
+
+  /** The address of the NAS song that is open, or of the first screen when the song is from this device. */
+  private playRoute(): Route {
+    const id = this.snapshot.currentTrack?.nas?.id;
+    const path = id ? pathOfTrackId(id) : null;
+    return path ? { kind: 'play', path, at: 0 } : { kind: 'home' };
+  }
+
+  /** Goes where an address says: from a link, or from the browser's back and forward buttons. */
+  private async applyRoute(route: Route): Promise<void> {
+    if (route.kind === 'home') {
+      this.set({ songsOpen: false });
+      return;
+    }
+    if (!this.snapshot.pairing) {
+      this.set({ songsOpen: false, notice: "This link is for a NAS this device isn't paired with. Ask its owner to send you an invite." });
+      this.writeRoute({ kind: 'home' }, 'replace');
+      return;
+    }
+    if (route.kind === 'folders') {
+      this.set({ songsOpen: true });
+      if (await this.openFolder(route.path, true)) return;
+      await this.openFolder('');
+      this.set({ notice: "The NAS doesn't have that folder any more." });
+      this.writeRoute({ kind: 'folders', path: '' }, 'replace');
+      return;
+    }
+    const id = `nas:${trackIdOf(route.path)}`;
+    if (this.snapshot.currentId === id) {
+      this.set({ songsOpen: false });
+      return;
+    }
+    // The song's folder becomes the list it plays from, as if it had been chosen there.
+    const found = await this.openFolder(folderOf(route.path), true);
+    const track = found ? this.snapshot.nasFolder?.tracks.find((candidate) => candidate.id === id) : undefined;
+    if (!track) {
+      if (!found) await this.openFolder('');
+      this.set({ songsOpen: true, notice: "The NAS doesn't have that song any more." });
+      this.writeRoute({ kind: 'folders', path: this.snapshot.nasFolder?.path ?? '' }, 'replace');
+      return;
+    }
+    this.set({ songsOpen: false });
+    // A page can't start sound without a tap, so a song opened from a link waits for Play.
+    await this.select(track.id, false, 'none');
+    if (route.at > 0 && this.snapshot.currentId === id) this.seek(route.at);
+  }
+
+  /** Opens the Songs panel; on a paired device its address becomes the NAS folder it shows. */
+  openSongs(): void {
+    this.set({ songsOpen: true });
+    if (!this.snapshot.pairing) return;
+    const show = () => { if (this.snapshot.songsOpen) this.writeRoute({ kind: 'folders', path: this.snapshot.nasFolder?.path ?? '' }, 'push'); };
+    if (this.snapshot.nasFolder) show();
+    else void this.openFolder(loadLastPath()).then(show);
+  }
+
+  closeSongs(): void {
+    this.set({ songsOpen: false });
+    this.writeRoute(this.playRoute(), 'push');
+  }
+
+  /** Opens a NAS folder the listener chose, as a step the browser's back button can undo. */
+  async browse(path: string): Promise<void> {
+    await this.openFolder(path);
+    if (this.snapshot.songsOpen && this.snapshot.nasFolder) this.writeRoute({ kind: 'folders', path: this.snapshot.nasFolder.path }, 'push');
   }
 
   /* ---------- Adding files ---------- */
@@ -255,7 +338,7 @@ class PlayerStore {
   }
 
   /** Opens a track: its audio, then its lyrics. */
-  async select(id: string, autoplay = true): Promise<void> {
+  async select(id: string, autoplay = true, history: 'push' | 'replace' | 'none' = 'push'): Promise<void> {
     const lists = [this.snapshot.tracks, this.snapshot.nasFolder?.tracks ?? [], this.snapshot.queue];
     const queue = lists.find((list) => list.some((candidate) => candidate.id === id));
     const track = queue?.find((candidate) => candidate.id === id);
@@ -269,6 +352,11 @@ class PlayerStore {
       currentId: id, currentTrack: track, queue, song: null, lyricsLoading: true, lyricsNames: [], songInfo: known?.song ?? null, usInfo: known?.us ?? null,
       duration: track.durationSeconds ?? 0, notice: '',
     });
+    // A NAS song has an address. A song from this device doesn't, so it only clears another song's address.
+    if (history !== 'none') {
+      if (track.nas) this.writeRoute(this.playRoute(), history);
+      else if (parseRoute(location.pathname).kind === 'play') this.writeRoute({ kind: 'home' }, 'replace');
+    }
     this.updateMediaSession();
     try {
       const url = await this.urlFor(track);
@@ -363,7 +451,7 @@ class PlayerStore {
     const at = queue.findIndex((track) => track.id === currentId);
     const next = queue[at + direction];
     if (direction === -1 && (this.position() > 3 || !next)) this.seek(0);
-    else if (next) void this.select(next.id, autoplay);
+    else if (next) void this.select(next.id, autoplay, 'replace');
   }
 
   seek(time: number): void {
@@ -498,36 +586,47 @@ class PlayerStore {
         pairing: null, nasState: 'idle', nasFolder: null,
         notice: 'This device is no longer paired with the NAS. Ask its owner for a new invite.',
       });
+      this.writeRoute({ kind: 'home' }, 'replace');
     } else {
       this.set({ notice: error instanceof NasError ? NAS_MESSAGES[error.code] ?? fallback : fallback });
     }
   }
 
   /** Shows a folder of the NAS in the browser; '' shows its roots. */
-  async openFolder(path: string): Promise<void> {
+  /**
+   * Shows a folder of the NAS in the browser; '' shows its roots. Resolves to whether that folder is now shown.
+   * A folder the NAS doesn't have falls back to the roots, unless `strict`, where the caller says what happens.
+   */
+  async openFolder(path: string, strict = false): Promise<boolean> {
     const pairing = this.snapshot.pairing;
-    if (!pairing) return;
+    if (!pairing) return false;
     const run = ++this.browseRun;
     this.set({ nasState: 'loading' });
     try {
       const folder = await fetchFolder(pairing, path);
-      if (run !== this.browseRun) return;
+      if (run !== this.browseRun) return false;
       saveLastPath(folder.path);
       this.set({
         nasState: 'ready',
         nasFolder: { path: folder.path, parent: folder.parent, folders: folder.folders, tracks: folder.tracks.map(trackFromNas) },
       });
+      return true;
     } catch (error) {
-      if (run !== this.browseRun) return;
-      // The folder remembered from last time is gone: start again from the roots.
-      if (error instanceof NasError && error.status === 404 && path) { await this.openFolder(''); return; }
+      if (run !== this.browseRun) return false;
+      if (error instanceof NasError && error.status === 404 && path) {
+        // The folder remembered from last time is gone: start again from the roots.
+        if (!strict) await this.openFolder('');
+        else this.set({ nasState: 'ready' });
+        return false;
+      }
       this.set({ nasState: 'error' });
       this.nasFailed(error, "Can't open that folder on the NAS. Try again in a moment.");
+      return false;
     }
   }
 
-  refreshNas(): Promise<void> {
-    return this.openFolder(this.snapshot.nasFolder?.path ?? '');
+  async refreshNas(): Promise<void> {
+    await this.openFolder(this.snapshot.nasFolder?.path ?? '');
   }
 
   /** Starts pairing from a typed address and code; the person still confirms the server first. */
@@ -562,6 +661,7 @@ class PlayerStore {
       pairing: null, nasState: 'idle', nasFolder: null,
       ...(playingFromNas ? { currentId: null, currentTrack: null, queue: [], song: null, lyricsNames: [], songInfo: null, usInfo: null } : {}),
     });
+    this.writeRoute({ kind: 'home' }, 'replace');
     await forget(pairing);
   }
 

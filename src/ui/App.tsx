@@ -9,7 +9,7 @@ import { pickFiles } from './format';
 
 export function App() {
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  const [songsOpen, setSongsOpen] = useState(false);
+  const songsOpen = snap.songsOpen;
   const [dragging, setDragging] = useState(false);
   const track = snap.currentTrack;
   const playing = track !== null;
@@ -63,12 +63,12 @@ export function App() {
   return (
     <div className={classes}>
       <header className="top">
-        <a className="brand" href="./" aria-label="Taiko"><span lang="ja">太鼓</span> Taiko</a>
+        <a className="brand" href="/" aria-label="Taiko"><span lang="ja">太鼓</span> Taiko</a>
         <SearchBar snap={snap} />
-        {(snap.tracks.length > 0 || snap.pairing) && <button className="plain-button songs-button" type="button" onClick={() => setSongsOpen(!songsOpen)} aria-expanded={songsOpen}>Songs</button>}
+        {(snap.tracks.length > 0 || snap.pairing) && <button className="plain-button songs-button" type="button" onClick={() => (songsOpen ? store.closeSongs() : store.openSongs())} aria-expanded={songsOpen}>Songs</button>}
       </header>
 
-      {!playing && <StartScreen snap={snap} onShowSongs={() => setSongsOpen(true)} />}
+      {!playing && <StartScreen snap={snap} onShowSongs={() => store.openSongs()} />}
 
       {playing && (
         <>
@@ -89,11 +89,11 @@ export function App() {
               {snap.notice} <button className="text-button" type="button" onClick={() => store.dismissNotice()}>Dismiss</button>
             </p>
           )}
-          <TransportBar snap={snap} onShowSongs={() => setSongsOpen(true)} />
+          <TransportBar snap={snap} onShowSongs={() => store.openSongs()} />
         </>
       )}
 
-      {songsOpen && <SongsPanel snap={snap} onClose={() => setSongsOpen(false)} />}
+      {songsOpen && <SongsPanel snap={snap} onClose={() => store.closeSongs()} />}
       <PairDialog snap={snap} />
     </div>
   );
