@@ -428,9 +428,9 @@ describe('the folder browser, with the library scan off', () => {
     ]);
     expect(album.tracks).toEqual([
       { id: id('Shelf/Tin Harbor/Low Tide/1 - c.MP3'), title: '1 - c', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null, lyrics: [] },
-      { id: id('Shelf/Tin Harbor/Low Tide/2 - b.flac'), title: 'Slack Water', artist: 'Tin Harbor', album: '', trackNumber: null, discNumber: null, durationSeconds: 10, lyrics: [] },
+      { id: id('Shelf/Tin Harbor/Low Tide/2 - b.flac'), title: 'Slack Water', artist: 'Tin Harbor', album: '', trackNumber: null, discNumber: null, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16, lyrics: [] },
       {
-        id: id('Shelf/Tin Harbor/Low Tide/10 - a.flac'), title: 'Slack Water', artist: 'Tin Harbor', album: '', trackNumber: null, discNumber: null, durationSeconds: 10,
+        id: id('Shelf/Tin Harbor/Low Tide/10 - a.flac'), title: 'Slack Water', artist: 'Tin Harbor', album: '', trackNumber: null, discNumber: null, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16,
         lyrics: [{ index: 0, name: '10 - a.ja.ttml', format: 'ttml' }, { index: 1, name: '10 - a.lrc', format: 'lrc' }],
       },
     ]);

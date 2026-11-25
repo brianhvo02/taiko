@@ -31,6 +31,8 @@ export function otherNames(tags: Tags): Partial<Tags> {
   for (const key of ['titleRoman', 'artistRoman', 'albumRoman', 'titleEnglish', 'artistEnglish', 'albumEnglish', 'appleSongId', 'albumArtist', 'albumArtistRoman', 'date'] as const) {
     if (tags[key]) out[key] = tags[key];
   }
+  if (tags.sampleRate) out.sampleRate = tags.sampleRate;
+  if (tags.bitsPerSample) out.bitsPerSample = tags.bitsPerSample;
   return out;
 }
 

@@ -118,6 +118,8 @@ export interface Snapshot {
   muted: boolean;
   /** False where only the device's own buttons set the volume (an iPhone): the slider is left out there. */
   canSetVolume: boolean;
+  /** Whether there is an AirPlay speaker or screen to send the sound to (Safari only). */
+  canAirplay: boolean;
   /** An invite link waiting for the person to confirm it. */
   pendingPair: PairLink | null;
   pairError: string;
@@ -139,7 +141,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), canAirplay: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -180,6 +182,8 @@ class PlayerStore {
   private restarting = false;
   /** The song played to its end. The element's own `ended` can't be trusted for a stream cut by an exact seek. */
   private finished = false;
+  /** Whether the open song's own stream has been given to the audio element (see `songEnded`). */
+  private streamLoaded = false;
   private resumeAfterSeek = false;
   /** Counts changes to the playlists made on this device, so a sync can tell one happened while it ran. */
   private playlistEdits = 0;
@@ -246,6 +250,11 @@ class PlayerStore {
     else if (this.snapshot.pairing) void this.openFolder(loadLastPath());
     if (saved && route.kind !== 'play') void this.restoreSession(saved, false);
     if (this.snapshot.pairing) void this.loadLibrary();
+    // Safari says when an AirPlay speaker is in reach; the bar then offers it.
+    this.audio.setAttribute('x-webkit-airplay', 'allow');
+    this.audio.addEventListener('webkitplaybacktargetavailabilitychanged', (event) => {
+      this.set({ canAirplay: (event as Event & { availability?: string }).availability === 'available' });
+    });
     void this.restoreKept();
     void this.syncPlaylists().then(() => this.repointStored());
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void this.syncPlaylists(); });
@@ -275,7 +284,9 @@ class PlayerStore {
 
   /** The song played to its end: go on to the next in the list, or stop after the last. Runs once per ending. */
   private songEnded(): void {
-    if (this.finished) return;
+    // A song whose stream hasn't been loaded yet can't have ended: this is the song before it ending a second time
+    // (a browser can say both that it paused at its end and that it ended), which would skip the new song.
+    if (this.finished || !this.streamLoaded) return;
     this.finished = true;
     const { queue, currentId, repeat } = this.snapshot;
     const at = queue.findIndex((track) => track.id === currentId);
@@ -643,6 +654,7 @@ class PlayerStore {
     const run = ++this.loadRun;
     const known = this.identified.get(id);
     this.source = null;
+    this.streamLoaded = false;
     this.audio.pause();
     this.resetStream();
     this.set({
@@ -674,6 +686,7 @@ class PlayerStore {
       }
       if (this.exact) this.set({ duration: this.exact.total });
       this.audio.src = url;
+      this.streamLoaded = true;
       if (autoplay) this.audio.play().catch(() => {});
     } catch (error) {
       if (run !== this.loadRun) return;
@@ -812,6 +825,11 @@ class PlayerStore {
   private keepSettings(): void {
     const { showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine } = this.snapshot;
     saveSettings({ showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine });
+  }
+
+  /** Opens Safari's list of AirPlay speakers and screens. */
+  chooseAirplay(): void {
+    (this.audio as HTMLAudioElement & { webkitShowPlaybackTargetPicker?: () => void }).webkitShowPlaybackTargetPicker?.();
   }
 
   /** Brings back the songs kept in this browser from earlier visits. */

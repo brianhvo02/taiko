@@ -2,7 +2,9 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import { NAS, toneFlac } from './fixtures.ts';
-import { mockCatalog, pair, pick } from './helpers.ts';
+import { clearSharedPlaylists, mockCatalog, pair, pick } from './helpers.ts';
+
+test.beforeEach(() => clearSharedPlaylists());
 
 /** The library on the first screen: the NAS's albums and artists, its search, and this device's songs by album. */
 
@@ -42,7 +44,7 @@ test('lists the NAS albums, opens one at its own address and plays from it', asy
   await tiles(page).filter({ hasText: 'Night Market' }).click();
   await expect(page).toHaveURL(albumUrl);
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Night Market');
-  await expect(page.locator('.sleeve-facts')).toHaveText('2026, 3 songs, 1 min');
+  await expect(page.locator('.sleeve-facts')).toHaveText('2026, 3 songs, 1 min, 16-bit 22.05 kHz');
   await expect(page.locator('.sleeve .cover')).toHaveJSProperty('complete', true);
   await expect(rows(page).locator('.song-title')).toHaveText(['Paper Lanterns', '港の灯', 'untagged']);
   // A song by someone other than the album's artist says so; a title in another script has its reading.

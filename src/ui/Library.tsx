@@ -4,7 +4,7 @@ import type { Track } from '../library/tracks';
 import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
 import type { NasAlbum } from '../shared/api';
-import { otherForms } from './format';
+import { otherForms, qualityOf } from './format';
 import { AddToPlaylist, ForgetSongs, playlistsKept, LIST, NOTE, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /**
@@ -103,9 +103,28 @@ function Tile({ cover, title, detail, onOpen }: { cover: string | null | undefin
   );
 }
 
-function AlbumTiles({ albums, withArtist = true }: { albums: NasAlbum[]; withArtist?: boolean }) {
+/** How the album's audio is stored, when every song is stored the same way. */
+function sharedQuality(tracks: Track[]): string {
+  const first = tracks.length ? qualityOf(tracks[0]) : '';
+  return first && tracks.every((track) => qualityOf(track) === first) ? first : '';
+}
+
+/** The albums added most lately, in a row to scroll along, above a library big enough to lose them in. */
+function RecentlyAdded({ albums }: { albums: NasAlbum[] }) {
+  if (albums.length <= RECENT_SHOWN) return null;
+  const recent = [...albums].sort((a, b) => b.addedAt - a.addedAt).slice(0, RECENT_SHOWN);
   return (
-    <ul className="tiles">
+    <section className="recent" aria-label="Recently added">
+      <h2>Recently added</h2>
+      <AlbumTiles albums={recent} className="tiles strip" />
+    </section>
+  );
+}
+const RECENT_SHOWN = 10;
+
+function AlbumTiles({ albums, withArtist = true, className = 'tiles' }: { albums: NasAlbum[]; withArtist?: boolean; className?: string }) {
+  return (
+    <ul className={className}>
       {albums.map((album) => (
         <Tile
           key={album.path}
@@ -181,7 +200,7 @@ function AlbumPage({ snap, path }: { snap: Snapshot; path: string }) {
         title={title}
         other={known && otherForms(known.title, known.titleRoman, known.titleEnglish)}
         artist={artist && <button className="text-button" type="button" onClick={() => store.showArtist(artist)}>{artist}</button>}
-        facts={[yearOf(known?.date ?? tracks[0]?.date ?? ''), tracks.length ? count(tracks.length, 'song') : '', lengthOf(seconds)]}
+        facts={[yearOf(known?.date ?? tracks[0]?.date ?? ''), tracks.length ? count(tracks.length, 'song') : '', lengthOf(seconds), sharedQuality(tracks)]}
       >
         <button className="plain-button primary-button" type="button" disabled={!tracks.length} onClick={() => play()}>Play</button>
         {tracks.length > 0 && <RowMenu label="More for this album">{(close) => <AddToPlaylist snap={snap} tracks={tracks} close={close} />}</RowMenu>}
@@ -216,7 +235,7 @@ function DeviceAlbumPage({ snap, name }: { snap: Snapshot; name: string }) {
   return (
     <>
       <Crumbs steps={[{ name: 'Library', open: () => store.showHome() }, { name: 'This device' }, { name }]} />
-      <Sleeve cover={tracks[0]?.cover} title={name} artist={artist} facts={[count(tracks.length, 'song'), 'on this device']}>
+      <Sleeve cover={tracks[0]?.cover} title={name} artist={artist} facts={[count(tracks.length, 'song'), 'on this device', sharedQuality(tracks)]}>
         <button className="plain-button primary-button" type="button" disabled={!tracks.length} onClick={() => void store.playFrom(tracks, { kind: 'device' })}>Play</button>
       </Sleeve>
       <ul className="songlist">
@@ -355,6 +374,7 @@ function Home({ snap }: { snap: Snapshot }) {
             <p className="library-note">The NAS has found no albums yet. Albums are folders of tagged songs in the music it was set to read.</p>
           )}
 
+          {shelf === 'albums' && sort !== 'added' && <RecentlyAdded albums={library.albums} />}
           {shelf === 'albums' && <AlbumTiles albums={sorted(library.albums, sort)} />}
           {shelf === 'artists' && <ArtistList artists={artists} />}
           {shelf === 'playlists' && (

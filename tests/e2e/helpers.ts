@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
@@ -91,6 +92,14 @@ export function invite(): string {
 }
 
 /** Opens an invite link and pairs, leaving the player on its first screen, paired. */
+/**
+ * Empties the playlists the test NAS keeps for every paired device, so one test's playlists never show up in
+ * another's. The server reads its file afresh on every request.
+ */
+export function clearSharedPlaylists(): void {
+  rmSync(`${NAS.data}/playlists.json`, { force: true });
+}
+
 export async function pair(page: Page, deviceName = 'Test browser'): Promise<void> {
   await page.goto(invite());
   const dialog = page.getByRole('dialog');

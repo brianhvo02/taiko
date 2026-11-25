@@ -33,6 +33,8 @@ test('plays a song with lyrics combined from three versions and named by the cat
   // The catalog's names, home storefront first, replace the file's tags.
   await expect(page.locator('.now-title')).toHaveText('紙の灯籠 (Paper Lanterns)');
   await expect(page.locator('.credit')).toHaveText('Midori Vale, written by Midori Vale');
+  // How the file's audio is stored, read from the file.
+  await expect(page.locator('.bar .quality')).toHaveText('16-bit 22.05 kHz');
   await expect(page).toHaveTitle('紙の灯籠 - Taiko');
   await expect(page.locator('.seek-row output').last()).toHaveText('0:50');
 

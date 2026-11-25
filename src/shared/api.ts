@@ -118,6 +118,9 @@ export interface NasTrack {
   discNumber: number | null;
   /** Known for FLAC; null where the server can't tell without decoding. */
   durationSeconds: number | null;
+  /** How the audio is stored, known for FLAC: samples a second and bits in each. */
+  sampleRate?: number;
+  bitsPerSample?: number;
   /**
    * Other forms of the names, present only when the file has them: the reading in Latin script (the TITLESORT,
    * ARTISTSORT and ALBUMSORT tags, which for Japanese music hold the romaji), the official English name

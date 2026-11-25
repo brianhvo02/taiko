@@ -5,6 +5,7 @@
 import { AUDIO_EXTENSIONS, LYRICS_EXTENSIONS, lyricsBelongTo } from '../shared/api';
 import type { NasTrack } from '../shared/api';
 import { readTagsFrom } from '../shared/tags';
+import type { Tags } from '../shared/tags';
 
 export interface Track {
   id: string;
@@ -15,6 +16,9 @@ export interface Track {
   trackNumber: number | null;
   discNumber: number | null;
   durationSeconds: number | null;
+  /** How the audio is stored, known for FLAC (see `Tags`). */
+  sampleRate?: number;
+  bitsPerSample?: number;
   /** Other forms of the names, from the file's tags (see `Tags`). */
   titleRoman?: string;
   artistRoman?: string;
@@ -54,7 +58,7 @@ export const isLyrics = (file: File): boolean =>
 let nextDeviceId = 1;
 
 async function trackFromFile(file: File): Promise<Track> {
-  let tags = { title: '', artist: '', album: '', trackNumber: null as number | null, discNumber: null as number | null, durationSeconds: null as number | null };
+  let tags: Tags = { title: '', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null };
   try {
     tags = await readTagsFrom(async (offset, length) => new Uint8Array(await file.slice(offset, offset + length).arrayBuffer()), file.size);
   } catch {

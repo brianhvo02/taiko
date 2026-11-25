@@ -215,6 +215,9 @@ input::placeholder { color: var(--unsung); }
 .library-foot { font-size: var(--small); color: var(--unsung); }
 .library-foot .text-button { color: var(--quiet); }
 .library .crumbs { padding: 0; }
+/* A row of albums to scroll along: the same tiles, kept to one line. */
+.tiles.strip { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 9.5rem; overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: .75rem; scrollbar-width: thin; }
+.recent h2 { font-size: var(--body); font-weight: 500; color: var(--quiet); margin-bottom: .9rem; }
 .tiles { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 1.75rem 1.25rem; }
 .tile { display: grid; gap: .1rem; width: 100%; padding: 0; background: none; border: 0; text-align: left; cursor: pointer; line-height: 1.35; }
 .cover { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 3px; background: var(--night-raised); }
@@ -351,7 +354,10 @@ input::placeholder { color: var(--unsung); }
 .now { min-width: 0; line-height: 1.35; }
 .now div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .now-title { font-weight: 500; }
-.now .credit { color: var(--quiet); font-size: var(--small); min-height: 1.35em; }
+.now .credit-line { display: flex; align-items: baseline; gap: .6rem; font-size: var(--small); min-height: 1.35em; }
+.now .credit { color: var(--quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* How the audio is stored: a fact about the song, said quietly. */
+.quality { flex: none; color: var(--unsung); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .now a { color: inherit; text-decoration: none; }
 .now a:hover { text-decoration: underline; text-underline-offset: .2em; }
 .other-name { color: var(--quiet); font-weight: 400; }
@@ -432,6 +438,7 @@ input::placeholder { color: var(--unsung); }
 }
 .extras .plain-button { justify-self: start; }
 .extras-volume { display: none; }
+.extras-airplay { display: none; }
 .timing { display: flex; align-items: center; gap: .45rem; }
 .timing output { font-variant-numeric: tabular-nums; min-width: 6.5rem; text-align: center; color: var(--quiet); }
 .toggle { display: flex; align-items: center; gap: .5rem; cursor: pointer; }
@@ -576,6 +583,9 @@ input::placeholder { color: var(--unsung); }
   .extras { left: 0; right: auto; }
   /* A phone's own buttons set the volume; where a page may set it too, the slider is among the options. */
   .side-zone > .volume { display: none; }
+  /* There is one place for an icon beside the transport, and Songs has it: AirPlay is among the options. */
+  .side-zone > .airplay { display: none; }
+  .extras-airplay { display: block; }
   .extras-volume { display: block; }
   .extras-volume .volume { width: 100%; }
   .transport .play { width: 3.4rem; height: 3.4rem; }

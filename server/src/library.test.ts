@@ -180,16 +180,16 @@ describe('Library', () => {
     expect(lib.tracks).toEqual([
       {
         id: encodeTrackId('Music', ['Midori Vale', '[2021] Night Market', '01. Paper Lanterns.flac']), title: 'Paper Lanterns', artist: 'Midori Vale',
-        album: 'Night Market', trackNumber: 1, discNumber: null, durationSeconds: 10, albumArtist: 'Midori Vale', date: '2021-03-04',
+        album: 'Night Market', trackNumber: 1, discNumber: null, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16, albumArtist: 'Midori Vale', date: '2021-03-04',
         lyrics: [{ index: 0, name: '01. Paper Lanterns.lrc', format: 'lrc' }],
       },
       {
         id: encodeTrackId('Music', ['Midori Vale', '[2021] Night Market', '02. Closing Bell.flac']), title: 'Closing Bell', artist: 'Midori Vale',
-        album: 'Night Market', trackNumber: 2, discNumber: null, durationSeconds: 10, albumArtist: 'Midori Vale', lyrics: [],
+        album: 'Night Market', trackNumber: 2, discNumber: null, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16, albumArtist: 'Midori Vale', lyrics: [],
       },
       {
         id: encodeTrackId('Music', ['Midori Vale', '[2021] Night Market', 'Bonus', '01. Dawn Stalls.flac']), title: 'Dawn Stalls', artist: 'Midori Vale',
-        album: 'Night Market (Bonus)', trackNumber: null, discNumber: null, durationSeconds: 10, lyrics: [],
+        album: 'Night Market (Bonus)', trackNumber: null, discNumber: null, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16, lyrics: [],
       },
       { id: encodeTrackId('Music', ['Tin Harbor', 'Loose', 'Gulls.mp3']), title: 'Gulls', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null, lyrics: [] },
     ]);
@@ -363,7 +363,7 @@ describe('Library', () => {
       // A result is the song as the browser lists it.
       expect(lib.search('tourou')[0]).toEqual({
         id: encodeTrackId('Music', ['Midori Vale', 'Night Market', '3.flac']), title: '灯籠', artist: '緑谷', album: '夜市',
-        trackNumber: null, discNumber: null, durationSeconds: 10, titleRoman: 'Tourou', artistRoman: 'Midoritani', albumRoman: 'Yoichi',
+        trackNumber: null, discNumber: null, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16, titleRoman: 'Tourou', artistRoman: 'Midoritani', albumRoman: 'Yoichi',
         titleEnglish: 'Lantern Song', artistEnglish: 'Green Valley', albumEnglish: 'Evening Stalls', lyrics: [],
       });
     });

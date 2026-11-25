@@ -30,7 +30,7 @@ describe('readTags', () => {
   it('reads Vorbis comments and the length from a FLAC file', () => {
     expect(readTags(flac(['ALBUMARTIST=Midori Vale', 'ALBUMARTISTSORT=Vale Midori', 'DATE=2026-10-14']))).toMatchObject({ albumArtist: 'Midori Vale', albumArtistRoman: 'Vale Midori', date: '2026-10-14' });
     const tags = readTags(flac(['title=Paper Lanterns', 'ARTIST=Midori Vale', 'Album=Night Market', 'TRACKNUMBER=3/12', 'DISCNUMBER=1']));
-    expect(tags).toEqual({ title: 'Paper Lanterns', artist: 'Midori Vale', album: 'Night Market', trackNumber: 3, discNumber: 1, durationSeconds: 10 });
+    expect(tags).toEqual({ title: 'Paper Lanterns', artist: 'Midori Vale', album: 'Night Market', trackNumber: 3, discNumber: 1, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16 });
   });
 
   it('reads Japanese text', () => {
@@ -68,7 +68,7 @@ describe('readTagsFrom', () => {
 
     const reads: number[] = [];
     expect(await readTagsFrom(reader(withCover, reads), withCover.length)).toEqual({
-      title: '紙の灯籠', artist: 'Midori Vale', album: '', trackNumber: 2, discNumber: null, durationSeconds: 10,
+      title: '紙の灯籠', artist: 'Midori Vale', album: '', trackNumber: 2, discNumber: null, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16,
     });
     expect(reads.reduce((sum, n) => sum + n, 0)).toBeLessThan(1024);
   });

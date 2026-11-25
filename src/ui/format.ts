@@ -18,6 +18,12 @@ export interface NowPlaying {
   art: string;
 }
 
+/** How a song's audio is stored, as a listener reads it: "24-bit 96 kHz". Empty when it isn't known. */
+export function qualityOf(song: { sampleRate?: number; bitsPerSample?: number }): string {
+  if (!song.sampleRate || !song.bitsPerSample) return '';
+  return `${song.bitsPerSample}-bit ${Number((song.sampleRate / 1000).toFixed(2))} kHz`;
+}
+
 /** Whether a name is written in a script that a reading in Latin letters helps with (Japanese, say). */
 export const needsReading = (name: string): boolean => /[^\u0000-\u024f\u2000-\u206f]/.test(name);
 

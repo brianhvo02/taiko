@@ -229,7 +229,7 @@ describe('GET library/search', () => {
     const found = await search('bell vale');
     expect(found.tracks).toEqual([{
       id: id('Music/Midori Vale/[2021] Night Market/02. Closing Bell.flac'), title: 'Closing Bell', artist: 'Midori Vale', album: 'Night Market',
-      trackNumber: 2, discNumber: null, durationSeconds: 10, albumRoman: 'Yoichi', titleEnglish: 'Last Orders', albumArtist: 'Midori Vale', date: '2021-03-04', lyrics: [],
+      trackNumber: 2, discNumber: null, durationSeconds: 10, sampleRate: 44100, bitsPerSample: 16, albumRoman: 'Yoichi', titleEnglish: 'Last Orders', albumArtist: 'Midori Vale', date: '2021-03-04', lyrics: [],
     }]);
     const folder = (await app.call('GET', `browse?path=${encodeURIComponent('Music/Midori Vale/[2021] Night Market')}`, app.token)).json<BrowseResponse>();
     expect(found.tracks[0]).toEqual(folder.tracks[1]);

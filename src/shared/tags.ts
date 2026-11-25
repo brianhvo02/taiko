@@ -14,6 +14,9 @@ export interface Tags {
   trackNumber: number | null;
   discNumber: number | null;
   durationSeconds: number | null;
+  /** How the audio is stored, for a FLAC file: samples a second, and bits in each. */
+  sampleRate?: number;
+  bitsPerSample?: number;
   /**
    * Other forms of the names, present only when the file has them: the reading in Latin script (the TITLESORT,
    * ARTISTSORT and ALBUMSORT tags, which for Japanese music hold the romaji), the official English name
@@ -117,6 +120,13 @@ function readVorbisComments(block: Uint8Array, tags: Tags): void {
   }
 }
 
+/** STREAMINFO's sample rate, and its bits per sample: five bits across two bytes, stored as one less. */
+function noteQuality(tags: Tags, rate: number, byte12: number, byte13: number): void {
+  if (rate <= 0) return;
+  tags.sampleRate = rate;
+  tags.bitsPerSample = (((byte12 & 0x01) << 4) | (byte13 >> 4)) + 1;
+}
+
 function readFlac(bytes: Uint8Array, start: number, tags: Tags): void {
   let at = start;
   while (at + 4 <= bytes.length) {
@@ -131,6 +141,7 @@ function readFlac(bytes: Uint8Array, start: number, tags: Tags): void {
       const rate = (bytes[body + 10] << 12) | (bytes[body + 11] << 4) | (bytes[body + 12] >> 4);
       const samples = (bytes[body + 13] & 0x0f) * 2 ** 32 + be32(bytes, body + 14);
       if (rate > 0 && samples > 0) tags.durationSeconds = samples / rate;
+      noteQuality(tags, rate, bytes[body + 12], bytes[body + 13]);
     }
     if (type === 4) readVorbisComments(bytes.subarray(body, end), tags);
     if (header & 0x80) return;
@@ -306,6 +317,7 @@ export async function readTagsFrom(read: TagReader, size: number): Promise<Tags>
           const rate = (info[10] << 12) | (info[11] << 4) | (info[12] >> 4);
           const samples = (info[13] & 0x0f) * 2 ** 32 + be32(info, 14);
           if (rate > 0 && samples > 0) tags.durationSeconds = samples / rate;
+          noteQuality(tags, rate, info[12], info[13]);
         }
       } else if (type === 4 && length <= 4 * 1024 * 1024) {
         readVorbisComments(await read(body, length), tags);

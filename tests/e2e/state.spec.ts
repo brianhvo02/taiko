@@ -2,7 +2,9 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { toneFlac } from './fixtures.ts';
-import { expectInTime, listen, mockCatalog, pair, pick, seekTo, shown } from './helpers.ts';
+import { clearSharedPlaylists, expectInTime, listen, mockCatalog, pair, pick, seekTo, shown } from './helpers.ts';
+
+test.beforeEach(() => clearSharedPlaylists());
 
 /** Repeat and shuffle, playlists, and what the browser keeps between visits. */
 
@@ -348,4 +350,33 @@ test('a playlist and a link made before an album was replaced lead to the fresh 
   await page.evaluate(() => (window as unknown as { taikoStore: { deletePlaylist(id: string): void } }).taikoStore.deletePlaylist('made-before'));
   await page.waitForTimeout(700);
   await page.evaluate(() => (window as unknown as { taikoStore: { syncPlaylists(): Promise<void> } }).taikoStore.syncPlaylists());
+});
+
+test('a song played to its end goes on to the next one once, not twice', async ({ page }) => {
+  await mockCatalog(page);
+  const keptPairing = existsSync(KEPT_PAIRING) ? readFileSync(KEPT_PAIRING, 'utf8') : '';
+  if (keptPairing) {
+    await page.addInitScript((saved) => { if (!localStorage.getItem('taiko:nas')) localStorage.setItem('taiko:nas', saved); }, keptPairing);
+    await page.goto('/');
+  } else {
+    await pair(page, 'Ending test');
+  }
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await expect(page.locator('.library .songlist .song')).toHaveCount(3);
+  // Two songs from the NAS, on repeat, played whole with nothing sought: a browser that says both "paused at the
+  // end" and "ended" used to move on twice, which in a list of two comes back to the song that just played.
+  type Store = { getSnapshot(): { album: { tracks: { title: string }[] }; playlists: { id: string }[]; repeat: string; currentTrack: { title: string } | null }; createPlaylist(name: string, tracks: unknown[], show: boolean): void; cycleRepeat(): void; playPlaylist(id: string, index: number): Promise<void> };
+  await page.evaluate(async () => {
+    const store = (window as unknown as { taikoStore: Store }).taikoStore;
+    store.createPlaylist('Two short songs', store.getSnapshot().album.tracks.filter((track) => track.title !== 'Paper Lanterns'), false);
+    while (store.getSnapshot().repeat !== 'all') store.cycleRepeat();
+    const tracks = store.getSnapshot().album.tracks.filter((track) => track.title !== 'Paper Lanterns');
+    await store.playPlaylist(store.getSnapshot().playlists[0].id, tracks.findIndex((track) => track.title === 'untagged'));
+  });
+  const playing = () => page.evaluate(() => (window as unknown as { taikoStore: Store }).taikoStore.getSnapshot().currentTrack?.title);
+  expect(await playing()).toBe('untagged');
+  // The five-second song ends, and the other one is playing, and still is a moment later.
+  await expect.poll(playing, { timeout: 15_000 }).toBe('港の灯');
+  await page.waitForTimeout(2000);
+  expect(await playing()).toBe('港の灯');
 });

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
-import { formatTime, nowPlaying, pickFiles } from './format';
+import { formatTime, nowPlaying, pickFiles, qualityOf } from './format';
 
 /** The bar's icons, drawn on a 24-unit grid in the text colour. A button's name comes from its hidden label. */
 const SPEAKER = <path d="M3 9.5v5a1 1 0 0 0 1 1h3.2l4.15 3.32A1 1 0 0 0 13 18V6a1 1 0 0 0-1.65-.78L7.2 8.5H4a1 1 0 0 0-1 1Z" />;
@@ -43,6 +43,8 @@ const ICONS = {
       <path d="M11.3 9.6a.900.9 0 0 1 1.6.560v4.24a.900.9 0 1 1-1.8 0v-2.33l-.300.19a.900.9 0 0 1-.960-1.52l1.46-.940Z" />
     </>
   ),
+  // A screen with a triangle rising into it: where the sound can be sent.
+  airplay: <path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-1.6l-1.7-2H19V6H5v9h3.3l-1.7 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm7 9.4 5.1 6.1a.3.3 0 0 1-.23.5H7.13a.3.3 0 0 1-.23-.5L12 13.4Z" />,
   songs: <path d="M4 6.5a1.25 1.25 0 1 1 2.5 0 1.25 1.25 0 0 1-2.5 0ZM9 5.5h10a1 1 0 1 1 0 2H9a1 1 0 0 1 0-2ZM4 12a1.25 1.25 0 1 1 2.5 0A1.25 1.25 0 0 1 4 12Zm5-1h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm-5 6.5a1.25 1.25 0 1 1 2.5 0 1.25 1.25 0 0 1-2.5 0Zm5-1h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Z" />,
 } satisfies Record<string, ReactNode>;
 
@@ -154,6 +156,8 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
     </div>
   );
 
+  const quality = snap.currentTrack ? qualityOf(snap.currentTrack) : '';
+
   return (
     <footer className="bar">
       <div className="now-zone">
@@ -163,7 +167,10 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
             {now?.link ? <a href={now.link} target="_blank" rel="noopener" title="Open in Apple Music">{now.title}</a> : now?.title}
             {now?.otherTitle && <span className="other-name"> ({now.otherTitle})</span>}
           </div>
-          <div className="credit">{credit}</div>
+          <div className="credit-line">
+            <span className="credit">{credit}</span>
+            {quality && <span className="quality" title="How this song's audio is stored">{quality}</span>}
+          </div>
         </div>
       </div>
 
@@ -231,10 +238,16 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
               )}
               <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Add lyrics or music</button>
               <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); onFindSong(); }}>Find this song in Apple Music</button>
+              {snap.canAirplay && (
+                <div className="extras-airplay">
+                  <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); store.chooseAirplay(); }}>Play on an AirPlay speaker</button>
+                </div>
+              )}
               {volume && <div className="extras-volume">{volume}</div>}
             </div>
           )}
         </div>
+        {snap.canAirplay && <IconButton icon="airplay" label="AirPlay" className="airplay" onClick={() => store.chooseAirplay()} />}
         <IconButton icon="songs" label="Songs" pressed={snap.songsOpen} onClick={() => (snap.songsOpen ? store.closeSongs() : store.openSongs())} />
         {volume}
       </div>
