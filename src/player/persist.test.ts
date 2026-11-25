@@ -68,16 +68,16 @@ describe('settings', () => {
     expect(loadSettings(null)).toEqual(DEFAULT_SETTINGS);
     expect(loadSettings(memory({ [KEYS.settings]: '{not json' }))).toEqual(DEFAULT_SETTINGS);
     expect(loadSettings(memory({ [KEYS.settings]: '[1,2]' }))).toEqual(DEFAULT_SETTINGS);
-    expect(loadSettings(memory({ [KEYS.settings]: JSON.stringify({ repeat: 'sometimes', shuffle: 'yes', showRoman: 0, sweepLines: 'please' }) }))).toEqual(DEFAULT_SETTINGS);
+    expect(loadSettings(memory({ [KEYS.settings]: JSON.stringify({ repeat: 'sometimes', shuffle: 'yes', showRoman: 0, sweepLines: 'please', seekOnLine: 'no' }) }))).toEqual(DEFAULT_SETTINGS);
   });
 
   it('come back as they were saved', () => {
     const store = memory();
-    saveSettings({ showRoman: false, showTranslation: true, repeat: 'one', shuffle: true, sweepLines: true }, store);
-    expect(loadSettings(store)).toEqual({ showRoman: false, showTranslation: true, repeat: 'one', shuffle: true, sweepLines: true });
+    saveSettings({ showRoman: false, showTranslation: true, repeat: 'one', shuffle: true, sweepLines: true, seekOnLine: false }, store);
+    expect(loadSettings(store)).toEqual({ showRoman: false, showTranslation: true, repeat: 'one', shuffle: true, sweepLines: true, seekOnLine: false });
     // A setting added later is at its default in what an older visit stored.
     store.setItem(KEYS.settings, JSON.stringify({ showRoman: false, repeat: 'all' }));
-    expect(loadSettings(store)).toEqual({ showRoman: false, showTranslation: true, repeat: 'all', shuffle: false, sweepLines: false });
+    expect(loadSettings(store)).toEqual({ showRoman: false, showTranslation: true, repeat: 'all', shuffle: false, sweepLines: false, seekOnLine: true });
   });
 
   it('survive a storage that refuses to write', () => {

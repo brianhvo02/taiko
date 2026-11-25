@@ -294,7 +294,9 @@ input::placeholder { color: var(--unsung); }
   transition: opacity .5s;
 }
 .line[data-state="past"] { opacity: .38; }
-@media (hover: hover) { .lyrics .line:hover { opacity: 1; } }
+@media (hover: hover) { .lyrics:not(.still) .line:hover { opacity: 1; } }
+/* Lines that a press doesn't move the song to are plain text. */
+.lyrics.still .line { cursor: default; }
 /* A quiet note that stays put above the lyrics, for lyrics that only say when each line is sung. */
 .timing-note {
   position: fixed;
@@ -560,6 +562,9 @@ input::placeholder { color: var(--unsung); }
   .lines { grid-column: 1; }
   .part-name { padding-top: 0; }
   .lyrics::before, .lyrics::after { height: 4rem; }
+  /* The line being sung sits at the top, clear of the strip and its fade. The song starts there, and its last line can reach it. */
+  .lyrics { padding-top: calc(var(--top-height) + 3.5rem); padding-bottom: calc(100vh - var(--top-height) - 3.5rem); }
+  .line { scroll-margin-top: calc(var(--top-height) + 3.5rem); }
   /* The bar stacks: the song, the seek bar, then the transport with Options and Songs at its sides. */
   .bar { grid-template-columns: auto 1fr auto; gap: .5rem .25rem; padding-bottom: max(.8rem, env(safe-area-inset-bottom)); }
   .now-zone { grid-column: 1 / -1; }

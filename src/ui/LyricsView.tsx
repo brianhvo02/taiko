@@ -72,6 +72,7 @@ export function LyricsView({ song }: { song: Song }) {
           el.append(sentence);
         }
         el.addEventListener('click', () => {
+          if (!store.getSnapshot().seekOnLine) return;
           store.seek(line.begin + store.getSnapshot().offset);
           holdUntil = 0;
         });
@@ -83,7 +84,11 @@ export function LyricsView({ song }: { song: Song }) {
     }
 
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    // On a phone the line being sung sits at the top, where the styles leave room for it; on a wide screen, in the middle.
+    const narrow = matchMedia('(max-width: 44rem)');
     let shown = -1;
+    // Whether a press on a line moves the song there. When it doesn't, the lines stop looking and acting like buttons.
+    let pressable = true;
     let holdUntil = 0;
     let frame = 0;
     // Following the song pauses for a moment when the listener scrolls by hand.
@@ -101,6 +106,14 @@ export function LyricsView({ song }: { song: Song }) {
       const t = store.position() - settings.offset;
       // Word by word when the words are timed, or when the listener asked for line-timed lyrics to be swept too.
       const sweep = song.wordTimed || settings.sweepLines;
+      if (settings.seekOnLine !== pressable) {
+        pressable = settings.seekOnLine;
+        root.classList.toggle('still', !pressable);
+        for (const line of lines) {
+          line.el.tabIndex = pressable ? 0 : -1;
+          line.el.setAttribute('aria-disabled', String(!pressable));
+        }
+      }
       // A seek means the listener wants to be where the song is: follow it again.
       if (store.seekCount !== seeks) { seeks = store.seekCount; holdUntil = 0; }
       let current = -1;
@@ -119,7 +132,7 @@ export function LyricsView({ song }: { song: Song }) {
       if (current !== shown) {
         shown = current;
         if (current >= 0 && performance.now() >= holdUntil) {
-          lines[current].el.scrollIntoView({ block: 'center', behavior: reducedMotion.matches ? 'auto' : 'smooth' });
+          lines[current].el.scrollIntoView({ block: narrow.matches ? 'start' : 'center',behavior: reducedMotion.matches ? 'auto' : 'smooth' });
         }
       }
       frame = requestAnimationFrame(tick);

@@ -215,6 +215,11 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
                 </label>
               )}
               {snap.song && (
+                <label className="toggle" title="When this is off, pressing a line does nothing, so a stray touch can't move the song.">
+                  <input type="checkbox" checked={snap.seekOnLine} onChange={(e) => store.setSeekOnLine(e.currentTarget.checked)} /> Press a line to go to it
+                </label>
+              )}
+              {snap.song && (
                 <div className="timing" role="group" aria-label="Lyric timing">
                   <button className="plain-button" type="button" onClick={() => store.nudge(-0.05)}>Earlier</button>
                   <output>{offsetText}</output>

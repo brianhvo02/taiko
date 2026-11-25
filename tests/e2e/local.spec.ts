@@ -171,3 +171,59 @@ test.describe('on a phone', () => {
     await expect(page.getByRole('complementary', { name: 'Songs' })).toBeHidden();
   });
 });
+
+test('keeps the line being sung at the top on a phone and in the middle on a wide screen', async ({ page }) => {
+  await pick(page, 'Choose files', [lanterns(), ...versions]);
+  const lines = page.locator('.lyrics .line');
+  await expect(lines).toHaveCount(3);
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  // Where the middle of the last line sits, as a share of the window's height, once the song is there.
+  const place = async () => {
+    await seekTo(page, 31);
+    await expect(lines.nth(2)).toHaveAttribute('data-state', 'active');
+    let last = -1;
+    await expect.poll(async () => {
+      const before = last;
+      last = await lines.nth(2).evaluate((el) => { const box = el.getBoundingClientRect(); return (box.top + box.height / 2) / innerHeight; });
+      return Math.abs(last - before);
+    }).toBeLessThan(0.001);
+    return last;
+  };
+  const wide = await place();
+  expect(wide).toBeGreaterThan(0.4);
+  expect(wide).toBeLessThan(0.6);
+
+  await page.setViewportSize({ width: 390, height: 780 });
+  await seekTo(page, 3);
+  await expect(lines.first()).toHaveAttribute('data-state', 'active');
+  const narrow = await place();
+  expect(narrow).toBeLessThan(0.3);
+  // Below the top strip, not under it.
+  expect(await lines.nth(2).evaluate((el) => el.getBoundingClientRect().top)).toBeGreaterThan(56);
+});
+
+test('pressing a line moves the song there unless the listener turns that off', async ({ page }) => {
+  await pick(page, 'Choose files', [lanterns(), ...versions]);
+  const lines = page.locator('.lyrics .line');
+  await expect(lines).toHaveCount(3);
+  await page.getByRole('button', { name: 'Options' }).click();
+  await expect(page.getByLabel('Press a line to go to it')).toBeChecked();
+  await page.getByLabel('Press a line to go to it').uncheck();
+  await page.keyboard.press('Escape');
+
+  // The line says it can't be pressed, so the test has to insist, as a stray touch would.
+  await expect(lines.nth(2)).toHaveAttribute('aria-disabled', 'true');
+  await lines.nth(2).click({ force: true });
+  await page.waitForTimeout(500);
+  expect(await shown(page)).toBeLessThan(5);
+
+  // The choice is kept between visits, and can be taken back.
+  await page.reload();
+  await pick(page, 'Choose files', [lanterns(), ...versions]);
+  await page.getByRole('button', { name: 'Options' }).click();
+  await expect(page.getByLabel('Press a line to go to it')).not.toBeChecked();
+  await page.getByLabel('Press a line to go to it').check();
+  await page.keyboard.press('Escape');
+  await lines.nth(2).click();
+  await expect.poll(() => shown(page)).toBeGreaterThan(29.8);
+});
