@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<!--
+  A trial, not part of the player: it plays the end of one song into the start of the next in four ways, so the
+  owner can hear on a real phone which of them joins without a gap and which keeps going with the screen locked.
+  What is learnt here decides how gapless playback, volume levelling and crossfade are built. It uses the pairing
+  the player keeps in this browser, and is linked from nowhere. Delete it once the audio engine is built.
+-->
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>Taiko: joining two songs</title>
+  <style>
+    :root { --night: #111a35; --raised: #1a2547; --rule: #2b3866; --quiet: #a4add2; --hide: #f6efe0; --brass: #e3b55c; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 1.5rem 1rem 4rem; background: var(--night); color: var(--hide); font: 1rem/1.5 system-ui, sans-serif; }
+    main { max-width: 40rem; margin: 0 auto; display: grid; gap: 1.5rem; }
+    h1 { font: 700 1.6rem/1.2 Georgia, serif; margin: 0; }
+    h2 { font-size: 1rem; margin: 0 0 .3rem; }
+    p { margin: 0; color: var(--quiet); }
+    select, button { font: inherit; color: var(--hide); background: var(--raised); border: 1px solid var(--rule); border-radius: 4px; padding: .55rem .8rem; max-width: 100%; }
+    button { cursor: pointer; }
+    button.go { background: var(--hide); color: var(--night); border-color: var(--hide); font-weight: 600; }
+    button:disabled { opacity: .45; cursor: default; }
+    label { display: grid; gap: .25rem; color: var(--quiet); font-size: .9rem; }
+    .test { display: grid; gap: .6rem; padding: 1rem; background: var(--raised); border-left: 3px solid var(--rule); }
+    .test.running { border-left-color: var(--brass); }
+    .row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+    #log { white-space: pre-wrap; font: .85rem/1.5 ui-monospace, monospace; color: var(--quiet); background: #0c1329; padding: .8rem; min-height: 6rem; border: 1px solid var(--rule); }
+    ol { margin: 0; padding-left: 1.2rem; color: var(--quiet); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Joining two songs</h1>
+  <p>Each test plays the last 12 seconds of one song straight into the first 12 seconds of the next. Pick an album whose songs run into each other (a live album is best), and the first of the two songs.</p>
+
+  <div class="row">
+    <label>Album <select id="album"><option>Reading your library</option></select></label>
+    <label>First song <select id="song"></select></label>
+  </div>
+
+  <ol>
+    <li>Run each test with the screen on and listen at the join: is there a gap, a click, or a clean join?</li>
+    <li>Run each again, and lock the phone as soon as it starts: does the second song still come in?</li>
+  </ol>
+
+  <section class="test" id="t1">
+    <h2>1. Two players, the second started when the first ends</h2>
+    <p>The simplest way. Expect a small gap.</p>
+    <div class="row"><button class="go" data-test="1">Play test 1</button></div>
+  </section>
+  <section class="test" id="t2">
+    <h2>2. Two players, the second started just before the first ends</h2>
+    <p>The second is started a fraction of a second early, by a timer.</p>
+    <div class="row"><button class="go" data-test="2">Play test 2</button></div>
+  </section>
+  <section class="test" id="t3">
+    <h2>3. Two players through a mixer, crossfaded over 6 seconds</h2>
+    <p>The songs overlap and fade into each other. This is the route crossfade and volume levelling would need on an iPhone.</p>
+    <div class="row"><button class="go" data-test="3">Play test 3</button></div>
+  </section>
+  <section class="test" id="t4">
+    <h2>4. Both songs decoded in memory, joined to the sample</h2>
+    <p>An exact join. Takes a moment to load before it starts.</p>
+    <div class="row"><button class="go" data-test="4">Play test 4</button></div>
+  </section>
+
+  <div class="row"><button id="stop">Stop</button></div>
+  <div id="log" aria-live="polite"></div>
+  <p>When you're done, tell Claude for each test: gap or no gap with the screen on, and whether the second song came in with the phone locked. A screenshot of the grey box helps too.</p>
+</main>
+
+<script>
+(() => {
+  const TAIL = 12, HEAD = 12, FADE = 6;
+  const $ = (id) => document.getElementById(id);
+  const logBox = $('log');
+  const started = performance.now();
+  const log = (text) => { logBox.textContent += `${((performance.now() - started) / 1000).toFixed(1).padStart(6)}s  ${text}\n`; };
+
+  let pairing = null;
+  try { pairing = JSON.parse(localStorage.getItem('taiko:nas') || 'null'); } catch { /* none */ }
+  if (!pairing) { log('This browser is not paired with a NAS. Open the player first and pair it.'); return; }
+
+  const api = async (path, init = {}) => {
+    const reply = await fetch(pairing.base + path, { ...init, headers: { ...(init.headers || {}), Authorization: `Bearer ${pairing.token}` } });
+    if (!reply.ok) throw new Error(`${path}: ${reply.status}`);
+    return reply.json();
+  };
+  const ticket = (id, fromSeconds) => api(`tracks/${encodeURIComponent(id)}/ticket`, fromSeconds > 0
+    ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fromSeconds }) }
+    : { method: 'POST' });
+
+  let tracks = [];
+  const albumSelect = $('album'), songSelect = $('song');
+  const option = (value, text) => Object.assign(document.createElement('option'), { value, textContent: text });
+
+  async function loadAlbum() {
+    songSelect.replaceChildren(option('', 'Reading the album'));
+    const folder = await api(`browse?path=${encodeURIComponent(albumSelect.value)}`);
+    tracks = folder.tracks;
+    songSelect.replaceChildren(...tracks.slice(0, -1).map((track, index) => option(String(index), `${index + 1}. ${track.title}  →  ${tracks[index + 1].title}`)));
+    if (tracks.length < 2) songSelect.replaceChildren(option('', 'This album has only one song'));
+  }
+  albumSelect.addEventListener('change', () => loadAlbum().catch((error) => log(`Can't read the album: ${error.message}`)));
+  api('library').then((library) => {
+    albumSelect.replaceChildren(...library.albums.map((album) => option(album.path, `${album.artist ? album.artist + ' / ' : ''}${album.title}`)));
+    return loadAlbum();
+  }).catch((error) => log(`Can't read the library: ${error.message}`));
+
+  // What is playing, so Stop and the next test can clear it away.
+  let cleanup = [];
+  function stop() {
+    for (const undo of cleanup) { try { undo(); } catch { /* already gone */ } }
+    cleanup = [];
+    for (const section of document.querySelectorAll('.test')) section.classList.remove('running');
+  }
+  $('stop').addEventListener('click', () => { stop(); log('Stopped.'); });
+
+  function player(url, mixed) {
+    const audio = new Audio();
+    if (mixed) audio.crossOrigin = 'anonymous';
+    audio.preload = 'auto';
+    audio.src = url;
+    cleanup.push(() => { audio.pause(); audio.removeAttribute('src'); audio.load(); });
+    return audio;
+  }
+
+  /** The two songs chosen, with an address for the end of the first and the start of the second. */
+  async function pair() {
+    const index = Number(songSelect.value);
+    const first = tracks[index], second = tracks[index + 1];
+    if (!first || !second) throw new Error('choose an album with two songs');
+    const length = first.durationSeconds || 0;
+    // The whole first song, for the players to jump near the end of; and a stream of just its end, for the test that decodes it.
+    const [whole, a, b] = await Promise.all([ticket(first.id, 0), ticket(first.id, Math.max(0, length - TAIL)), ticket(second.id, 0)]);
+    log(`"${first.title}" (${Math.round(length)} s), its last ${TAIL} s, then "${second.title}"`);
+    return { whole, a, b, length };
+  }
+
+  /** Starts a player near the end of its song. The jump needn't be exact here: only the join is listened to. */
+  async function playEnd(audio, length) {
+    if (!(audio.readyState >= 1)) await new Promise((resolve) => audio.addEventListener('loadedmetadata', resolve, { once: true }));
+    const total = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : length;
+    audio.currentTime = Math.max(0, total - TAIL);
+    await audio.play();
+  }
+
+  /** Lets a second player start later without a tap: iOS only lets a page start sound it was once told to play. */
+  async function unlock(audio) {
+    audio.muted = true;
+    try { await audio.play(); audio.pause(); audio.currentTime = 0; } catch (error) { log(`  (could not prime the second player: ${error.name})`); }
+    audio.muted = false;
+  }
+  const stopAfter = (audio, seconds, name) => {
+    const timer = setInterval(() => { if (audio.currentTime >= seconds) { clearInterval(timer); audio.pause(); log(`${name}: done.`); stop(); } }, 250);
+    cleanup.push(() => clearInterval(timer));
+  };
+
+  const tests = {
+    async 1() {
+      const { whole, b, length } = await pair();
+      const one = player(whole.url), two = player(b.url);
+      await unlock(two);
+      let ended = 0;
+      one.addEventListener('ended', () => { ended = performance.now(); two.play().catch((error) => log(`  second song refused to start: ${error.name}`)); });
+      two.addEventListener('playing', () => { if (ended) log(`Test 1: the second song started ${Math.round(performance.now() - ended)} ms after the first ended.`); stopAfter(two, HEAD, 'Test 1'); }, { once: true });
+      await playEnd(one, length);
+    },
+    async 2() {
+      const { whole, b, length } = await pair();
+      const one = player(whole.url), two = player(b.url);
+      await unlock(two);
+      const LEAD = 0.12;
+      let fired = false;
+      const timer = setInterval(() => {
+        const left = one.duration - one.currentTime;
+        if (!fired && Number.isFinite(left) && left <= LEAD) {
+          fired = true;
+          clearInterval(timer);
+          two.play().then(() => log(`Test 2: the second song was started with ${Math.round(left * 1000)} ms of the first still to go.`)).catch((error) => log(`  second song refused to start: ${error.name}`));
+          stopAfter(two, HEAD, 'Test 2');
+        }
+      }, 10);
+      cleanup.push(() => clearInterval(timer));
+      // If the timer was held back (a locked phone slows timers), the ending still starts the second song.
+      one.addEventListener('ended', () => { if (!fired) { fired = true; log('Test 2: the timer was late; started at the ending instead.'); two.play().catch(() => {}); stopAfter(two, HEAD, 'Test 2'); } });
+      await playEnd(one, length);
+    },
+    async 3() {
+      const { whole, b, length } = await pair();
+      const Context = window.AudioContext || window.webkitAudioContext;
+      const context = new Context();
+      cleanup.push(() => context.close());
+      const one = player(whole.url, true), two = player(b.url, true);
+      const gainOne = context.createGain(), gainTwo = context.createGain();
+      context.createMediaElementSource(one).connect(gainOne).connect(context.destination);
+      context.createMediaElementSource(two).connect(gainTwo).connect(context.destination);
+      gainTwo.gain.value = 0;
+      await context.resume();
+      await unlock(two);
+      let fading = false;
+      // The fade is set off by the song's own clock, which keeps ticking on a locked phone when timers don't.
+      one.addEventListener('timeupdate', () => {
+        const left = (Number.isFinite(one.duration) && one.duration > 0 ? one.duration : length) - one.currentTime;
+        if (fading || left > FADE) return;
+        fading = true;
+        const now = context.currentTime;
+        gainOne.gain.setValueAtTime(1, now); gainOne.gain.linearRampToValueAtTime(0, now + left);
+        gainTwo.gain.setValueAtTime(0, now); gainTwo.gain.linearRampToValueAtTime(1, now + left);
+        two.play().then(() => log(`Test 3: crossfade started with ${left.toFixed(1)} s to go (mixer is "${context.state}").`)).catch((error) => log(`  second song refused to start: ${error.name}`));
+        stopAfter(two, HEAD + FADE, 'Test 3');
+      });
+      await playEnd(one, length);
+      log(`Test 3: playing through the mixer (mixer is "${context.state}").`);
+    },
+    async 4() {
+      const { a, b } = await pair();
+      const Context = window.AudioContext || window.webkitAudioContext;
+      const context = new Context();
+      cleanup.push(() => context.close());
+      await context.resume();
+      log('Test 4: fetching and decoding both songs');
+      const controller = new AbortController();
+      cleanup.push(() => controller.abort());
+      const decode = (buffer) => new Promise((resolve, reject) => context.decodeAudioData(buffer, resolve, reject));
+      const whole = async (url, init = {}) => (await fetch(url, { signal: controller.signal, ...init })).arrayBuffer();
+      const first = await decode(await whole(a.url));
+      // Only the start of the second song is needed. Its first few megabytes are tried; a browser that won't decode
+      // a file cut short gets the whole of it.
+      let second;
+      try {
+        second = await decode(await whole(b.url, { headers: { Range: 'bytes=0-5999999' } }));
+      } catch {
+        log('Test 4: the start alone would not decode; fetching the whole second song');
+        second = await decode(await whole(b.url));
+      }
+      const at = context.currentTime + 0.2;
+      const one = context.createBufferSource(), two = context.createBufferSource();
+      one.buffer = first; two.buffer = second;
+      one.connect(context.destination); two.connect(context.destination);
+      one.start(at);
+      two.start(at + first.duration, 0, HEAD);
+      cleanup.push(() => { one.stop(); two.stop(); });
+      log(`Test 4: playing ${first.duration.toFixed(2)} s, then the next song joined at that exact sample (mixer is "${context.state}").`);
+      two.addEventListener('ended', () => { log('Test 4: done.'); stop(); });
+    },
+  };
+
+  for (const button of document.querySelectorAll('button[data-test]')) {
+    button.addEventListener('click', async () => {
+      stop();
+      const name = button.dataset.test;
+      $(`t${name}`).classList.add('running');
+      log(`--- Test ${name} ---`);
+      try { await tests[name](); } catch (error) { log(`Test ${name} failed: ${error.message || error.name}`); stop(); }
+    });
+  }
+  document.addEventListener('visibilitychange', () => log(document.visibilityState === 'hidden' ? '(screen locked or page hidden)' : '(page showing again)'));
+})();
+</script>
+</body>
+</html>
