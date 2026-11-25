@@ -506,6 +506,8 @@ input::placeholder { color: var(--unsung); }
 .song-title { grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .song-detail { grid-column: 2; color: var(--quiet); font-size: var(--small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .song-detail:empty { display: none; }
+/* With no second line the title takes both rows, so it sits level with the number and the length beside it. */
+.song-title:has(+ .song-detail:empty) { grid-row: 1 / span 2; }
 .song-meta { grid-column: 3; grid-row: 1 / span 2; color: var(--quiet); font-size: var(--small); font-variant-numeric: tabular-nums; }
 .song.folder .song-lead { color: var(--quiet); }
 /* The song that is open is marked in brass, the colour of "now". */

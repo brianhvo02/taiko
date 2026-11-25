@@ -5,7 +5,7 @@
  */
 import { counterpart, identify } from '../apple/catalog';
 import type { AppleSong, Identified } from '../apple/catalog';
-import { sortFiles, trackFromNas } from '../library/tracks';
+import { smallCover, sortFiles, trackFromNas } from '../library/tracks';
 import type { Track } from '../library/tracks';
 import { mergeInto, sameSong, serialize } from '../lyrics/merge';
 import { openLyrics, songFromDoc } from '../lyrics/ttml';
@@ -1181,7 +1181,7 @@ class PlayerStore {
           artist: songInfo?.artistName ?? track.artist,
           album: songInfo?.collectionName ?? track.album,
           artwork: track.cover
-            ? [{ src: track.cover }]
+            ? [{ src: smallCover(track.cover) }]
             : songInfo?.artworkUrl100 ? [{ src: songInfo.artworkUrl100.replace('100x100', '512x512'), sizes: '512x512' }] : [],
         })
       : null;

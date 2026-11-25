@@ -72,6 +72,12 @@ async function trackFromFile(file: File): Promise<Track> {
   };
 }
 
+/**
+ * The address of a NAS cover's small copy, for where the picture is shown small (the bar, a list's heading). The
+ * NAS answers with the full picture when the folder has no small one.
+ */
+export const smallCover = (cover: string): string => (!cover.includes('?') || /[?&]size=/.test(cover) ? cover : `${cover}&size=small`);
+
 export function trackFromNas(nas: NasTrack, cover: string | null = null): Track {
   const { id, lyrics: _lyrics, ...names } = nas;
   return {

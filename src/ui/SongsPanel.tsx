@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { smallCover } from '../library/tracks';
 import type { Snapshot, SongsTab } from '../player/store';
 import { store } from '../player/store';
 import { canPickFolder, pickFiles } from './format';
@@ -28,7 +29,7 @@ function Folders({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string; o
       </nav>
       {folder && all.length > 0 && (
         <div className={folder.cover ? 'album' : 'album no-cover'}>
-          {folder.cover && <img className="folder-cover" src={folder.cover} alt="" />}
+          {folder.cover && <img className="folder-cover" src={smallCover(folder.cover)} alt="" />}
           <div className="album-text">
             <div className="album-name">{segments[segments.length - 1]}</div>
             <div className="actions">

@@ -1,4 +1,5 @@
 import type { Snapshot } from '../player/store';
+import { smallCover } from '../library/tracks';
 import { AUDIO_EXTENSIONS } from '../shared/api';
 
 /** Seconds as m:ss. */
@@ -38,7 +39,7 @@ export function nowPlaying(snap: Snapshot): NowPlaying | null {
   if (!track) return null;
   const { songInfo, usInfo } = snap;
   // The album's own cover on the NAS comes before Apple's.
-  const art = track.cover ?? songInfo?.artworkUrl100 ?? '';
+  const art = track.cover ? smallCover(track.cover) : songInfo?.artworkUrl100 ?? '';
   // A file that carries its own other names (a reading, an English name) is named by them, not by the catalog.
   if (track.titleRoman || track.titleEnglish || track.artistRoman || track.artistEnglish || !songInfo) {
     return {

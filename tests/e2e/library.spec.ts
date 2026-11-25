@@ -142,3 +142,11 @@ test('groups the songs picked on this device by album', async ({ page }) => {
   await expect(page.locator('.now-title')).toHaveText('Song 2');
   await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeDisabled();
 });
+
+test('remembers which shelf was showing', async ({ page }) => {
+  await openPaired(page);
+  await page.getByRole('tab', { name: 'Artists' }).click();
+  await expect(page.getByRole('tab', { name: 'Artists' })).toHaveAttribute('aria-selected', 'true');
+  await page.reload();
+  await expect(page.getByRole('tab', { name: 'Artists' })).toHaveAttribute('aria-selected', 'true');
+});

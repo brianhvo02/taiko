@@ -161,7 +161,7 @@ test('playlists: make one from a song, add to it, reorder, play through, and fin
   await next(page).click();
   await expect(title(page)).toHaveText('紙の灯籠 (Paper Lanterns)');
   await expect(page.locator('.lyrics .line')).toHaveCount(3);
-  await expect(page.locator('.bar .art')).toHaveAttribute('src', /\/api\/cover\?/);
+  await expect(page.locator('.bar .art')).toHaveAttribute('src', /\/api\/cover\?.*&size=small$/);
   await expect(next(page)).toBeDisabled();
 
   // It is still there after a reload, and can be renamed and deleted.

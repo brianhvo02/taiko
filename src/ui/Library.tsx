@@ -288,9 +288,19 @@ function Results({ snap, query }: { snap: Snapshot; query: string }) {
 }
 
 type Shelf = 'albums' | 'artists' | 'playlists';
+const SHELF_KEY = 'taiko:library-shelf';
+
+function loadShelf(): Shelf {
+  try {
+    const saved = localStorage.getItem(SHELF_KEY);
+    return saved === 'artists' || saved === 'playlists' ? saved : 'albums';
+  } catch {
+    return 'albums';
+  }
+}
 
 function Home({ snap }: { snap: Snapshot }) {
-  const [shelf, setShelf] = useState<Shelf>('albums');
+  const [shelf, setShelf] = useState(loadShelf);
   const [sort, setSort] = useState(loadSort);
   const { library } = snap;
   const artists = artistsOf(library.albums);
@@ -298,6 +308,14 @@ function Home({ snap }: { snap: Snapshot }) {
   const shelves: [Shelf, string][] = snap.pairing ? [['albums', 'Albums'], ['artists', 'Artists'], ['playlists', 'Playlists']] : [];
   const reading = library.state === 'loading' || library.state === 'idle' || library.scanning;
 
+  const chooseShelf = (value: Shelf) => {
+    setShelf(value);
+    try {
+      localStorage.setItem(SHELF_KEY, value);
+    } catch {
+      // The choice lasts for this visit.
+    }
+  };
   const chooseSort = (value: Sort) => {
     setSort(value);
     try {
@@ -315,7 +333,7 @@ function Home({ snap }: { snap: Snapshot }) {
             <h1>Library</h1>
             <div className="tabs" role="tablist" aria-label="What to list">
               {shelves.map(([name, label]) => (
-                <button key={name} type="button" role="tab" aria-selected={name === shelf} className={name === shelf ? 'tab current' : 'tab'} onClick={() => setShelf(name)}>{label}</button>
+                <button key={name} type="button" role="tab" aria-selected={name === shelf} className={name === shelf ? 'tab current' : 'tab'} onClick={() => chooseShelf(name)}>{label}</button>
               ))}
             </div>
             {shelf === 'albums' && library.albums.length > 1 && (
