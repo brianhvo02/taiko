@@ -16,7 +16,7 @@ npm run typecheck      # tsc -b over the app, node and server projects
 npm run build          # typecheck, then the static site in dist/
 npm run server:build   # esbuild bundle: server/dist/server.mjs
 npm run server:dev     # build and run the server on :4193 against fixtures/music (not in the repo)
-npm run server:deploy  # the owner's deploy to a NAS over ssh (server/deploy/deploy.sh; settings in .env.local)
+npm run server:deploy  # the owner's deploy to a NAS, over ssh or run on the NAS itself (server/deploy/deploy.sh; settings in .env.local)
 ```
 
 One test file: `npx vitest run src/lyrics/lyrics.test.ts`. One browser test: `npx playwright test tests/e2e/seek.spec.ts --project=chromium`. The first run needs `npx playwright install chromium firefox`.
