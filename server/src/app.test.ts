@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { BrowseResponse, LibraryResponse, NasTrack, PairResponse, TicketResponse } from '../../src/shared/api';
 import { createApp } from './app';
 import { PlaylistStore } from './playlists';
+import { ListeningStore } from './listening';
 import { PairingStore, TICKET_LIFETIME_SECONDS, loadOrCreateSecret, signTicket } from './auth';
 import type { LibraryRoot } from './config';
 import { Library } from './library';
@@ -59,6 +60,7 @@ async function start(basePath: string, options: { scan?: boolean; roots?: Librar
     tags,
     pairing,
     playlists: new PlaylistStore(data),
+    listening: new ListeningStore(data, () => clock),
     secret,
     now: () => clock,
   }));
@@ -675,5 +677,79 @@ describe('songs that moved when an album was replaced', () => {
     expect((await running.call('POST', 'moved', { body: { ids } })).status).toBe(401);
     expect((await running.call('POST', 'moved', { token, body: { ids: 'all' } })).status).toBe(400);
     expect((await running.call('GET', 'moved', { token })).status).toBe(405);
+  });
+});
+
+describe('what a user marks and hears', () => {
+  const of = (file: string) => Buffer.from(file, 'utf8').toString('base64url');
+  const song = (file: string, album = 'Night Market') => ({ id: of(file), title: file.split('/').pop()!, artist: 'Midori Vale', album, trackNumber: null, discNumber: null, durationSeconds: 10 });
+
+  it('keeps favourite songs and albums for each user alone', async () => {
+    const home = await start('/api/');
+    const aki = home.pairing.addUser('Aki')!;
+    const owner = await pair(home, 'Owner phone');
+    const friend = (await home.call('POST', 'pair', { body: { code: home.pairing.createCode(1, aki.id).code, deviceName: 'Aki phone' } })).json<PairResponse>().token;
+    const a = song('main/Night Market/a.flac');
+    const b = song('main/Night Market/b.flac');
+
+    expect((await home.call('GET', 'favourites', { token: owner })).json()).toEqual({ songs: [], albums: [] });
+    expect((await home.call('PUT', `favourites/songs/${a.id}`, { token: owner, body: { track: a } })).status).toBe(204);
+    expect((await home.call('PUT', `favourites/songs/${b.id}`, { token: owner, body: { track: b } })).status).toBe(204);
+    // Marked again, it stays where it was, with what is known about it now.
+    expect((await home.call('PUT', `favourites/songs/${a.id}`, { token: owner, body: { track: { ...a, title: 'Renamed' } } })).status).toBe(204);
+    expect((await home.call('PUT', `favourites/albums/${of('main/Night Market')}`, { token: owner, body: { title: 'Night Market', artist: 'Midori Vale' } })).status).toBe(204);
+    const at = new Date(clock).toISOString();
+    expect((await home.call('GET', 'favourites', { token: owner })).json()).toEqual({
+      songs: [{ track: { ...a, title: 'Renamed' }, addedAt: at }, { track: b, addedAt: at }],
+      albums: [{ path: 'main/Night Market', title: 'Night Market', artist: 'Midori Vale', addedAt: at }],
+    });
+    expect((await home.call('GET', 'favourites', { token: friend })).json()).toEqual({ songs: [], albums: [] });
+
+    expect((await home.call('DELETE', `favourites/songs/${a.id}`, { token: owner })).status).toBe(204);
+    expect((await home.call('DELETE', `favourites/albums/${of('main/Night Market')}`, { token: owner })).status).toBe(204);
+    expect((await home.call('GET', 'favourites', { token: owner })).json()).toEqual({ songs: [{ track: b, addedAt: at }], albums: [] });
+
+    // The id in the address is the song's; anything else is refused.
+    expect((await home.call('PUT', `favourites/songs/${a.id}`, { token: owner, body: { track: b } })).status).toBe(400);
+    expect((await home.call('PUT', 'favourites/songs/not*an*id', { token: owner, body: { track: a } })).status).toBe(400);
+    expect((await home.call('GET', 'favourites')).status).toBe(401);
+  });
+
+  it('counts plays and says what was heard lately, to the listener alone', async () => {
+    const home = await start('/api/');
+    const aki = home.pairing.addUser('Aki')!;
+    const owner = await pair(home, 'Owner phone');
+    const friend = (await home.call('POST', 'pair', { body: { code: home.pairing.createCode(1, aki.id).code, deviceName: 'Aki phone' } })).json<PairResponse>().token;
+    const a = song('main/Night Market/a.flac');
+    const b = song('main/Night Market/b.flac');
+    const c = song('main/Low Tide/c.flac', 'Low Tide');
+    const started = clock;
+    for (const track of [a, b, a, c, a]) {
+      clock += 60_000;
+      expect((await home.call('POST', 'plays', { token: owner, body: { track } })).status).toBe(204);
+    }
+    // A play the device couldn't report at the time keeps its own time; one from the future is given now.
+    const earlier = new Date(started - 3_600_000).toISOString();
+    expect((await home.call('POST', 'plays', { token: owner, body: { track: b, at: earlier } })).status).toBe(204);
+    expect((await home.call('POST', 'plays', { token: friend, body: { track: c, at: new Date(clock + 9e9).toISOString() } })).status).toBe(204);
+
+    const history = (await home.call('GET', 'history', { token: owner })).json<{ total: number; plays: { at: string; track: { id: string } }[]; top: { track: { id: string }; count: number }[]; albums: { path: string; title: string }[] }>();
+    expect(history.total).toBe(6);
+    expect(history.plays.map((play) => play.track.id)).toEqual([a.id, c.id, a.id, b.id, a.id, b.id]);
+    expect(history.plays[5].at).toBe(earlier);
+    expect(history.top.map((entry) => [entry.track.id, entry.count])).toEqual([[a.id, 3], [b.id, 2], [c.id, 1]]);
+    expect(history.albums.map((album) => [album.path, album.title])).toEqual([['main/Night Market', 'Night Market'], ['main/Low Tide', 'Low Tide']]);
+    expect((await home.call('POST', 'plays/counts', { token: owner, body: { ids: [a.id, c.id, 'unknown'] } })).json()).toEqual({ counts: { [a.id]: 3, [c.id]: 1 } });
+
+    const theirs = (await home.call('GET', 'history', { token: friend })).json<{ total: number; plays: { at: string }[] }>();
+    expect(theirs.total).toBe(1);
+    expect(theirs.plays[0].at).toBe(new Date(clock).toISOString());
+    expect((await home.call('POST', 'plays', { token: owner, body: { track: { title: 'no id' } } })).status).toBe(400);
+
+    // A user who is removed takes what they marked and heard with them.
+    new ListeningStore(path.join(dir, `data${servers.length - 1}`)).removeUser(aki.id);
+    home.pairing.removeUser(aki.id);
+    const again = home.pairing.addUser('Aki')!;
+    expect(again.id).not.toBe(aki.id);
   });
 });

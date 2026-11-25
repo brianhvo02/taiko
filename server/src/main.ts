@@ -12,6 +12,7 @@
 import { createServer } from 'node:http';
 import { createApp } from './app';
 import { PlaylistStore } from './playlists';
+import { ListeningStore } from './listening';
 import { DEFAULT_CODE_DAYS, MAX_USER_NAME_LENGTH, PairingStore, loadOrCreateSecret } from './auth';
 import type { User } from './auth';
 import { loadConfig } from './config';
@@ -31,7 +32,7 @@ const USAGE = `Usage:
   server.mjs user rename <id|name> <new name>
   server.mjs user remove <id|name>
                                  remove a user and unpair their devices; the playlists they shared become the
-                                 owner's, their private ones are deleted`;
+                                 owner's; their private ones, their favourites and their history are deleted`;
 
 class UsageError extends Error {}
 
@@ -48,7 +49,7 @@ function serve(): void {
   const tags = new TagCache();
   // Only the roots LIBRARY_SCAN names go into the library; every root stays reachable through the folder browser.
   const library = new Library(config.roots.filter((root) => config.scanRoots.includes(root.name)), tags, log);
-  const server = createServer(createApp({ config, library, tags, pairing, playlists: new PlaylistStore(config.dataDir), secret, log }));
+  const server = createServer(createApp({ config, library, tags, pairing, playlists: new PlaylistStore(config.dataDir), listening: new ListeningStore(config.dataDir), secret, log }));
 
   server.on('error', (error: NodeJS.ErrnoException) => {
     console.error(error.code === 'EADDRINUSE' ? `taiko-server: port ${config.port} is already in use. Set PORT to a free one.` : `taiko-server: ${error.message}`);
@@ -136,6 +137,7 @@ function user(args: string[]): void {
     const target = pickUser(pairing, rest[0]);
     if (target.owner) throw new UsageError('The owner can\'t be removed. Rename them with: user rename');
     const passed = new PlaylistStore(config.dataDir).removeUser(target.id);
+    new ListeningStore(config.dataDir).removeUser(target.id);
     const unpaired = pairing.removeUser(target.id) ?? 0;
     console.log(`Removed ${target.name}: ${unpaired} ${unpaired === 1 ? 'device' : 'devices'} unpaired, ${passed} shared ${passed === 1 ? 'playlist' : 'playlists'} passed to the owner. Audio links their devices already have stop working within 6 hours.`);
   } else {

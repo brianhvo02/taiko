@@ -24,6 +24,13 @@
  *   GET    playlists/shared    paired  -> SharedPlaylistsResponse  (other users' public and collaborative playlists)
  *   PUT    playlists/shared/:owner/:id  paired  SharedPlaylistUpdate -> SharedPlaylist  (the songs of a collaborative
  *          playlist; 403 `not-collaborative` when it is only public, 404 when it isn't shared at all)
+ *   GET    favourites          paired  -> FavouritesResponse    (the user's favourite songs and albums)
+ *   PUT    favourites/songs/:id        paired  FavouriteSongRequest -> 204   (DELETE takes it away again)
+ *   PUT    favourites/albums/:id       paired  FavouriteAlbumRequest -> 204  (:id is the base64url of the album's
+ *          folder path; DELETE takes it away again)
+ *   POST   plays               paired  PlayRequest -> 204        (the user heard a song: half of it, or four minutes)
+ *   GET    history             paired  -> HistoryResponse       (the user's latest plays, most played songs, albums played lately)
+ *   POST   plays/counts        paired  PlayCountsRequest -> PlayCountsResponse  (how often the user played some songs)
  *   POST   moved               paired  MovedRequest -> MovedResponse  (where songs that are gone from their old
  *          place went, for playlists and links made before an album was replaced)
  *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
@@ -54,6 +61,65 @@ export interface PlaylistsResponse {
 export interface PlaylistsUpdate {
   base: number;
   playlists: Playlist[];
+}
+
+/** A song a user marked as a favourite, and when. */
+export interface FavouriteSong {
+  track: SavedTrack;
+  addedAt: string;
+}
+
+/** An album a user marked as a favourite: its folder, and what it was called when it was marked. */
+export interface FavouriteAlbum {
+  path: string;
+  title: string;
+  artist: string;
+  addedAt: string;
+}
+
+export interface FavouritesResponse {
+  songs: FavouriteSong[];
+  albums: FavouriteAlbum[];
+}
+
+export interface FavouriteSongRequest {
+  track: SavedTrack;
+}
+
+export interface FavouriteAlbumRequest {
+  title: string;
+  artist: string;
+}
+
+/** One time a user heard a song. */
+export interface Play {
+  at: string;
+  track: SavedTrack;
+}
+
+export interface PlayRequest {
+  track: SavedTrack;
+  /** When it was heard, for a play the device couldn't report at the time. Left out: now. */
+  at?: string;
+}
+
+export interface HistoryResponse {
+  /** How many plays there are in all. */
+  total: number;
+  /** The latest plays, newest first. */
+  plays: Play[];
+  /** The songs played most, with how often. */
+  top: { track: SavedTrack; count: number }[];
+  /** The albums (folders) played lately, newest first, as their songs' tags named them. */
+  albums: { path: string; title: string; artist: string; at: string }[];
+}
+
+export interface PlayCountsRequest {
+  ids: string[];
+}
+
+export interface PlayCountsResponse {
+  counts: Record<string, number>;
 }
 
 /** Track ids to look up: songs a device has stored that may have moved. */

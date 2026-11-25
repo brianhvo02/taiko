@@ -3,10 +3,10 @@ import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, PairResponse, ScanResponse, SearchResponse,
-  InviteResponse, MovedResponse, NasUser, PlaylistsResponse, SharedPlaylistsResponse, TicketRequest, TicketResponse,
+  FavouritesResponse, HistoryResponse, InviteResponse, MovedResponse, NasUser, PlayCountsResponse, PlaylistsResponse, SharedPlaylistsResponse, TicketRequest, TicketResponse,
 } from '../../src/shared/api';
 import { MAX_MOVED_IDS } from '../../src/shared/api';
-import { acceptPlaylists, acceptTracks } from '../../src/shared/playlists';
+import { acceptPlaylists, acceptTracks, toSavedTrack } from '../../src/shared/playlists';
 import type { SharedPlaylist } from '../../src/shared/playlists';
 import { MAX_DEVICE_NAME_LENGTH, RateLimiter, TICKET_LIFETIME_SECONDS, signTicket, verifyTicket } from './auth';
 import type { Device, PairingStore, User } from './auth';
@@ -16,6 +16,7 @@ import { flacSeek } from './flac-file';
 import { nasTrack } from './library';
 import type { Library } from './library';
 import type { PlaylistStore } from './playlists';
+import type { ListeningStore } from './listening';
 import { MovedRecord } from './moved';
 import { LibraryPaths, byNameNumeric, decodeTrackId, encodeTrackId, listFolder } from './paths';
 import type { FolderListing, ResolvedTrack } from './paths';
@@ -46,6 +47,8 @@ export interface AppDeps {
   pairing: PairingStore;
   /** The playlists the paired devices share. */
   playlists: PlaylistStore;
+  /** Each user's favourites and listening history. Left out: none are kept, and the routes answer 404. */
+  listening?: ListeningStore;
   /** Signs tickets. */
   secret: Buffer;
   now?: () => number;
@@ -120,6 +123,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   const inviteLimit = new RateLimiter(DEVICE_INVITES, PAIR_WINDOW_MS);
   const paths = new LibraryPaths(config.roots);
   const moved = new MovedRecord(config.roots);
+  const { listening } = deps;
   const tags = deps.tags ?? new TagCache();
   /** When each device last asked for a rescan. */
   const scanAsked = new Map<string, number>();
@@ -281,6 +285,62 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
         started = library.scan();
       }
       sendJson(req, res, 200, { started } satisfies ScanResponse);
+      return;
+    }
+
+    if (listening && parts[0] === 'favourites' && parts.length === 1) {
+      allow(req, 'GET');
+      const device = requireDevice(req);
+      sendJson(req, res, 200, listening.favourites(device.userId) satisfies FavouritesResponse);
+      return;
+    }
+
+    if (listening && parts[0] === 'favourites' && parts.length === 3 && (parts[1] === 'songs' || parts[1] === 'albums')) {
+      allow(req, 'PUT', 'DELETE');
+      const device = requireDevice(req);
+      const on = req.method === 'PUT';
+      const named = decodeTrackId(parts[2]);
+      if (named === null) throw new HttpError(400, 'bad-request');
+      const body = on ? await readJsonBody(req) : {};
+      let kept: boolean;
+      if (parts[1] === 'songs') {
+        const track = on ? toSavedTrack(body.track) : null;
+        if (on && (!track || track.id !== parts[2])) throw new HttpError(400, 'bad-request');
+        kept = listening.setSong(device.userId, track ?? { id: parts[2], title: '', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null }, on);
+      } else {
+        const title = typeof body.title === 'string' ? body.title.slice(0, 500) : '';
+        const artist = typeof body.artist === 'string' ? body.artist.slice(0, 500) : '';
+        kept = listening.setAlbum(device.userId, { path: named, title, artist }, on);
+      }
+      if (!kept) throw new HttpError(400, 'too-many');
+      res.writeHead(204).end();
+      return;
+    }
+
+    if (listening && parts[0] === 'plays' && parts.length === 1) {
+      allow(req, 'POST');
+      const device = requireDevice(req);
+      const body = await readJsonBody(req);
+      const track = toSavedTrack(body.track);
+      if (!track || decodeTrackId(track.id) === null) throw new HttpError(400, 'bad-request');
+      listening.addPlay(device.userId, track, typeof body.at === 'string' ? body.at : undefined);
+      res.writeHead(204).end();
+      return;
+    }
+
+    if (listening && parts[0] === 'plays' && parts.length === 2 && parts[1] === 'counts') {
+      allow(req, 'POST');
+      const device = requireDevice(req);
+      const { ids } = await readJsonBody(req, false, MAX_MOVED_BODY_BYTES);
+      if (!Array.isArray(ids) || ids.length > MAX_MOVED_IDS || !ids.every((id) => typeof id === 'string')) throw new HttpError(400, 'bad-request');
+      sendJson(req, res, 200, { counts: listening.counts(device.userId, ids as string[]) } satisfies PlayCountsResponse);
+      return;
+    }
+
+    if (listening && parts[0] === 'history' && parts.length === 1) {
+      allow(req, 'GET');
+      const device = requireDevice(req);
+      sendJson(req, res, 200, listening.history(device.userId) satisfies HistoryResponse);
       return;
     }
 
