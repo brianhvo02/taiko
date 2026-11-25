@@ -90,9 +90,15 @@
     <div class="row"><button class="go" data-test="8">Play test 8</button></div>
   </section>
 
+  <section class="test" id="t9">
+    <h2>9. A whole song through the mixer, with lock screen controls</h2>
+    <p>Round 3. Plays the first song chosen from its start for as long as you like. Lock the phone and check on the lock screen: is the song named, is there a progress bar that moves and can be dragged, do pause, play and the next and previous buttons do something (each press is logged below)? Then try AirPlay from Control Center, if you have a speaker to hand.</p>
+    <div class="row"><button class="go" data-test="9">Play test 9</button></div>
+  </section>
+
   <div class="row"><button id="stop">Stop</button></div>
   <div id="log" aria-live="polite"></div>
-  <p>When you're done, tell Claude for tests 5 to 8: what you heard at the join with the screen on, and whether it kept playing with the phone locked. A screenshot of the grey box helps too.</p>
+  <p>When you're done, tell Claude what the lock screen showed and did in test 9. A screenshot of the grey box helps too.</p>
 </main>
 
 <script>
@@ -368,6 +374,51 @@
       log(`Test 6: playing through the mixer and out of a player (mixer is "${context.state}").`);
     },
     async 7() { await exactJoin('Test 7', 'stream'); },
+    async 9() {
+      const index = Number(songSelect.value);
+      const song = tracks[index];
+      if (!song) throw new Error('choose a song');
+      const whole = await ticket(song.id, 0);
+      const Context = window.AudioContext || window.webkitAudioContext;
+      const context = new Context();
+      cleanup.push(() => context.close());
+      const out = context.createMediaStreamDestination();
+      const speaker = new Audio();
+      speaker.srcObject = out.stream;
+      cleanup.push(() => { speaker.pause(); speaker.srcObject = null; });
+      const one = player(whole.url, true);
+      const gain = context.createGain();
+      // Half volume, to show that the mixer can turn a song down on a phone.
+      gain.gain.value = 0.5;
+      context.createMediaElementSource(one).connect(gain).connect(out);
+      await context.resume();
+      await speaker.play();
+      await one.play();
+      log(`Test 9: playing "${song.title}" at half volume through the mixer and out of a player.`);
+      if (!('mediaSession' in navigator)) { log('  this browser has no lock screen controls for pages'); return; }
+      const session = navigator.mediaSession;
+      session.metadata = new MediaMetadata({ title: song.title, artist: song.artist || 'Taiko trial', album: song.album || '' });
+      const tell = () => {
+        const length = Number.isFinite(one.duration) && one.duration > 0 ? one.duration : song.durationSeconds || 0;
+        try { if (length > 0) session.setPositionState({ duration: length, position: Math.min(one.currentTime, length), playbackRate: 1 }); } catch (error) { log(`  position refused: ${error.name}`); }
+      };
+      const handlers = {
+        play: () => { log('  lock screen: play'); void context.resume(); void speaker.play(); void one.play(); },
+        pause: () => { log('  lock screen: pause'); one.pause(); },
+        nexttrack: () => log('  lock screen: next'),
+        previoustrack: () => log('  lock screen: previous'),
+        seekto: (details) => { log(`  lock screen: dragged to ${Math.round(details.seekTime)} s`); one.currentTime = details.seekTime; tell(); },
+      };
+      for (const [action, handler] of Object.entries(handlers)) {
+        try { session.setActionHandler(action, handler); } catch { log(`  no "${action}" control here`); }
+      }
+      one.addEventListener('play', () => { session.playbackState = 'playing'; tell(); });
+      one.addEventListener('pause', () => { session.playbackState = 'paused'; tell(); });
+      const timer = setInterval(tell, 1000);
+      const watch = setInterval(() => log(`  at ${Math.round(one.currentTime)} s; mixer "${context.state}", speaker ${speaker.paused ? 'paused' : 'playing'}, song ${one.paused ? 'paused' : 'playing'}`), 5000);
+      cleanup.push(() => { clearInterval(timer); clearInterval(watch); session.metadata = null; for (const action of Object.keys(handlers)) { try { session.setActionHandler(action, null); } catch { /* not set */ } } });
+      speaker.addEventListener('pause', () => log('  the speaker player was paused (by the phone, or from the lock screen)'));
+    },
     async 8() { await exactJoin('Test 8', 'silent'); },
   };
 
