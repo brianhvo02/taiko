@@ -82,7 +82,6 @@ input::placeholder { color: var(--unsung); }
 .search form { display: flex; gap: .5rem; }
 .search input[type="search"] { flex: 1; }
 .search input::placeholder { color: var(--quiet); }
-.songs-button { margin-left: auto; }
 .search-results {
   position: absolute;
   top: calc(100% + .6rem);
@@ -214,37 +213,101 @@ input::placeholder { color: var(--unsung); }
   font-size: .9rem;
 }
 
-/* Transport */
+/* The player's bar: the song, the transport over the seek bar, then options, Songs and volume */
 .bar {
   position: fixed;
   inset: auto 0 0 0;
   z-index: 5;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 34rem) minmax(0, 1fr);
+  align-items: center;
+  gap: 1.5rem;
   background: var(--night-raised);
   border-top: 1px solid var(--rule);
-  padding: .75rem var(--gutter) .9rem;
+  padding: .7rem var(--gutter) .8rem;
   font-size: .9rem;
 }
-.seek-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .9rem; align-items: center; }
-.seek-row output { font-variant-numeric: tabular-nums; color: var(--quiet); min-width: 2.6rem; }
-.seek-row output:last-child { text-align: right; }
-.seek-row input { width: 100%; min-width: 0; accent-color: var(--petal); margin: 0; }
-.control-row { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1.1rem; margin-top: .6rem; }
-.art { width: 2.75rem; height: 2.75rem; border-radius: 4px; flex: none; }
-.now { flex: 1 1 12rem; min-width: 0; line-height: 1.35; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: none;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 50%;
+  color: var(--quiet);
+  cursor: pointer;
+}
+.icon-button svg { width: 1.3rem; height: 1.3rem; fill: currentColor; }
+.icon-button:hover, .icon-button[aria-pressed="true"], .icon-button[aria-expanded="true"] { color: var(--sung); }
+.icon-button:disabled { color: var(--rule); cursor: default; }
+.now-zone { display: flex; align-items: center; gap: .8rem; min-width: 0; }
+.art { width: 3rem; height: 3rem; border-radius: 4px; flex: none; }
+.now { min-width: 0; line-height: 1.35; }
 .now div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .now .credit { color: var(--quiet); font-size: .8rem; min-height: 1.35em; }
-.now a { color: inherit; text-decoration-color: var(--unsung); text-underline-offset: .2em; }
-.now a:hover { text-decoration-color: var(--sung); }
+.now a { color: inherit; text-decoration: none; }
+.now a:hover { text-decoration: underline; text-underline-offset: .2em; }
 .other-name { color: var(--quiet); }
-.transport { display: flex; align-items: center; gap: .5rem; }
-.play { min-width: 5.2rem; }
+.center-zone { display: grid; gap: .15rem; min-width: 0; }
+.transport { display: flex; align-items: center; justify-content: center; gap: .9rem; }
+.transport .icon-button { color: var(--sung); }
+.transport .icon-button:disabled { color: var(--unsung); }
+/* Play is the one filled button on the bar. */
+.transport .play { width: 2.6rem; height: 2.6rem; background: var(--sung); color: var(--night); }
+.transport .play:hover { background: #fff; color: var(--night); }
+.seek-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: .7rem; align-items: center; }
+.seek-row output { font-variant-numeric: tabular-nums; color: var(--quiet); font-size: .75rem; min-width: 2.2rem; }
+.seek-row output:first-child { text-align: right; }
+
+/* Sliders: a thin track filled up to the value (--fill, set from script), with a thumb that shows on approach. */
+.bar input[type="range"] {
+  --fill: 0%;
+  appearance: none;
+  width: 100%;
+  min-width: 0;
+  height: 1.1rem;
+  margin: 0;
+  background: none;
+  cursor: pointer;
+}
+.bar input[type="range"]::-webkit-slider-runnable-track { height: .25rem; border-radius: 999px; background: linear-gradient(to right, var(--sung) var(--fill), var(--rule) var(--fill)); }
+.bar input[type="range"]::-moz-range-track { height: .25rem; border-radius: 999px; background: linear-gradient(to right, var(--sung) var(--fill), var(--rule) var(--fill)); }
+.bar input[type="range"]::-webkit-slider-thumb { appearance: none; width: .75rem; height: .75rem; margin-top: -.25rem; border: 0; border-radius: 50%; background: var(--sung); opacity: 0; }
+.bar input[type="range"]::-moz-range-thumb { width: .75rem; height: .75rem; border: 0; border-radius: 50%; background: var(--sung); opacity: 0; }
+.bar input[type="range"]:hover::-webkit-slider-runnable-track, .bar input[type="range"]:focus-visible::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--petal) var(--fill), var(--rule) var(--fill)); }
+.bar input[type="range"]:hover::-moz-range-track, .bar input[type="range"]:focus-visible::-moz-range-track { background: linear-gradient(to right, var(--petal) var(--fill), var(--rule) var(--fill)); }
+.bar input[type="range"]:hover::-webkit-slider-thumb, .bar input[type="range"]:focus-visible::-webkit-slider-thumb { opacity: 1; }
+.bar input[type="range"]:hover::-moz-range-thumb, .bar input[type="range"]:focus-visible::-moz-range-thumb { opacity: 1; }
+.bar input[type="range"]:disabled { cursor: default; }
+
+.side-zone { display: flex; align-items: center; justify-content: flex-end; gap: .35rem; min-width: 0; }
+.volume { display: flex; align-items: center; gap: .15rem; width: 8.5rem; min-width: 0; }
+.options { position: relative; }
+/* The options open above their button. */
+.extras {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + .9rem);
+  z-index: 7;
+  display: grid;
+  gap: .9rem;
+  width: max-content;
+  max-width: min(22rem, calc(100vw - 2rem));
+  padding: 1rem;
+  background: var(--night-raised);
+  border: 1px solid var(--rule);
+  border-radius: .75rem;
+}
+.extras .plain-button { justify-self: start; }
+.extras-volume { display: none; }
 .timing { display: flex; align-items: center; gap: .45rem; }
-.timing output { font-variant-numeric: tabular-nums; min-width: 4.2rem; text-align: center; color: var(--quiet); }
-.toggle { display: flex; align-items: center; gap: .4rem; cursor: pointer; }
+.timing output { font-variant-numeric: tabular-nums; min-width: 6.5rem; text-align: center; color: var(--quiet); }
+.toggle { display: flex; align-items: center; gap: .5rem; cursor: pointer; }
 .toggle input { accent-color: var(--petal); }
-/* On wide screens every control sits in the row; on phones the extra ones fold behind "Options". */
-.more, .narrow-only { display: none; }
-.extras { display: contents; }
 
 /* Songs panel */
 .songs {
@@ -291,24 +354,32 @@ input::placeholder { color: var(--unsung); }
   .search select { max-width: 5.5rem; }
   /* The keyboard's search key submits; the button would push the field off a phone's screen. */
   .search form button { display: none; }
-  .narrow-only { display: inline-block; }
   /* 16px text stops phones zooming the page when a field is tapped. */
   .search input[type="search"], .search select, .songs-filter { font-size: 1rem; }
   .search-results { position: fixed; left: .75rem; right: .75rem; top: var(--top-height); }
   .result { grid-template-columns: 2.75rem minmax(0, 1fr); }
   .result button { grid-column: 2; justify-self: start; }
-  .songs-button { display: none; }
   .part { grid-template-columns: 1fr; }
   .lines { grid-column: 1; }
   .part-name { padding-top: 0; }
   .slots li { grid-template-columns: 4.5rem 1fr; }
-  /* Cover art and title get a row of their own, above the buttons. */
-  .art { order: -2; }
-  .now { order: -1; flex: 1 1 calc(100% - 4rem); }
-  .more { display: inline-block; margin-left: auto; }
-  .extras { display: none; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: .6rem 1.1rem; }
-  .extras.open { display: flex; }
-  .bar { padding-bottom: max(.9rem, env(safe-area-inset-bottom)); }
+  /* The bar stacks: the song, the seek bar, then the transport with Options and Songs at its sides. */
+  .bar { grid-template-columns: auto 1fr auto; gap: .5rem 1rem; padding-bottom: max(.8rem, env(safe-area-inset-bottom)); }
+  .now-zone { grid-column: 1 / -1; }
+  .center-zone { display: contents; }
+  .seek-row { grid-column: 1 / -1; grid-row: 2; }
+  .transport { grid-column: 2; grid-row: 3; gap: 1.4rem; }
+  .side-zone { display: contents; }
+  .options { grid-column: 1; grid-row: 3; }
+  .side-zone > .icon-button { grid-column: 3; grid-row: 3; }
+  .extras { left: 0; right: auto; }
+  /* A phone's own buttons set the volume; where a page may set it too, the slider is among the options. */
+  .side-zone > .volume { display: none; }
+  .extras-volume { display: block; }
+  .extras-volume .volume { width: 100%; }
+  .transport .play { width: 3.2rem; height: 3.2rem; }
+  .transport .play svg { width: 1.6rem; height: 1.6rem; }
+  .icon-button { width: 2.75rem; height: 2.75rem; }
   .songs { inset: 0; width: 100%; z-index: 10; border-left: 0; }
 }
 @media (pointer: coarse) {

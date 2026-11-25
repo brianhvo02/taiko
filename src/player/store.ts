@@ -55,6 +55,11 @@ export interface Snapshot {
   nasFolder: NasListing | null;
   /** Whether the Songs panel is open. */
   songsOpen: boolean;
+  /** From 0 to 1. */
+  volume: number;
+  muted: boolean;
+  /** False where only the device's own buttons set the volume (an iPhone): the slider is left out there. */
+  canSetVolume: boolean;
   /** An invite link waiting for the person to confirm it. */
   pendingPair: PairLink | null;
   pairError: string;
@@ -71,7 +76,7 @@ class PlayerStore {
   private snapshot: Snapshot = {
     tracks: [], queue: [], currentId: null, currentTrack: null, song: null, lyricsLoading: false, lyricsNames: [], songInfo: null, usInfo: null,
     playing: false, duration: 0, offset: 0, showRoman: true, showTranslation: true, notice: '',
-    pairing: loadPairing(), nasState: 'idle', nasFolder: null, songsOpen: false, pendingPair: null, pairError: '',
+    pairing: loadPairing(), nasState: 'idle', nasFolder: null, songsOpen: false, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -112,6 +117,7 @@ class PlayerStore {
 
   constructor() {
     this.audio.preload = 'auto';
+    this.audio.volume = this.snapshot.volume;
     this.audio.addEventListener('play', () => this.set({ playing: true }));
     // Loading a restarted stream pauses the element for a moment; that isn't the listener pausing.
     this.audio.addEventListener('pause', () => {
@@ -537,6 +543,26 @@ class PlayerStore {
     this.set({ offset: Math.round((this.snapshot.offset + seconds) * 100) / 100 });
   }
 
+  setVolume(volume: number): void {
+    const level = Math.max(0, Math.min(1, volume));
+    this.audio.volume = level;
+    this.audio.muted = false;
+    try {
+      localStorage.setItem(VOLUME_KEY, String(level));
+    } catch {
+      // Without storage the volume lasts until the tab closes.
+    }
+    this.set({ volume: level, muted: false });
+  }
+
+  toggleMute(): void {
+    const muted = !this.snapshot.muted;
+    this.audio.muted = muted;
+    // Unmuting a volume of nothing would still be silent.
+    if (!muted && this.snapshot.volume === 0) this.setVolume(0.5);
+    else this.set({ muted });
+  }
+
   setShowRoman(showRoman: boolean): void { this.set({ showRoman }); }
   setShowTranslation(showTranslation: boolean): void { this.set({ showTranslation }); }
   dismissNotice(): void { this.set({ notice: '' }); }
@@ -698,6 +724,24 @@ class PlayerStore {
         })
       : null;
   }
+}
+
+const VOLUME_KEY = 'taiko:volume';
+
+function loadVolume(): number {
+  try {
+    const stored = Number(localStorage.getItem(VOLUME_KEY) ?? '1');
+    return Number.isFinite(stored) && stored >= 0 && stored <= 1 ? stored : 1;
+  } catch {
+    return 1;
+  }
+}
+
+/** Whether a page may set the volume here. On an iPhone the setting is ignored and reads back as 1. */
+function volumeCanBeSet(): boolean {
+  const probe = new Audio();
+  probe.volume = 0.5;
+  return probe.volume === 0.5;
 }
 
 /** Reads parts of a file picked on this device. */

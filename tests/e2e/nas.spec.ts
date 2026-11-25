@@ -56,7 +56,7 @@ test('pairs from an invite link, browses the folders and plays a song with its l
   await page.getByRole('button', { name: 'Next', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Harbour Lights' })).toBeVisible();
   await expect(page).toHaveURL('/nas/play/Music/Midori%20Vale/Night%20Market/10%20-%20harbour.flac');
-  await page.locator('.transport button', { hasText: 'Back' }).click();
+  await page.getByRole('button', { name: 'Previous' }).click();
   await expect(page.locator('.now-title')).toContainText('紙の灯籠');
   await expect(page).toHaveURL('/nas/play/Music/Midori%20Vale/Night%20Market/2%20-%20lanterns.flac');
 

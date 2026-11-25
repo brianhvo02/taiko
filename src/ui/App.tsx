@@ -65,7 +65,6 @@ export function App() {
       <header className="top">
         <a className="brand" href="/" aria-label="Taiko"><span lang="ja">太鼓</span> Taiko</a>
         <SearchBar snap={snap} />
-        {(snap.tracks.length > 0 || snap.pairing) && <button className="plain-button songs-button" type="button" onClick={() => (songsOpen ? store.closeSongs() : store.openSongs())} aria-expanded={songsOpen}>Songs</button>}
       </header>
 
       {!playing && <StartScreen snap={snap} onShowSongs={() => store.openSongs()} />}
@@ -89,7 +88,7 @@ export function App() {
               {snap.notice} <button className="text-button" type="button" onClick={() => store.dismissNotice()}>Dismiss</button>
             </p>
           )}
-          <TransportBar snap={snap} onShowSongs={() => store.openSongs()} />
+          <TransportBar snap={snap} />
         </>
       )}
 

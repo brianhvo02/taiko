@@ -45,6 +45,8 @@ test('plays a song with lyrics combined from three versions and named by the cat
   await expect(lines.first()).toHaveAttribute('data-state', 'past');
   expect(await fill(0, 1)).toBe(1);
 
+  // The lyric options open from the bar and close on a click elsewhere.
+  await page.getByRole('button', { name: 'Options' }).click();
   await page.getByLabel('Romanization').uncheck();
   await expect(page.locator('.lyrics .roman').first()).toBeHidden();
   await expect(page.locator('.lyrics .translation').first()).toBeVisible();
@@ -91,6 +93,30 @@ test('lists the songs, walks them, and pairs lyrics with songs by name', async (
   await expect(page.locator('.lyrics .line').first()).toContainText('紙の灯籠');
 });
 
+test('sets the volume, mutes, and remembers the volume', async ({ page }) => {
+  const volume = () => page.evaluate(() => {
+    const audio = (window as unknown as { taikoStore: { audio: HTMLAudioElement } }).taikoStore.audio;
+    return { volume: audio.volume, muted: audio.muted };
+  });
+  await pick(page, 'Choose files', [lanterns()]);
+  const slider = page.getByLabel('Volume');
+  await expect(slider).toHaveValue('1');
+
+  await slider.fill('0.3');
+  expect((await volume()).volume).toBeCloseTo(0.3);
+  await page.getByRole('button', { name: 'Mute', exact: true }).click();
+  expect(await volume()).toMatchObject({ muted: true });
+  await expect(slider).toHaveValue('0');
+  await page.getByRole('button', { name: 'Unmute' }).click();
+  expect(await volume()).toMatchObject({ muted: false });
+  await expect(slider).toHaveValue('0.3');
+
+  await page.reload();
+  await pick(page, 'Choose files', [lanterns()]);
+  await expect(page.getByLabel('Volume')).toHaveValue('0.3');
+  expect((await volume()).volume).toBeCloseTo(0.3);
+});
+
 test('says so when a file is neither audio nor lyrics', async ({ page }) => {
   await pick(page, 'Choose files', [{ name: 'cover.jpg', content: 'not a song' }]);
   await expect(page.locator('.start .notice')).toHaveText('cover.jpg is not audio or lyrics, so it was left out.');
@@ -109,6 +135,11 @@ test.describe('on a phone', () => {
     await expect(page.getByLabel('Romanization')).toBeHidden();
     await page.getByRole('button', { name: 'Options' }).click();
     await expect(page.getByLabel('Romanization')).toBeVisible();
+    // On a phone the volume slider sits with the options, not on the bar.
+    await expect(page.getByLabel('Volume')).toHaveCount(2);
+    await expect(page.getByLabel('Volume').first()).toBeVisible();
+    await page.mouse.click(195, 300);
+    await expect(page.getByLabel('Romanization')).toBeHidden();
 
     // The Songs panel covers the screen, and choosing a song closes it.
     await page.getByRole('button', { name: 'Songs' }).click();
