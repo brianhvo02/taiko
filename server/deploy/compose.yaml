@@ -1,0 +1,41 @@
+# Taiko's NAS server. Every value of yours lives in .env next to this file (copy .env.example to .env).
+#
+#   npm run server:build            (in the repo; makes server/dist/server.mjs, which the image copies)
+#   docker compose up -d --build    (in this folder)
+#
+# Then make a pairing code and open its link on the device to pair:
+#   docker compose exec taiko-server node /app/server.mjs invite
+# Paired devices:
+#   docker compose exec taiko-server node /app/server.mjs devices
+#   docker compose exec taiko-server node /app/server.mjs unpair <id or name>
+services:
+  taiko-server:
+    image: ${TAIKO_IMAGE:-taiko-server:latest}
+    build:
+      context: ..
+    container_name: taiko-server
+    restart: unless-stopped
+    # PUBLIC_BASE, LIBRARY_ROOTS and the optional settings come from .env (documented in .env.example). The server
+    # and every subcommand refuse to start without PUBLIC_BASE.
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      PORT: "8080"
+    volumes:
+      # LIBRARY_MOUNT (a folder on the host) is bound read-only at /library, and LIBRARY_ROOTS names folders under
+      # it. The server never writes to your library. create_host_path: false means Docker never makes a missing
+      # folder, so an unmounted drive stays missing instead of becoming an empty folder.
+      - type: bind
+        source: ${LIBRARY_MOUNT}
+        target: /library
+        read_only: true
+        bind:
+          create_host_path: false
+      # Pairing codes (hashed), paired devices (token hashes) and the secret that signs audio links.
+      - taiko-data:/data
+    # Point your HTTPS reverse proxy at this port; PUBLIC_BASE is the address the proxy serves it under.
+    ports:
+      - "${HOST_PORT:-8080}:8080"
+
+volumes:
+  taiko-data:

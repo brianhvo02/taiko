@@ -1,0 +1,25 @@
+node_modules
+dist
+*.tsbuildinfo
+.cache/
+.DS_Store
+
+# Real music and lyrics used for local testing never go in the repo
+fixtures/local
+
+# Self-hosting settings (values stay on the host)
+.env
+server/deploy/.env
+server/deploy/compose.override.yaml
+
+# Music for `npm run server:dev`
+fixtures/music
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+!.env.example
+
+# The owner deploy's settings (TAIKO_NAS_HOST, TAIKO_CADDY_SITE; read by server/deploy/deploy.sh)
+.env.local

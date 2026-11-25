@@ -1,0 +1,38 @@
+{
+  "name": "taiko",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "server:build": "node server/build.mjs",
+    "server:dev": "npm run server:build && node server/dev.mjs",
+    "server:deploy": "bash server/deploy/deploy.sh"
+  },
+  "dependencies": {
+    "@fontsource/shippori-mincho": "^5.3.0",
+    "@fontsource/zen-kaku-gothic-new": "^5.3.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "esbuild": "0.28.2",
+    "jsdom": "^30.1.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents": false
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Taiko",
+  "short_name": "Taiko",
+  "description": "Plays your music with its lyrics in time.",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#17162b",
+  "theme_color": "#17162b",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

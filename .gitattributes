@@ -1,0 +1,2 @@
+# Line endings stay LF everywhere: the deploy scripts are piped to the NAS over ssh, where CRLF breaks bash.
+* text=auto eol=lf
