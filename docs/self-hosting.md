@@ -65,7 +65,7 @@ docker compose exec taiko-server node /app/server.mjs unpair <id|name>  # remove
 
 4. Run `npm run server:deploy`.
 
-The script checks the NAS's `.env` first and refuses to go on if a required setting is missing or `PUBLIC_BASE` doesn't match the route. Then it bundles the server, builds the image for linux/amd64, ships it over ssh, writes `~/taiko-server/compose.yaml`, starts the service and adds a `/taiko/*` route to the Caddy site (`~/caddy/Caddyfile`, backed up first, validated, reloaded and never restarted). It never writes the NAS's `.env` or `compose.override.yaml`. Leave `TAIKO_CADDY_SITE` unset to skip Caddy.
+The script checks the NAS's `.env` first and refuses to go on if a required setting is missing or `PUBLIC_BASE` doesn't match the route. Then it bundles the server, builds the image for linux/amd64, ships it over ssh, writes `~/taiko-server/compose.yaml`, starts the service, removes the images earlier deploys left on the NAS, and adds a `/taiko/*` route to the Caddy site (`~/caddy/Caddyfile`, backed up first, validated, reloaded and never restarted). It never writes the NAS's `.env` or `compose.override.yaml`. Leave `TAIKO_CADDY_SITE` unset to skip Caddy.
 
 The compose file publishes the server on the host's port 8080. If that port is taken on the NAS, set `HOST_PORT` in its `.env`.
 

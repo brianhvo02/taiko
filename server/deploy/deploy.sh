@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The owner's deploy, run from the repo: npm run server:deploy
-# Builds the server image, ships it to the NAS over ssh, writes the generic compose file, (re)starts the service and
+# Builds the server image, ships it to the NAS over ssh, writes the generic compose file, (re)starts the service,
+# removes the images of earlier deploys and
 # adds the /taiko/* route to Caddy. The NAS's own settings stay on the NAS, in ~/taiko-server/.env and
 # ~/taiko-server/compose.override.yaml (the proxy's network, extra mounts); this script never writes either.
 # Adapted from Seikou's server/deploy/deploy.sh.
@@ -142,6 +143,20 @@ fi
 # --no-build: the compose file's build context is the repo, which the NAS doesn't have.
 ssh -- "$HOST" "cd $REMOTE_DIR && TAIKO_IMAGE=taiko-server:latest docker compose $COMPOSE_FILES up -d --no-build"
 echo "    A manual restart must name the same files: cd $REMOTE_DIR && docker compose $COMPOSE_FILES up -d --no-build"
+
+# Every deploy tags the image with its commit, so the earlier ones pile up on the NAS. Now that the service runs
+# the new one, the others go: every taiko-server tag but this deploy's and "latest". A tag that can't be removed
+# (an image still in use) is left, and never fails the deploy.
+echo "==> Removing earlier taiko-server images from $HOST"
+ssh -- "$HOST" "bash -s -- $(printf '%q' "$TAG")" <<'SH' || echo "    Could not tidy the old images; the deploy itself is done."
+keep="$1"
+docker images taiko-server --format '{{.Tag}}' | while read -r tag; do
+  case "$tag" in
+    latest|"$keep"|'<none>'|'') ;;
+    *) docker rmi "taiko-server:$tag" >/dev/null 2>&1 && echo "    removed taiko-server:$tag" || echo "    kept taiko-server:$tag (still in use)" ;;
+  esac
+done
+SH
 
 if [ -n "$CADDY_SITE" ]; then
   echo "==> Routing $ROUTE/* in Caddy"
