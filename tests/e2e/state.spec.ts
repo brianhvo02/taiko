@@ -182,7 +182,7 @@ test('playlists: make one from a song, add to it, reorder, play through, and fin
   await expect(panel.getByText('No playlists yet.')).toBeVisible();
 });
 
-test('offers to continue where the listener left off, with the queue, the moment and the song\'s lyric timing', async ({ page }) => {
+test('comes back to where the listener left off, with the queue, the moment and the song\'s lyric timing', async ({ page }) => {
   await mockCatalog(page);
   await pair(page, 'Resume test');
   await page.goto('/nas/play/Music/Midori%20Vale/Night%20Market/2%20-%20lanterns.flac');
@@ -202,25 +202,45 @@ test('offers to continue where the listener left off, with the queue, the moment
   await expect(play(page)).toHaveText('Play');
   const left = await shown(page);
 
-  // A new visit to the first screen offers it back.
+  // A new visit to the first screen has the song back in the bar, stopped at that moment and waiting for Play.
   await page.goto('/');
   await listen(page);
-  const offer = page.locator('.resume');
-  await expect(offer).toContainText('Paper Lanterns, Midori Vale, at 0:2');
-  await expect(offer).toContainText('2 more songs in the queue');
-  await offer.getByRole('button', { name: 'Continue' }).click();
   await expect(title(page)).toHaveText('紙の灯籠 (Paper Lanterns)');
-  await expect(play(page)).toHaveText('Pause');
+  await expect(play(page)).toHaveText('Play');
   await expect.poll(() => shown(page)).toBeGreaterThan(left - 0.3);
-  expect(await shown(page)).toBeLessThan(left + 6);
-  await expectInTime(page, 'after continuing');
+  expect(await shown(page)).toBeLessThan(left + 0.3);
+  await expect(page).toHaveURL('/');
+  await expect(page.locator('.lyrics')).toHaveCount(0);
+  await play(page).click();
+  await expect(play(page)).toHaveText('Pause');
+  await expectInTime(page, 'after coming back');
+  await play(page).click();
+  await expect(play(page)).toHaveText('Play');
+  const again = await shown(page);
+  expect(again).toBeGreaterThan(left - 0.3);
+
+  // Reloading the song's own page comes back to the moment too, with its lyrics showing.
+  await page.getByRole('button', { name: 'Lyrics' }).click();
   await expect(page).toHaveURL('/nas/play/Music/Midori%20Vale/Night%20Market/2%20-%20lanterns.flac');
+  await page.reload();
+  await listen(page);
+  await expect(page.locator('.lyrics .line')).toHaveCount(3);
+  await expect.poll(() => shown(page)).toBeGreaterThan(again - 0.3);
+  expect(await shown(page)).toBeLessThan(again + 0.3);
+  await expect(play(page)).toHaveText('Play');
+  // A link to a moment in the song is followed as written.
+  await page.goto('/nas/play/Music/Midori%20Vale/Night%20Market/2%20-%20lanterns.flac?t=5');
+  await expect.poll(() => shown(page)).toBeGreaterThan(4.7);
+  expect(await shown(page)).toBeLessThan(5.3);
+  await page.goto('/');
+  await expect(title(page)).toHaveText('紙の灯籠 (Paper Lanterns)');
 
   // The nudge and the hidden romanization came back with it; the queue did too.
   await page.getByRole('button', { name: 'Options' }).click();
   await expect(page.getByText('0.10 s later')).toBeVisible();
   await expect(page.getByLabel('Romanization')).not.toBeChecked();
   await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Lyrics' }).click();
   await next(page).click();
   await expect(page.getByRole('heading', { name: '港の灯' })).toBeVisible();
   await page.getByRole('button', { name: 'Options' }).click();

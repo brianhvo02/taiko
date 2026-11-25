@@ -108,7 +108,6 @@ export interface Snapshot {
   /** The playlist open in the panel, or null for the list of them. */
   openPlaylist: string | null;
   /** Where the listener was last time, offered on the first screen. */
-  resume: Session | null;
   /** From 0 to 1. */
   volume: number;
   muted: boolean;
@@ -135,7 +134,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, resume: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -177,6 +176,8 @@ class PlayerStore {
   /** The song played to its end. The element's own `ended` can't be trusted for a stream cut by an exact seek. */
   private finished = false;
   private resumeAfterSeek = false;
+  /** While a saved session is being restored, the moment it is going back to. */
+  private restoringAt: number | null = null;
   /** The object URL of the cut stream now playing, for a file on this device. */
   private cutUrl = '';
   /** Goes up on every seek, so the lyrics know to follow the song again. */
@@ -227,11 +228,14 @@ class PlayerStore {
     // The address bar says where to start: a NAS folder or song from a link, else the first screen.
     addEventListener('popstate', () => void this.applyRoute(parseRoute(location.pathname, location.search)));
     const route = parseRoute(location.pathname, location.search);
-    if (route.kind !== 'home') void this.applyRoute(route);
-    else {
-      this.offerResume();
-      if (this.snapshot.pairing) void this.openFolder(loadLastPath());
-    }
+    // The song the listener left comes back with its queue, stopped where it was. A link to another song, or to a
+    // moment in one, is followed as it is written.
+    const saved = this.savedSession();
+    const left = saved && route.kind === 'play' && route.at === 0 && trackIdOf(route.path) === saved.current;
+    if (saved && left) void this.restoreSession(saved, true);
+    else if (route.kind !== 'home') void this.applyRoute(route);
+    else if (this.snapshot.pairing) void this.openFolder(loadLastPath());
+    if (saved && route.kind !== 'play') void this.restoreSession(saved, false);
     if (this.snapshot.pairing) void this.loadLibrary();
     // Where the listener is gets saved as they go, and when the page is put away.
     setInterval(() => { if (!this.audio.paused) this.saveSessionNow(); }, 5000);
@@ -784,32 +788,34 @@ class PlayerStore {
       source,
       tracks: queue.filter((track) => track.nas).map(savedOf),
       current: currentTrack.nas.id,
-      position: this.finished ? 0 : this.position(),
+      position: this.restoringAt ?? (this.finished ? 0 : this.position()),
     });
   }
 
-  /** On the first screen, offers the session saved last time, if it was on the NAS this device is paired with. */
-  private offerResume(): void {
+  /** The session saved last time, if it was on the NAS this device is paired with. */
+  private savedSession(): Session | null {
     const saved = loadSession();
-    if (saved && this.snapshot.pairing && saved.nas === this.snapshot.pairing.base) this.set({ resume: saved });
+    return saved && this.snapshot.pairing && saved.nas === this.snapshot.pairing.base ? saved : null;
   }
 
-  /** Takes up the offer: the same queue, the same song, from where it stopped. */
-  async resumeSession(): Promise<void> {
-    const saved = this.snapshot.resume;
-    if (!saved) return;
+  /**
+   * Puts the listener back where they were: the same queue, the same song, stopped at the same moment and waiting
+   * for Play (a page can't start sound without a tap). `show` opens the song's lyrics; otherwise it only fills the bar.
+   */
+  private async restoreSession(saved: Session, show: boolean): Promise<void> {
     const queue = saved.tracks.map(fromSaved);
     const id = `nas:${saved.current}`;
-    this.setQueue(queue, saved.source, queue.findIndex((track) => track.id === id));
-    this.set({ resume: null });
-    await this.select(id, false, 'push');
-    if (this.snapshot.currentId !== id || !this.audio.src) return;
-    if (saved.position > 1) {
-      this.resumeAfterSeek = true;
-      this.seek(saved.position);
-      if (this.exact) return;
+    const index = queue.findIndex((track) => track.id === id);
+    if (index < 0) return;
+    // Until the song is back at its moment, what is saved stays as it was: a visit cut short mustn't forget the place.
+    this.restoringAt = saved.position;
+    try {
+      this.setQueue(queue, saved.source, index);
+      await this.select(id, false, show ? 'none' : 'replace');
+      if (this.snapshot.currentId === id && this.audio.src && saved.position > 1) this.seek(saved.position);
+    } finally {
+      this.restoringAt = null;
     }
-    this.audio.play().catch(() => {});
   }
 
   /** Looks a NAS song up again in its folder. False when the NAS no longer has it. */
@@ -1037,7 +1043,7 @@ class PlayerStore {
     if (error instanceof NasError && error.status === 401) {
       clearPairing();
       this.set({
-        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, resume: null, songsTab: 'device',
+        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, songsTab: 'device',
         library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [],
         notice: 'This device is no longer paired with the NAS. Ask its owner for a new invite.',
       });
@@ -1117,7 +1123,7 @@ class PlayerStore {
       this.audio.load();
     }
     this.set({
-      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, resume: null, songsTab: 'device',
+      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, songsTab: 'device',
       library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [], view: 'library',
       ...(playingFromNas ? { currentId: null, currentTrack: null, queue: [], song: null, lyricsNames: [], songInfo: null, usInfo: null } : {}),
     });

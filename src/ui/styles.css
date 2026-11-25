@@ -195,10 +195,6 @@ input::placeholder { color: var(--unsung); }
 .pair-form input, .dialog input { font-size: var(--body); color: var(--hide); }
 .pair-form button { justify-self: start; }
 .fine-print { max-width: 44rem; color: var(--unsung); font-size: var(--small); }
-/* Last time's song, offered back. Marked in brass, as what is "now" is. */
-.resume { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem 2rem; max-width: 44rem; padding: 1rem 1.25rem; border-left: 3px solid var(--brass); background: var(--night-raised); border-radius: 0 var(--corner) var(--corner) 0; }
-.resume h2 { font-size: var(--body); font-weight: 500; }
-.resume p { color: var(--quiet); }
 
 /*
  * The library. The covers are the only pictures in the player, so they sit straight on the night with no frame;

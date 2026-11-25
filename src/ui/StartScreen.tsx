@@ -3,7 +3,7 @@ import { defaultDeviceName, normalizeBase } from '../nas/client';
 import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
 import { Library } from './Library';
-import { canPickFolder, formatTime, pickFiles } from './format';
+import { canPickFolder, pickFiles } from './format';
 
 /**
  * The first screen opens with what the player does: a line being sung, filling word by word, with its
@@ -117,26 +117,6 @@ function NasWay({ snap, onShowSongs }: { snap: Snapshot; onShowSongs: () => void
   );
 }
 
-/** Offers to pick up where the listener left off last time: the same queue and song, from the same moment. */
-function Resume({ snap }: { snap: Snapshot }) {
-  const saved = snap.resume;
-  const song = saved?.tracks.find((track) => track.id === saved.current);
-  if (!saved || !song) return null;
-  const rest = saved.tracks.length - 1;
-  return (
-    <section className="resume">
-      <div>
-        <h2>Where you left off</h2>
-        <p>
-          {song.title}{song.artist && `, ${song.artist}`}, at {formatTime(saved.position)}
-          {rest > 0 && ` (${rest} more ${rest === 1 ? 'song' : 'songs'} in the queue)`}
-        </p>
-      </div>
-      <button className="plain-button primary-button" type="button" onClick={() => void store.resumeSession()}>Continue</button>
-    </section>
-  );
-}
-
 /**
  * The first screen. With nothing to list it says what the player does and how to bring music in; once there is
  * music (a NAS library, or songs picked here) it is the library, with the ways to add more under it.
@@ -147,7 +127,6 @@ export function StartScreen({ snap, stocked, quietNotice, onShowSongs }: { snap:
     <main className={stocked ? 'start stocked' : 'start'}>
       {!stocked && <HeroLine />}
       {!stocked && <p className="lede">Taiko plays your music and fills in each word of the lyrics as it is sung.</p>}
-      {front && <Resume snap={snap} />}
       {stocked && <Library snap={snap} />}
       {front && <Ways snap={snap} stocked={stocked} quietNotice={quietNotice} onShowSongs={onShowSongs} />}
     </main>
