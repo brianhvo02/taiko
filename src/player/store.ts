@@ -832,16 +832,20 @@ class PlayerStore {
 
     let source: LyricsSource | null = null;
     const otherSong: string[] = [];
+    const opened: { source: LyricsSource; name: string; timed: boolean }[] = [];
     for (const item of texts) {
-      let opened: LyricsSource;
       try {
-        opened = openLyrics(item.text, item.name);
+        const one = openLyrics(item.text, item.name);
+        opened.push({ source: one, name: item.name, timed: songFromDoc(one.doc).timed });
       } catch {
         unreadable.push(item.name);
-        continue;
       }
-      if (!source) source = opened;
-      else if (sameSong(source, opened)) mergeInto(source, opened);
+    }
+    // Lyrics that follow the song come before lyrics that are only words: with both beside a song, the timed ones show.
+    const anyTimed = opened.some((item) => item.timed);
+    for (const item of opened.filter((entry) => entry.timed || !anyTimed)) {
+      if (!source) source = item.source;
+      else if (sameSong(source, item.source)) mergeInto(source, item.source);
       else otherSong.push(item.name);
     }
     this.source = source;

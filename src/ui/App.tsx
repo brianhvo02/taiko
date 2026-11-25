@@ -93,7 +93,8 @@ export function App() {
       {lyricsShown && (
         <>
           {snap.song && <LyricsView song={snap.song} />}
-          {snap.song && !snap.song.wordTimed && <p className="timing-note">These lyrics are timed by line, not by word</p>}
+          {snap.song && snap.song.timed && !snap.song.wordTimed && <p className="timing-note">These lyrics are timed by line, not by word</p>}
+          {snap.song && !snap.song.timed && <p className="timing-note">These lyrics have no timing, so they don't follow the song</p>}
           {!snap.song && (
             <main className="no-lyrics">
               {snap.lyricsLoading ? <p>Loading lyrics</p> : (

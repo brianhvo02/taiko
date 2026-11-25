@@ -222,7 +222,7 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
               {snap.song?.hasTranslation && (
                 <label className="toggle"><input type="checkbox" checked={snap.showTranslation} onChange={(e) => store.setShowTranslation(e.currentTarget.checked)} /> Translation</label>
               )}
-              {snap.song && !snap.song.wordTimed && (
+              {snap.song && snap.song.timed && !snap.song.wordTimed && (
                 <label className="toggle" title="These lyrics only say when each line is sung. Sweeping fills a line evenly over its length.">
                   <input type="checkbox" checked={snap.sweepLines} onChange={(e) => store.setSweepLines(e.currentTarget.checked)} /> Sweep across each line
                 </label>
@@ -240,12 +240,12 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
                   <p className="toggle-note">Songs whose files say how loud they are play at about the same loudness. While this is on, AirPlay can't carry the sound.</p>
                 </>
               )}
-              {snap.song && (
+              {snap.song?.timed && (
                 <label className="toggle" title="When this is off, pressing a line does nothing, so a stray touch can't move the song.">
                   <input type="checkbox" checked={snap.seekOnLine} onChange={(e) => store.setSeekOnLine(e.currentTarget.checked)} /> Press a line to go to it
                 </label>
               )}
-              {snap.song && (
+              {snap.song?.timed && (
                 <div className="timing" role="group" aria-label="Lyric timing">
                   <button className="plain-button" type="button" onClick={() => store.nudge(-0.05)}>Earlier</button>
                   <output>{offsetText}</output>

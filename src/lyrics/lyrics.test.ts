@@ -27,6 +27,19 @@ describe('parseTime', () => {
 });
 
 describe('openLyrics', () => {
+  it('reads lyrics with no timing at all as lines to read, stanza by stanza', () => {
+    // As Apple sends them: the same wrapper, `itunes:timing="None"`, and plain lines with no times or words marked.
+    const untimed = HEAD_OPEN.replace('itunes:timing="Word"', 'itunes:timing="None"') + '<translations/>' + WRITERS + HEAD_CLOSE
+      + '<body><div><p>紙の灯籠</p><p>夜を渡る</p></div><div><p>また明日</p><p> </p></div></body></tt>';
+    const song = songFromDoc(openLyrics(wrap(untimed), 'song.json').doc);
+    expect(song.timed).toBe(false);
+    expect(song.wordTimed).toBe(false);
+    expect(song.parts.map((part) => part.lines.map((line) => text(line.original)))).toEqual([['紙の灯籠', '夜を渡る'], ['また明日']]);
+    expect(song.writers).toEqual(['Midori Vale']);
+    // Timed lyrics say so.
+    expect(songFromDoc(openLyrics(ttml('<translations/>'), 'song.ttml').doc).timed).toBe(true);
+  });
+
   it('reads an Apple Music JSON response with its song ID', () => {
     const source = openLyrics(wrap(ttml('<translations/>', WRITERS, ROMAN)), 'song.json');
     expect(source.catalogId).toBe('123456');

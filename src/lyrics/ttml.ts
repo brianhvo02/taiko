@@ -44,6 +44,11 @@ export interface Song {
    * plain LRC file, or Apple's line-timed lyrics. Such a line lights up whole; it is not swept word by word.
    */
   wordTimed: boolean;
+  /**
+   * Whether the lines say when they are sung. False for lyrics that are words only (Apple marks them
+   * `itunes:timing="None"`): they are shown to read, stanza by stanza, and don't follow the song.
+   */
+  timed: boolean;
 }
 
 /** An open lyrics file: the TTML document, and the JSON it came wrapped in, if any. */
@@ -87,7 +92,7 @@ function pieces(node: Element, begin: number, end: number, out: Piece[] = []): P
   return out;
 }
 
-/** Builds the song a document describes. Throws when it has no timed lines. */
+/** Builds the song a document describes. Throws when it has no lines. */
 export function songFromDoc(doc: Document): Song {
   const body = all(doc, 'body')[0];
   if (!body) throw new Error('no body');
@@ -106,11 +111,14 @@ export function songFromDoc(doc: Document): Song {
   }
 
   const parts: (SongPart & { node: Node | null })[] = [];
+  // Lyrics with no times at all are kept as lines to read; among timed lines, one without a time is left out.
+  const timed = all(body, 'p').some((p) => !Number.isNaN(parseTime(p.getAttribute('begin'))));
   for (const p of all(body, 'p')) {
-    const begin = parseTime(p.getAttribute('begin'));
+    const begin = timed ? parseTime(p.getAttribute('begin')) : 0;
     if (Number.isNaN(begin)) continue;
+    if (!timed && !(p.textContent ?? '').trim()) continue;
     const end = parseTime(p.getAttribute('end'));
-    const lineEnd = Number.isNaN(end) ? begin + 5 : end;
+    const lineEnd = !timed ? 0 : Number.isNaN(end) ? begin + 5 : end;
     const key = p.getAttribute('itunes:key') ?? '';
     const romanEntry = romanByKey.get(key);
     let part = parts[parts.length - 1];
@@ -127,7 +135,7 @@ export function songFromDoc(doc: Document): Song {
       translation: translationByKey.get(key) ?? '',
     });
   }
-  if (!parts.length) throw new Error('no timed lines');
+  if (!parts.length) throw new Error('no lines');
 
   const lines = parts.flatMap((part) => part.lines);
   return {
@@ -139,6 +147,7 @@ export function songFromDoc(doc: Document): Song {
     hasTranslation: lines.some((line) => line.translation),
     // Word-timed when any word in the song starts or ends at a time that isn't its line's.
     wordTimed: lines.some((line) => line.original.some((piece) => piece.kind === 'word' && (piece.begin !== line.begin || piece.end !== line.end))),
+    timed,
   };
 }
 

@@ -264,3 +264,26 @@ test('keeps the songs picked here for the next visit, with their lyrics, until t
   await expect(page.getByText('Music on this device')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Songs' })).toHaveCount(0);
 });
+
+test('lyrics with no timing are shown to read, and timed lyrics for the same song are preferred', async ({ page }) => {
+  // As Apple sends unsynced lyrics: the usual wrapper, lines with no times.
+  const untimed = JSON.stringify({ data: [{ id: '1', type: 'syllable-lyrics', attributes: { ttmlLocalizations:
+    '<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" itunes:timing="None" xml:lang="en"><head><metadata/></head>'
+    + '<body><div><p>First line to read</p><p>Second line to read</p></div><div><p>A line of the next stanza</p></div></body></tt>' } }] });
+  await pick(page, 'Choose files', [harbour(), { name: 'Harbour.json', content: untimed }]);
+  const lines = page.locator('.lyrics .line');
+  await expect(lines).toHaveText(['First line to read', 'Second line to read', 'A line of the next stanza']);
+  await expect(page.getByText("These lyrics have no timing, so they don't follow the song")).toBeVisible();
+  // Every line is lit, none is a button, and there is no timing to adjust.
+  await expect(lines.first()).toHaveAttribute('data-state', 'active');
+  await expect(lines.nth(2)).toHaveAttribute('aria-disabled', 'true');
+  await page.getByRole('button', { name: 'Options' }).click();
+  await expect(page.getByRole('group', { name: 'Lyric timing' })).toHaveCount(0);
+  await expect(page.getByLabel('Press a line to go to it')).toHaveCount(0);
+
+  // A timed file for the same song takes its place, without a complaint about the untimed one.
+  await pick(page, 'Add lyrics or music', [{ name: 'Harbour.lrc', content: lyrics.lrc }]);
+  await expect(lines.first()).toHaveText('Paper lanterns');
+  await expect(page.getByText("These lyrics have no timing, so they don't follow the song")).toHaveCount(0);
+  await expect(page.locator('.toast')).toHaveCount(0);
+});

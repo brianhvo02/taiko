@@ -72,7 +72,7 @@ export function LyricsView({ song }: { song: Song }) {
           el.append(sentence);
         }
         el.addEventListener('click', () => {
-          if (!store.getSnapshot().seekOnLine) return;
+          if (!store.getSnapshot().seekOnLine || !song.timed) return;
           store.seek(line.begin + store.getSnapshot().offset);
           holdUntil = 0;
         });
@@ -81,6 +81,19 @@ export function LyricsView({ song }: { song: Song }) {
       }
       section.append(holder);
       root.append(section);
+    }
+
+    // Lyrics with no timing are simply there to read: every line lit, none of them a button, nothing following the song.
+    if (!song.timed) {
+      root.classList.add('still', 'untimed');
+      for (const line of lines) {
+        line.el.dataset.state = 'active';
+        line.el.tabIndex = -1;
+        line.el.setAttribute('aria-disabled', 'true');
+        for (const word of line.words) word.el.style.setProperty('--p', '1');
+      }
+      scrollTo(0, 0);
+      return () => root.classList.remove('still', 'untimed');
     }
 
     const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
