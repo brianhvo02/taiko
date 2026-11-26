@@ -930,3 +930,52 @@ test('a join shaped in a playlist: leaves the first song early, fades, starts th
   await dialog.getByRole('button', { name: 'Put it back to the usual' }).click();
   await expect(panel.locator('.song', { hasText: 'Paper Lanterns' })).not.toContainText('fades');
 });
+
+test('remote control: one of your devices sees another, steers it, and takes its music over', async ({ page, browser }) => {
+  await mockCatalog(page);
+  await pair(page, 'Kitchen speaker');
+  const other = await (await browser.newContext()).newPage();
+  await pair(other, 'Phone in hand');
+  type Store = { position(): number; getSnapshot(): { currentTrack: { title: string } | null; playing: boolean; queue: unknown[] } };
+  const playing = (on: Page) => on.evaluate(() => { const store = (window as unknown as { taikoStore: Store }).taikoStore; return { title: store.getSnapshot().currentTrack?.title ?? null, playing: store.getSnapshot().playing, at: store.position(), queue: store.getSnapshot().queue.length }; });
+
+  // The speaker plays an album.
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await page.locator('.library .songlist .song', { hasText: 'Paper Lanterns' }).click();
+  await expect(page.locator('.play')).toHaveText('Pause');
+
+  // The phone sees it under Other devices, with what it is playing.
+  await other.getByRole('button', { name: 'Open from NAS' }).click();
+  const panel = other.getByRole('complementary', { name: 'Songs' });
+  await panel.getByRole('tab', { name: 'Other devices' }).click();
+  const device = panel.locator('.device', { hasText: 'Kitchen speaker' });
+  await expect(device.locator('.song-title')).toHaveText('Paper Lanterns');
+
+  // It pauses the speaker, plays it again, moves it, and sends it on to the next song.
+  await device.getByRole('button', { name: 'Pause' }).click();
+  await expect(page.locator('.play')).toHaveText('Play');
+  await expect(device.getByRole('button', { name: 'Play', exact: true })).toBeVisible();
+  await expect(device.locator('.song-detail')).toContainText('paused');
+  await device.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await device.getByLabel('Position in the song on Kitchen speaker').fill('30');
+  await device.getByLabel('Position in the song on Kitchen speaker').dispatchEvent('pointerup');
+  await expect.poll(async () => (await playing(page)).at).toBeGreaterThan(29.5);
+  await device.getByRole('button', { name: 'Next' }).click();
+  await expect.poll(async () => (await playing(page)).title).toBe('港の灯');
+  await expect(device.locator('.song-title')).toHaveText('港の灯');
+
+  // "Play here" brings the queue and the place in the song to the phone, and the speaker falls quiet.
+  await expect.poll(async () => (await playing(page)).at, { timeout: 15_000 }).toBeGreaterThan(4);
+  await device.getByRole('button', { name: 'Play here' }).click();
+  await expect.poll(async () => (await playing(other)).title).toBe('港の灯');
+  await expect.poll(async () => (await playing(other)).playing).toBe(true);
+  await expect.poll(async () => (await playing(other)).at).toBeGreaterThan(3);
+  expect((await playing(other)).queue).toBe(3);
+  await expect(page.locator('.play')).toHaveText('Play');
+
+  // The speaker's page is closed: it leaves the phone's list, and the tab with it.
+  await page.close();
+  await expect(panel.getByRole('tab', { name: 'Other devices' })).toHaveCount(0);
+  await other.context().close();
+});

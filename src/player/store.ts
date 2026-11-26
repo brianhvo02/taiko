@@ -18,9 +18,11 @@ import {
 } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
+import { openLive, sendCommand, sendState } from '../nas/live';
 import { noteChanges, reconcile, transitionKey, withoutLostTransitions } from '../shared/playlists';
 import type { PlaylistAccess, SharedPlaylist, Transition } from '../shared/playlists';
-import type { FavouritesResponse, HistoryResponse, InviteResponse, NasUser } from '../shared/api';
+import { MAX_SHARED_QUEUE } from '../shared/api';
+import type { FavouritesResponse, HistoryResponse, InviteResponse, LiveDevice, NasUser, PlaybackState, RemoteCommand } from '../shared/api';
 import {
   cleanName, loadOffsets, loadPendingPlays, loadPlaylistSync, loadPlaylists, loadSession, loadSettings, saveOffset, savePendingPlays, savePlaylistSync, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
 } from './persist';
@@ -73,7 +75,7 @@ export interface OfflineView {
 export const albumKey = (path: string): string => `album:${path}`;
 export const playlistKey = (id: string): string => `playlist:${id}`;
 
-export type SongsTab = 'queue' | 'folders' | 'playlists' | 'device';
+export type SongsTab = 'queue' | 'folders' | 'playlists' | 'device' | 'devices';
 
 /** What the library is showing: its front page, an artist, an album on the NAS, or an album of this device's songs. */
 export type LibraryPage = { kind: 'home' } | { kind: 'artist'; name: string } | { kind: 'album'; path: string } | { kind: 'deviceAlbum'; name: string };
@@ -166,6 +168,8 @@ export interface Snapshot {
   playCounts: Record<string, number>;
   /** NAS songs kept on this device to play with no connection. */
   offline: OfflineView;
+  /** The user's other devices that have the player open, and what each is playing (remote control). */
+  devices: LiveDevice[];
   /** Where the listener was last time, offered on the first screen. */
   /** From 0 to 1. */
   volume: number;
@@ -210,7 +214,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), mixing: false, canMix: mixerPossible(), canGapless: enginePossible(), canAirplay: false, pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, devices: [], volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), mixing: false, canMix: mixerPossible(), canGapless: enginePossible(), canAirplay: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -278,6 +282,13 @@ class PlayerStore {
   /** Counts changes to the playlists made on this device, so a sync can tell one happened while it ran. */
   private playlistEdits = 0;
   private syncing = false;
+  /** The live connection to the NAS: how to close it, this device's id on it, and whether it is up. */
+  private stopLive: (() => void) | null = null;
+  private myDevice = '';
+  private liveUp = false;
+  private reportTimer = 0;
+  private lastQueueTold: Track[] | null = null;
+  private lastOrderTold: number[] | null = null;
   private keepRun = 0;
   private offlineRead: Promise<void> = Promise.resolve();
   private readonly keptCovers = new Map<string, string>();
@@ -304,7 +315,7 @@ class PlayerStore {
     for (const [deck, player] of this.decks.players.entries()) player.addEventListener('ended', () => { if (this.fading?.deck === deck) this.endFade(); });
     // The lock screen's buttons are claimed again each time sound starts: iOS only honours them once audio is
     // playing, and goes back to its own skip-10-seconds buttons otherwise.
-    on('play', () => { this.decks.wake(); this.set({ playing: true }); this.wireMediaSession(); this.tellPosition(); this.sayPlaying(true); });
+    on('play', () => { this.reportState(); this.decks.wake(); this.set({ playing: true }); this.wireMediaSession(); this.tellPosition(); this.sayPlaying(true); });
     // Loading a restarted stream pauses the element for a moment; that isn't the listener pausing.
     on('pause', () => {
       if (this.restarting) return;
@@ -390,6 +401,7 @@ class PlayerStore {
     void this.refreshUser();
     void this.loadShared();
     void this.loadListening();
+    this.startLive();
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible') return;
       void this.syncPlaylists();
@@ -667,7 +679,8 @@ class PlayerStore {
     const { pairing, tracks } = this.snapshot;
     let songsTab = tab ?? this.snapshot.songsTab;
     if (songsTab === 'queue' && !this.snapshot.currentTrack) songsTab = pairing ? 'folders' : 'device';
-    if (songsTab !== 'queue') {
+    if (songsTab === 'devices' && !this.snapshot.devices.length) songsTab = pairing ? 'folders' : 'device';
+    if (songsTab !== 'queue' && songsTab !== 'devices') {
       if (!pairing) songsTab = 'device';
       else if (songsTab === 'device' && !tracks.length) songsTab = 'folders';
     }
@@ -1153,6 +1166,7 @@ class PlayerStore {
   /* ---------- Picking up where the listener left off ---------- */
 
   private saveSessionNow(): void {
+    this.reportState();
     const { pairing, currentTrack, queue, source } = this.snapshot;
     // Only NAS songs can come back: a file picked on the device is gone once the page is.
     if (!pairing || !currentTrack?.nas || source.kind === 'device') return;
@@ -1628,6 +1642,111 @@ class PlayerStore {
     } finally {
       this.sendingPlays = false;
     }
+  }
+
+  /* ---------- Remote control: the user's other devices (nas/live.ts) ---------- */
+
+  /** Opens the live connection to the NAS, over which the user's devices see and steer each other. */
+  private startLive(): void {
+    this.stopLive?.();
+    this.stopLive = null;
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    this.lastQueueTold = null;
+    this.stopLive = openLive(pairing, (event) => {
+      if (this.snapshot.pairing !== pairing) return;
+      if (event.type === 'devices') {
+        const fresh = this.myDevice !== event.you || !this.liveUp;
+        this.myDevice = event.you;
+        this.liveUp = true;
+        this.set({ devices: event.devices.filter((device) => device.id !== event.you) });
+        // Newly connected: the others are told what is playing here, queue and all.
+        if (fresh) {
+          this.lastQueueTold = null;
+          this.reportState();
+        }
+      } else if (event.type === 'command') {
+        this.obey(event.command);
+      }
+    }, () => {
+      this.liveUp = false;
+      if (this.snapshot.pairing === pairing && this.snapshot.devices.length) this.set({ devices: [] });
+    });
+  }
+
+  /**
+   * Tells the user's other devices what is playing here: whether, where in the song, and the song; and the queue
+   * when it has changed, in the order it plays, so that another device can take it over. Only songs from the NAS
+   * can be told of; a song from this device means nothing elsewhere.
+   */
+  private reportState(): void {
+    clearTimeout(this.reportTimer);
+    this.reportTimer = window.setTimeout(() => {
+      const { pairing, currentTrack, queue, duration } = this.snapshot;
+      if (!pairing || !this.liveUp) return;
+      const state: Partial<PlaybackState> = {
+        playing: !this.audio.paused && !this.finished,
+        position: this.position(),
+        at: Date.now(),
+        duration,
+        track: currentTrack?.nas ? savedOf(currentTrack) : null,
+      };
+      if (this.lastQueueTold !== queue || this.lastOrderTold !== this.order) {
+        this.lastQueueTold = queue;
+        this.lastOrderTold = this.order;
+        const songs = inPlayOrder(queue, this.order).filter((track) => track.nas).map(savedOf);
+        // A very long queue is told from a little before the open song.
+        const at = songs.findIndex((song) => song.id === currentTrack?.nas?.id);
+        const from = songs.length > MAX_SHARED_QUEUE ? Math.max(0, Math.min(at - 20, songs.length - MAX_SHARED_QUEUE)) : 0;
+        state.queue = songs.slice(from, from + MAX_SHARED_QUEUE);
+        state.order = state.queue.map((_, index) => index);
+      }
+      sendState(pairing, state);
+    }, 300);
+  }
+
+  /** Does what another of the user's devices asked. */
+  private obey(command: RemoteCommand): void {
+    if (!this.snapshot.currentId) return;
+    if (command.action === 'play') { if (this.audio.paused) this.toggle(); }
+    else if (command.action === 'pause') { if (!this.audio.paused) this.audio.pause(); }
+    else if (command.action === 'next') this.step(1, !this.audio.paused);
+    else if (command.action === 'previous') this.step(-1, !this.audio.paused);
+    else if (command.action === 'seek' && command.value !== undefined) this.seek(command.value);
+  }
+
+  /** Asks another device to play, pause, step or move within its song. */
+  async remote(deviceId: string, action: RemoteCommand['action'], value?: number): Promise<void> {
+    const pairing = this.snapshot.pairing;
+    if (!pairing) return;
+    if (!(await sendCommand(pairing, deviceId, value === undefined ? { action } : { action, value }))) this.set({ notice: "That device isn't there any more." });
+  }
+
+  /** Where another device's song has got to by now, going by what it last said. */
+  remotePosition(state: PlaybackState): number {
+    const moved = state.playing ? Math.max(0, (Date.now() - state.at) / 1000) : 0;
+    return Math.max(0, Math.min(state.position + moved, state.duration || state.position + moved));
+  }
+
+  /** Takes over what another device is playing: its queue and its place in the song come here, and it pauses. */
+  async playHere(deviceId: string): Promise<void> {
+    const device = this.snapshot.devices.find((candidate) => candidate.id === deviceId);
+    const state = device?.state;
+    if (!device || !state?.track || !state.queue?.length) {
+      this.set({ notice: `${device?.name ?? 'That device'} has nothing playing that can be brought here.` });
+      return;
+    }
+    const queue = state.queue.map(fromSaved);
+    const id = `nas:${state.track.id}`;
+    const index = queue.findIndex((track) => track.id === id);
+    if (index < 0) return;
+    void this.remote(deviceId, 'pause');
+    this.setQueue(queue, { kind: 'queue' }, index);
+    this.order = queue.map((_, place) => place);
+    // Carries on from where it was there, less a moment for the handing over.
+    const at = this.remotePosition(state);
+    this.startNextAt = at > 3 && at < (state.duration || Infinity) - 3 ? at - 1 : 0;
+    await this.select(id, true, 'push');
   }
 
   /* ---------- Users, and the playlists they share ---------- */
@@ -2163,8 +2282,11 @@ class PlayerStore {
   private nasFailed(error: unknown, fallback: string): void {
     if (error instanceof NasError && error.status === 401) {
       clearPairing();
+      this.stopLive?.();
+      this.stopLive = null;
+      this.liveUp = false;
       this.set({
-        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, songsTab: 'device',
+        pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, devices: [], songsTab: 'device',
         library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [],
         notice: 'This device is no longer paired with the NAS. Ask its owner for a new invite.',
       });
@@ -2227,6 +2349,7 @@ class PlayerStore {
       void this.syncPlaylists().then(() => this.repointStored());
       void this.loadShared();
       void this.loadListening();
+      this.startLive();
       void this.loadLibrary();
       await this.openFolder('');
     } catch (error) {
@@ -2237,6 +2360,9 @@ class PlayerStore {
   async forgetNas(): Promise<void> {
     const pairing = this.snapshot.pairing;
     if (!pairing) return;
+    this.stopLive?.();
+    this.stopLive = null;
+    this.liveUp = false;
     const playingFromNas = this.current()?.origin === 'nas';
     if (playingFromNas) {
       this.loadRun++;
@@ -2247,7 +2373,7 @@ class PlayerStore {
       this.audio.load();
     }
     this.set({
-      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, songsTab: 'device',
+      pairing: null, nasState: 'idle', nasFolder: null, playlists: [], openPlaylist: null, playlistsShared: false, user: null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, devices: [], songsTab: 'device',
       library: { state: 'idle', albums: [], scanning: false }, album: null, page: { kind: 'home' }, searchTracks: [], view: 'library',
       ...(playingFromNas ? { currentId: null, currentTrack: null, queue: [], song: null, lyricsNames: [], songInfo: null, usInfo: null } : {}),
     });

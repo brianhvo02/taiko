@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
+import type { LiveDevice } from '../shared/api';
 import { smallCover } from '../library/tracks';
 import type { Snapshot, SongsTab } from '../player/store';
 import { playlistKey, sharedKey, store } from '../player/store';
 import { transitionKey } from '../shared/playlists';
 import type { PlaylistAccess, Transition } from '../shared/playlists';
 import { TransitionDialog } from './TransitionDialog';
-import { canPickFolder, pickFiles } from './format';
+import { canPickFolder, formatTime, pickFiles } from './format';
 import { ACCESS, AddToPlaylist, FOLDER, ForgetSongs, KeepButton, NOTE, QueueItems, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
 /** The paired NAS, folder by folder. A folder of songs plays through as an album. */
@@ -253,7 +255,67 @@ function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string;
   );
 }
 
-const TAB_NAMES: Record<SongsTab, string> = { queue: 'Queue', folders: 'Folders', playlists: 'Playlists', device: 'This device' };
+const TAB_NAMES: Record<SongsTab, string> = { queue: 'Queue', folders: 'Folders', playlists: 'Playlists', device: 'This device', devices: 'Other devices' };
+
+/** One of the user's other devices: what it is playing, and the means to steer it or to bring its music here. */
+function OtherDevice({ device, onChosen }: { device: LiveDevice; onChosen: () => void }) {
+  const state = device.state;
+  // The time shown runs on between the device's words about itself.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!state?.playing) return;
+    const timer = window.setInterval(() => setTick((tick) => tick + 1), 1000);
+    return () => clearInterval(timer);
+  }, [state?.playing]);
+  const [dragged, setDragged] = useState<number | null>(null);
+  const at = state ? store.remotePosition(state) : 0;
+  const length = state?.duration ?? 0;
+  const shown = dragged ?? at;
+  return (
+    <li className="device">
+      <div className="device-name">{device.name}</div>
+      {!state?.track && <p className="device-idle">Nothing from the NAS is playing there.</p>}
+      {state?.track && (
+        <>
+          <div className="device-song">
+            <span className="song-title">{state.track.title}</span>
+            <span className="song-detail">{[state.track.artist, state.playing ? '' : 'paused'].filter(Boolean).join(', ')}</span>
+          </div>
+          <div className="device-seek">
+            <output>{formatTime(shown)}</output>
+            <input
+              type="range" min={0} max={length || 1} step={1} value={Math.min(shown, length || 1)} disabled={!length}
+              aria-label={`Position in the song on ${device.name}`}
+              style={{ '--fill': `${length ? (Math.min(shown, length) / length) * 100 : 0}%` } as CSSProperties}
+              onChange={(e) => setDragged(Number(e.currentTarget.value))}
+              onPointerUp={() => { if (dragged !== null) void store.remote(device.id, 'seek', dragged); setDragged(null); }}
+              onKeyUp={() => { if (dragged !== null) void store.remote(device.id, 'seek', dragged); setDragged(null); }}
+            />
+            <output>{formatTime(length)}</output>
+          </div>
+          <div className="actions">
+            <button className="plain-button" type="button" onClick={() => void store.remote(device.id, 'previous')}>Previous</button>
+            <button className="plain-button" type="button" onClick={() => void store.remote(device.id, state.playing ? 'pause' : 'play')}>{state.playing ? 'Pause' : 'Play'}</button>
+            <button className="plain-button" type="button" onClick={() => void store.remote(device.id, 'next')}>Next</button>
+            <button className="plain-button primary-button" type="button" onClick={() => { void store.playHere(device.id); onChosen(); }}>Play here</button>
+          </div>
+        </>
+      )}
+    </li>
+  );
+}
+
+/** The user's other devices that have Taiko open. */
+function Devices({ snap, onChosen }: { snap: Snapshot; onChosen: () => void }) {
+  return (
+    <>
+      <p className="songs-note">Your other devices with Taiko open. Steer one from here, or bring what it is playing to this device.</p>
+      <ul className="devices">
+        {snap.devices.map((device) => <OtherDevice key={device.id} device={device} onChosen={onChosen} />)}
+      </ul>
+    </>
+  );
+}
 
 /** What is playing and what comes after it, in order, for the listener to rearrange. */
 function Queue({ snap }: { snap: Snapshot }) {
@@ -301,10 +363,10 @@ function Queue({ snap }: { snap: Snapshot }) {
 export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => void }) {
   const [filter, setFilter] = useState('');
   const wanted = filter.trim().toLowerCase();
-  const tabs: SongsTab[] = [...(snap.pairing ? ['folders' as const, 'playlists' as const, ...(snap.tracks.length ? ['device' as const] : [])] : ['device' as const]), ...(snap.currentTrack ? ['queue' as const] : [])];
+  const tabs: SongsTab[] = [...(snap.pairing ? ['folders' as const, 'playlists' as const, ...(snap.tracks.length ? ['device' as const] : [])] : ['device' as const]), ...(snap.currentTrack ? ['queue' as const] : []), ...(snap.devices.length ? ['devices' as const] : [])];
   const tab = tabs.includes(snap.songsTab) ? snap.songsTab : tabs[0];
   const device = snap.tracks.filter((track) => !wanted || `${track.title}\n${track.artist}\n${track.album}`.toLowerCase().includes(wanted));
-  const listed = tab === 'queue' ? 0 : tab === 'device' ? snap.tracks.length
+  const listed = tab === 'queue' || tab === 'devices' ? 0 : tab === 'device' ? snap.tracks.length
     : tab === 'folders' ? (snap.nasFolder ? snap.nasFolder.folders.length + snap.nasFolder.tracks.length : 0)
       : (snap.playlists.find((playlist) => playlist.id === snap.openPlaylist)?.tracks.length ?? snap.playlists.length);
   // On a phone the panel covers the screen, so choosing a song closes it.
@@ -328,6 +390,7 @@ export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => v
       )}
       <div className="songs-scroll">
         {tab === 'queue' && <Queue snap={snap} />}
+        {tab === 'devices' && <Devices snap={snap} onChosen={closeIfNarrow} />}
         {tab === 'folders' && <Folders snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
         {tab === 'playlists' && <Playlists snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
         {tab === 'device' && (
