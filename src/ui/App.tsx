@@ -94,8 +94,13 @@ export function App() {
     const onVisible = () => { if (document.visibilityState === 'visible') keepLit(); };
     document.addEventListener('visibilitychange', onVisible);
     void document.documentElement.requestFullscreen?.().catch(() => {});
-    // Leaving the browser's full screen (Escape) leaves the lyrics' too.
-    const onFullscreen = () => { if (!document.fullscreenElement) setWantFocus(false); };
+    // Leaving the browser's full screen (Escape) leaves the lyrics' too. Only a full screen that this visit to the
+    // lyrics went into counts: word of having left an earlier one can arrive late.
+    let entered = false;
+    const onFullscreen = () => {
+      if (document.fullscreenElement) entered = true;
+      else if (entered) setWantFocus(false);
+    };
     document.addEventListener('fullscreenchange', onFullscreen);
     // The controls show while the listener stirs, and go a few seconds after.
     let timer = 0;
