@@ -368,6 +368,8 @@ input::placeholder { color: var(--unsung); }
 .now .credit { color: var(--quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .now .credit:empty { display: none; }
 /* How the audio is stored: a fact about the song, said quietly. */
+/* Where the song is sounding, when that isn't here: said in brass, as what is "now" is. */
+.quality.casting { color: var(--brass); }
 /* The heart beside the open song: an outline until it is a favourite, then filled in the drumhead's colour. */
 .now-zone .favourite { flex: none; margin-left: auto; color: var(--unsung); }
 .now-zone .favourite[aria-pressed="true"] { color: var(--hide); }

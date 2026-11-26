@@ -184,7 +184,7 @@ function Ways({ snap, stocked, quietNotice, onShowSongs }: { snap: Snapshot; sto
         </section>
         <NasWay snap={snap} onShowSongs={onShowSongs} />
       </div>
-      <p className="fine-print">A song's Apple Music ID, and what you search Apple Music for, go to Apple to name the song. Nothing else leaves this device.</p>
+      <p className="fine-print">A song's Apple Music ID, and what you search Apple Music for, go to Apple to name the song. Casting, if you use it, loads Google's Cast code and tells your speaker or TV what to play. Nothing else leaves this device.</p>
     </>
   );
 }

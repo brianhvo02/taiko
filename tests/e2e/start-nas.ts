@@ -53,6 +53,8 @@ Object.assign(process.env, {
   APP_URL: NAS.app,
   LIBRARY_ROOTS: `Music=${NAS.library}`,
   LIBRARY_SCAN: 'Music',
+  // Where a cast device would fetch songs from: the same server, by another name for the same machine.
+  LAN_BASE: NAS.base.replace('localhost', '127.0.0.1'),
   // Every test pairs from the same address; the suite makes more pairings in ten minutes than a household would.
   PAIR_ATTEMPTS: '200',
   DATA_DIR: NAS.data,

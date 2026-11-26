@@ -34,6 +34,12 @@ export interface Config {
   scanIntervalMinutes: number;
   /** `PAIR_ATTEMPTS`: how many pairing attempts one address may make in ten minutes. */
   pairAttempts: number;
+  /**
+   * `LAN_BASE`: the address a Cast speaker or TV on the home network reaches this server at, ending in the same
+   * path as `PUBLIC_BASE` (for example http://192.168.1.20:4193/taiko/api/). Such a device isn't on a private
+   * network like Tailscale and fetches the music itself. '' when not set: nothing can be cast.
+   */
+  lanBase: string;
 }
 
 export class ConfigError extends Error {}
@@ -80,6 +86,17 @@ function parsePublicBase(env: Env): URL {
     throw new ConfigError(`PUBLIC_BASE must be a plain address with no query, fragment or login, got "${text}".`);
   }
   return url;
+}
+
+/** `LAN_BASE`, checked: a plain address whose path is the one the routes are mounted at. */
+function parseLanBase(env: Env, publicBase: URL): string {
+  const text = value(env, 'LAN_BASE');
+  if (!text) return '';
+  const url = httpUrl(text, 'LAN_BASE');
+  if (url.pathname !== publicBase.pathname || url.search || url.hash || url.username || url.password) {
+    throw new ConfigError(`LAN_BASE must be a plain address ending in ${publicBase.pathname}, the same path as PUBLIC_BASE, got "${text}".`);
+  }
+  return url.href;
 }
 
 export function parseLibraryRoots(text: string): LibraryRoot[] {
@@ -168,5 +185,6 @@ export function loadConfig(env: Env, options: { library: boolean } = { library: 
     scanRoots: options.library ? parseScanRoots(value(env, 'LIBRARY_SCAN'), roots) : [],
     scanIntervalMinutes: parseWholeNumber(env, 'SCAN_INTERVAL_MINUTES', DEFAULT_SCAN_INTERVAL_MINUTES, 0, 525600),
     pairAttempts: parseWholeNumber(env, 'PAIR_ATTEMPTS', DEFAULT_PAIR_ATTEMPTS, 1, 10000),
+    lanBase: parseLanBase(env, publicBase),
   };
 }

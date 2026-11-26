@@ -40,7 +40,7 @@ const servers: Server[] = [];
 const id = (text: string): string => Buffer.from(text, 'utf8').toString('base64url');
 
 /** `scan: false` is the server with LIBRARY_SCAN off: the library is never scanned. */
-async function start(basePath: string, options: { scan?: boolean; roots?: LibraryRoot[] } = {}): Promise<Running> {
+async function start(basePath: string, options: { scan?: boolean; roots?: LibraryRoot[]; lanBase?: string } = {}): Promise<Running> {
   const roots = options.roots ?? [{ name: 'main', dir: path.join(dir, 'music') }];
   const tags = new TagCache();
   const library = new Library(options.scan ?? true ? roots : [], tags);
@@ -55,7 +55,7 @@ async function start(basePath: string, options: { scan?: boolean; roots?: Librar
   const base = `http://127.0.0.1:${port}${basePath}`;
   const secret = loadOrCreateSecret(data);
   server.on('request', createApp({
-    config: { publicBase: base, basePath, serverName: 'Test NAS', appOrigins: [APP_ORIGIN], roots },
+    config: { publicBase: base, basePath, serverName: 'Test NAS', appOrigins: [APP_ORIGIN], roots, lanBase: options.lanBase ?? '' },
     library,
     tags,
     pairing,
@@ -902,5 +902,26 @@ describe('remote control between a user\'s devices', () => {
       streams[0].close();
     }
     expect((await home.call('GET', 'health')).status).toBe(200);
+  });
+});
+
+describe('audio for a Cast speaker or TV on the home network', () => {
+  it('gives an address on the home network when the server has one, and says so when it has none', async () => {
+    const track = id('main/Night Market/03 Paper Lanterns.flac');
+    const without = await start('/api/');
+    const token = await pair(without);
+    const refused = await without.call('POST', `tracks/${track}/ticket`, { token, body: { lan: true } });
+    expect(refused.status).toBe(409);
+    expect(refused.json()).toEqual({ error: 'no-lan' });
+
+    const home = await start('/api/', { lanBase: 'http://192.168.1.20:4193/api/' });
+    const paired = await pair(home);
+    const usual = (await home.call('POST', `tracks/${track}/ticket`, { token: paired })).json<TicketResponse>();
+    const lan = (await home.call('POST', `tracks/${track}/ticket`, { token: paired, body: { lan: true } })).json<TicketResponse>();
+    expect(usual.url.startsWith(home.base)).toBe(true);
+    expect(lan.url.startsWith('http://192.168.1.20:4193/api/tracks/')).toBe(true);
+    // The same signed link, at another address: the server answers it wherever it is reached.
+    expect(lan.url.slice('http://192.168.1.20:4193/api/'.length)).toBe(usual.url.slice(home.base.length));
+    expect((await home.call('GET', usual.url)).status).toBe(200);
   });
 });

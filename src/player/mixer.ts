@@ -13,6 +13,7 @@
  * told to ask for its audio in a way that lets a page read it (`crossOrigin`) before the audio is loaded, or the
  * mixer hears silence; the NAS allows that for the player's address.
  */
+import { CastPlayer } from './cast';
 import { Engine, EnginePlayer, rampAlong } from './engine';
 
 /**
@@ -28,7 +29,10 @@ import { Engine, EnginePlayer, rampAlong } from './engine';
  * on a locked phone where a page's timers are slowed.
  */
 /** Something a song can sound from: an audio element, or one of the engine's players, which acts like one. */
-export type Player = HTMLAudioElement | EnginePlayer;
+export type Player = HTMLAudioElement | EnginePlayer | CastPlayer;
+
+/** The deck that is a Cast speaker or TV. Its loudness is the device's own, so levels and fades pass it by. */
+export const CAST_DECK = 4;
 
 /** The fade's shape: two songs crossing stay about as loud together as one (each at 71% half-way). */
 function fadeCurve(from: number, to: number): Float32Array<ArrayBuffer> {
@@ -48,15 +52,17 @@ export class Decks {
    */
   readonly engine = new Engine();
   readonly engines: [EnginePlayer, EnginePlayer] = [new EnginePlayer(this.engine), new EnginePlayer(this.engine)];
-  /** Every deck: the two elements, then the engine's two players. */
-  get players(): Player[] { return [...this.elements, ...this.engines]; }
+  /** The Cast speaker or TV, deck 4, when the listener is casting (cast.ts). */
+  readonly cast = new CastPlayer();
+  /** Every deck: the two elements, the engine's two players, then the cast device. */
+  get players(): Player[] { return [...this.elements, ...this.engines, this.cast]; }
   /** The mixer's parts, once it is on. */
   mixer: { context: AudioContext; fades: [GainNode, GainNode]; levels: [GainNode, GainNode]; speaker: HTMLAudioElement } | null = null;
   private volume = 1;
-  private readonly level = [1, 1, 1, 1];
-  private readonly fade = [1, 1, 1, 1];
-  private readonly ducked = [false, false, false, false];
-  private readonly timers = [0, 0, 0, 0];
+  private readonly level = [1, 1, 1, 1, 1];
+  private readonly fade = [1, 1, 1, 1, 1];
+  private readonly ducked = [false, false, false, false, false];
+  private readonly timers = [0, 0, 0, 0, 0];
 
   /** Takes both elements into the mixer. Throws where the browser can't. Done once. */
   startMixer(): void {
@@ -96,6 +102,7 @@ export class Decks {
   }
 
   private apply(deck: number): void {
+    if (deck === CAST_DECK) return;
     if (deck >= 2) {
       // The engine's players have their own volume controls, and can turn a song up as well as down.
       this.engines[deck - 2].setGain(this.ducked[deck] ? 0 : this.volume * this.level[deck]);
@@ -132,6 +139,7 @@ export class Decks {
   setFade(deck: number, value: number): void {
     clearInterval(this.timers[deck]);
     this.fade[deck] = value;
+    if (deck === CAST_DECK) return;
     if (deck >= 2) {
       this.engines[deck - 2].setFade(value);
     } else if (this.mixer) {
@@ -158,6 +166,7 @@ export class Decks {
     const shape = (progress: number): number => fadeAt(from, to, progress);
     clearInterval(this.timers[deck]);
     this.fade[deck] = to;
+    if (deck === CAST_DECK) return;
     if (deck >= 2) {
       this.engines[deck - 2].setFade(to, seconds, fadeCurve(from, to));
       return;

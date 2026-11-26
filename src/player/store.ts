@@ -28,8 +28,9 @@ import {
 } from './persist';
 import type { Playlist, QueueSource, SavedTrack, Session } from './persist';
 import { levelFactor } from './level';
+import { castPossible } from './cast';
 import { enginePossible } from './engine';
-import { Decks, keepMixerWanted, mixerPossible, mixerWanted } from './mixer';
+import { CAST_DECK, Decks, keepMixerWanted, mixerPossible, mixerWanted } from './mixer';
 import type { Player } from './mixer';
 import { inPlayOrder, makeOrder, nextRepeat, stepFrom, withMovedInQueue, withQueued, withoutQueued, withoutUpcoming } from './queue';
 import type { Repeat } from './queue';
@@ -144,6 +145,9 @@ export interface Snapshot {
   levelVolume: boolean;
   /** Seconds one song fades into the next; 0 for none. */
   crossfade: number;
+  /** Casting to a Google Cast speaker or TV (cast.ts): whether this browser can, and the device's name while it is on. */
+  canCast: boolean;
+  casting: string;
   /** Whether an album's songs are joined without a gap, by playing FLAC songs on the engine (engine.ts); and whether this browser could. */
   gapless: boolean;
   canGapless: boolean;
@@ -222,7 +226,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, devices: [], live: false, rooms: [], sharing: false, listeners: 0, joined: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), mixing: false, canMix: mixerPossible(), canGapless: enginePossible(), canAirplay: false, pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, devices: [], live: false, rooms: [], sharing: false, listeners: 0, joined: null, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), mixing: false, canMix: mixerPossible(), canGapless: enginePossible(), canCast: castPossible(), casting: '', canAirplay: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -372,6 +376,10 @@ class PlayerStore {
     on('error', () => {
       // The engine couldn't play the song (a browser that won't start its sound, a file it can't decode): the song
       // is played the ordinary way instead, from where it had got to.
+      if (this.active === CAST_DECK) {
+        this.set({ notice: `${this.snapshot.casting || 'The speaker or TV'} couldn't play that. It has to be on the same home network as the NAS.` });
+        return;
+      }
       if (this.active >= 2) {
         const song = this.current();
         if (song && !song.noEngine) {
@@ -920,7 +928,23 @@ class PlayerStore {
       if (this.exact) this.set({ duration: this.exact.total });
       // The song goes on a deck of the kind it needs: the engine for a FLAC song when gapless playback is on, an
       // audio element otherwise. During a crossfade that is never the deck the song before is fading out on.
-      const deck = this.freeDeck(this.wantsEngine(track, audio.exact));
+      let deck = this.freeDeck(this.wantsEngine(track, audio.exact));
+      if (this.snapshot.casting && track.nas && this.snapshot.pairing) {
+        // Casting: the speaker or TV fetches the song itself, from the NAS's address on the home network, and
+        // moves within it by itself.
+        const ticket = await fetchTicket(this.snapshot.pairing, track.nas.id, 0, true);
+        if (run !== this.loadRun) return;
+        audio.url = ticket.url;
+        this.exact = null;
+        deck = CAST_DECK;
+        const shown = nowPlayingArt(this.snapshot.songInfo);
+        this.decks.cast.describe({
+          title: this.snapshot.songInfo?.trackName ?? track.title, artist: this.snapshot.songInfo?.artistName ?? track.artist, album: track.album,
+          art: shown, fileName: pathOfTrackId(track.nas.id) ?? '',
+        });
+      } else if (this.snapshot.casting) {
+        this.set({ notice: `${track.title} is on this device only, so it plays here, not on ${this.snapshot.casting}.` });
+      }
       if (deck !== this.active) {
         if (this.fading?.deck !== this.active) this.clearDeck(this.active);
         this.active = deck;
@@ -2073,6 +2097,42 @@ class PlayerStore {
     return levelFactor(track, album, deck >= 2 || (this.decks.mixer && this.snapshot.mixing) ? 2 : 1);
   }
 
+  /* ---------- Casting (cast.ts) ---------- */
+
+  /**
+   * Asks which speaker or TV to cast to, and moves the open song there, at the moment it has got to. From then on
+   * songs from the NAS play on that device, with this page as the remote, until casting is stopped.
+   */
+  async startCast(): Promise<void> {
+    if (!this.snapshot.pairing) {
+      this.set({ notice: 'Casting plays songs from a NAS. Pair with one first.' });
+      return;
+    }
+    const at = this.position();
+    const playing = !this.audio.paused;
+    this.decks.cast.onEnded = () => {
+      // Stopped from the device, or by another remote: the song comes back here, paused where it was.
+      const reached = this.position();
+      this.set({ casting: '' });
+      void this.reloadCurrent(reached, false);
+    };
+    const device = await this.decks.cast.connect(CAST_APP_ID);
+    if (!device) return;
+    this.endFade();
+    this.cancelPrepared();
+    this.set({ casting: device });
+    await this.reloadCurrent(at, playing || this.snapshot.currentId === null);
+  }
+
+  /** Stops casting: the open song carries on from this device, paused where it was. */
+  async stopCast(): Promise<void> {
+    if (!this.snapshot.casting) return;
+    const at = this.position();
+    this.set({ casting: '' });
+    this.decks.cast.disconnect();
+    await this.reloadCurrent(at, false);
+  }
+
   /* ---------- Decks, and gapless playback on the engine ---------- */
 
   /** Whether the engine may be used here: the listener asked for gapless playback, and the browser can do it. */
@@ -2126,6 +2186,7 @@ class PlayerStore {
    */
   private async maybePrepare(): Promise<void> {
     const { duration, repeat, source, shuffle, queue, currentId } = this.snapshot;
+    if (this.active === CAST_DECK) return;
     if (this.active < 2 || this.prepared || this.preparing || this.fading || this.audio.paused || this.pendingSeek !== null || this.restarting) return;
     const left = duration - this.position();
     if (left > 20 || left < 1.5) return;
@@ -2215,6 +2276,8 @@ class PlayerStore {
    * this song before its end without a fade, cuts to the next one at that moment.
    */
   private maybeCrossfade(): void {
+    // A cast device plays one song at a time, at its own loudness: nothing is faded there.
+    if (this.active === CAST_DECK) return;
     if (this.fading || this.handingOver || this.audio.paused || this.pendingSeek !== null || this.restarting || this.finished) return;
     const plan = this.handover();
     if (!plan || plan.plain) return;
@@ -2547,6 +2610,12 @@ const offsetKey = (track: Track): string => (track.nas ? `nas:${track.nas.id}` :
 /** A NAS song as it is stored in a playlist or a session. */
 /** What names a shared playlist: whose it is, and which of theirs. */
 export const sharedKey = (playlist: SharedPlaylist): string => `${playlist.owner.id}/${playlist.id}`;
+
+/** The id of a Cast receiver app of Taiko's own, when the site was built with one; '' for Google's standard receiver. */
+const CAST_APP_ID: string = (import.meta.env as Record<string, string | undefined>).VITE_CAST_APP_ID ?? '';
+
+/** A picture for the cast device's screen: Apple's, which any device can fetch (the NAS's cover is on a private address). */
+const nowPlayingArt = (info: { artworkUrl100?: string } | null): string => info?.artworkUrl100?.replace('100x100', '600x600') ?? '';
 
 function savedOf(track: Track): SavedTrack {
   const { lyrics: _lyrics, ...saved } = track.nas!;

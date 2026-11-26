@@ -188,7 +188,8 @@ export function TransportBar({ snap, onFindSong, lyricsShown, onFocus, floating,
           </div>
           <div className="credit-line">
             <span className="credit">{credit}</span>
-            {quality && <span className="quality" title="How this song's audio is stored">{quality}</span>}
+            {quality && !snap.casting && <span className="quality" title="How this song's audio is stored">{quality}</span>}
+            {snap.casting && <span className="quality casting">on {snap.casting}</span>}
           </div>
         </div>
         {snap.favourites && snap.currentTrack?.nas && (
@@ -287,6 +288,11 @@ export function TransportBar({ snap, onFindSong, lyricsShown, onFocus, floating,
               )}
               <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Add lyrics or music</button>
               <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); onFindSong(); }}>Find this song in Apple Music</button>
+              {snap.canCast && snap.pairing && (
+                <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); void (snap.casting ? store.stopCast() : store.startCast()); }}>
+                  {snap.casting ? `Stop casting to ${snap.casting}` : 'Cast to a speaker or TV'}
+                </button>
+              )}
               {lyricsShown && (
                 <div className="extras-narrow">
                   <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); onFocus(); }}>Lyrics on the full screen</button>

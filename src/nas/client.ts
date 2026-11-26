@@ -277,9 +277,9 @@ export function saveLastPath(path: string): void {
 }
 
 /** A link to a track's audio. With `fromSeconds`, a FLAC track's audio begins at that time (see src/shared/flac.ts). */
-export async function fetchTicket(pairing: Pairing, trackId: string, fromSeconds = 0): Promise<TicketResponse> {
-  const body: TicketRequest = { fromSeconds };
-  const init: RequestInit = fromSeconds > 0
+export async function fetchTicket(pairing: Pairing, trackId: string, fromSeconds = 0, lan = false): Promise<TicketResponse> {
+  const body: TicketRequest = lan ? { fromSeconds, lan } : { fromSeconds };
+  const init: RequestInit = fromSeconds > 0 || lan
     ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
     : { method: 'POST' };
   return (await request(pairing.base, `tracks/${encodeURIComponent(trackId)}/ticket`, init, pairing.token)).json() as Promise<TicketResponse>;

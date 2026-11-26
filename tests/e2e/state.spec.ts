@@ -1045,3 +1045,109 @@ test('listening together: one person shares, another listens along and follows t
   nasCommand('user', 'remove', friendName);
   await friend.context().close();
 });
+
+test('casting: the song moves to the speaker or TV, this page steers it, and it comes back when casting stops', async ({ page }) => {
+  // Google's Cast code is stood in for: what the page asks of it is written down, and it answers as a device would.
+  await page.route('https://www.gstatic.com/cv/js/sender/**', (route) => route.fulfill({ contentType: 'text/javascript', body: `(() => {
+    const log = window.castLog = [];
+    const listeners = [];
+    const remote = { isPaused: true, currentTime: 0, duration: 0, isMediaLoaded: false, playerState: null };
+    const change = (field, value) => { remote[field] = value; for (const listener of listeners) listener({ field, value }); };
+    let update = null;
+    const media = { idleReason: null, addUpdateListener: (listener) => { update = listener; } };
+    const session = {
+      getCastDevice: () => ({ friendlyName: 'Living room TV' }),
+      getMediaSession: () => media,
+      loadMedia: async (request) => {
+        log.push({ did: 'load', url: request.media.url, type: request.media.contentType, title: request.media.metadata.title, from: request.currentTime, autoplay: request.autoplay });
+        media.idleReason = null;
+        change('isMediaLoaded', true); change('duration', 50); change('currentTime', request.currentTime); change('isPaused', !request.autoplay);
+      },
+      endSession: () => { log.push({ did: 'end' }); },
+    };
+    let current = null;
+    window.fakeCast = { finish: () => { media.idleReason = 'FINISHED'; change('isMediaLoaded', false); update && update(false); } };
+    window.chrome = window.chrome || {};
+    window.chrome.cast = {
+      AutoJoinPolicy: { ORIGIN_SCOPED: 'origin_scoped' },
+      Image: function (url) { this.url = url; },
+      media: {
+        DEFAULT_MEDIA_RECEIVER_APP_ID: 'CC1AD845', IdleReason: { FINISHED: 'FINISHED' },
+        MediaInfo: function (url, contentType) { this.url = url; this.contentType = contentType; },
+        MusicTrackMediaMetadata: function () {},
+        LoadRequest: function (info) { this.media = info; this.currentTime = 0; this.autoplay = true; },
+      },
+    };
+    window.cast = { framework: {
+      CastContext: { getInstance: () => ({
+        setOptions: (options) => log.push({ did: 'options', app: options.receiverApplicationId }),
+        requestSession: async () => { current = session; },
+        getCurrentSession: () => current,
+        addEventListener: () => {},
+      }) },
+      CastContextEventType: { SESSION_STATE_CHANGED: 'sessionstatechanged' },
+      SessionState: { SESSION_STARTED: 'started', SESSION_RESUMED: 'resumed', SESSION_ENDED: 'ended' },
+      RemotePlayer: function () { return remote; },
+      RemotePlayerController: function () { return {
+        addEventListener: (type, listener) => listeners.push(listener),
+        playOrPause: () => { log.push({ did: remote.isPaused ? 'play' : 'pause' }); change('isPaused', !remote.isPaused); },
+        seek: () => { log.push({ did: 'seek', to: remote.currentTime }); change('currentTime', remote.currentTime); },
+        stop: () => {},
+      }; },
+      RemotePlayerEventType: { ANY_CHANGE: 'anyChanged' },
+    } };
+    window.__onGCastApiAvailable(true);
+  })();` }));
+  await page.addInitScript(() => { (window as unknown as { chrome: unknown }).chrome ??= {}; });
+  await mockCatalog(page);
+  await pair(page, 'Cast test');
+  type Entry = { did: string; url?: string; type?: string; title?: string; from?: number; autoplay?: boolean; to?: number; app?: string };
+  const log = () => page.evaluate(() => (window as unknown as { castLog?: Entry[] }).castLog ?? []);
+  const deck = () => page.evaluate(() => (window as unknown as { taikoStore: { active: number } }).taikoStore.active);
+
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await page.locator('.library .songlist .song', { hasText: 'Paper Lanterns' }).click();
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await seekTo(page, 12);
+  await expect.poll(() => shown(page)).toBeGreaterThan(12.3);
+  // Nothing of Google's is loaded until casting is asked for.
+  expect(await page.evaluate(() => 'castLog' in window)).toBe(false);
+
+  // Asked to cast, the song is sent to the device: its address on the home network, its name, where it had got to.
+  await page.getByRole('button', { name: 'Options' }).click();
+  await page.getByRole('button', { name: 'Cast to a speaker or TV' }).click();
+  await expect(page.locator('.quality.casting')).toHaveText('on Living room TV');
+  await expect.poll(async () => (await log()).filter((entry) => entry.did === 'load').length).toBe(1);
+  const [options, sent] = await log();
+  expect(options).toEqual({ did: 'options', app: 'CC1AD845' });
+  expect(sent.url).toMatch(/^http:\/\/127\.0\.0\.1:4195\/api\/tracks\/[\w-]+\/audio\?exp=\d+&sig=[0-9a-f]+$/);
+  expect(sent).toMatchObject({ type: 'audio/flac', title: '紙の灯籠', autoplay: false });
+  expect(await deck()).toBe(4);
+  // It is moved to the moment and set playing, as it was here.
+  await expect.poll(async () => (await log()).slice(2).map((entry) => entry.did)).toEqual(['seek', 'play']);
+  expect((await log())[2].to).toBeGreaterThan(12);
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await expect.poll(() => shown(page)).toBeGreaterThan(13);
+
+  // This page is the remote: pause, and a move within the song, go to the device.
+  await page.locator('.play').click();
+  await expect(page.locator('.play')).toHaveText('Play');
+  await seekTo(page, 30);
+  await expect.poll(async () => (await log()).slice(-2)).toEqual([{ did: 'pause' }, { did: 'seek', to: 30 }]);
+  await page.locator('.play').click();
+  await expect(page.locator('.play')).toHaveText('Pause');
+
+  // The device says the song is over: the next one is sent to it.
+  await page.evaluate(() => (window as unknown as { fakeCast: { finish(): void } }).fakeCast.finish());
+  await expect.poll(async () => (await log()).filter((entry) => entry.did === 'load').length).toBe(2);
+  expect((await log()).filter((entry) => entry.did === 'load')[1]).toMatchObject({ autoplay: true, from: 0 });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { taikoStore: { getSnapshot(): { currentTrack: { title: string } } } }).taikoStore.getSnapshot().currentTrack.title)).toBe('港の灯');
+
+  // Casting is stopped: the device is let go, and the song is here again, paused.
+  await page.getByRole('button', { name: 'Options' }).click();
+  await page.getByRole('button', { name: 'Stop casting to Living room TV' }).click();
+  await expect(page.locator('.quality.casting')).toHaveCount(0);
+  await expect.poll(deck).toBeLessThan(4);
+  expect((await log()).pop()).toEqual({ did: 'end' });
+  await expect(page.locator('.play')).toHaveText('Play');
+});

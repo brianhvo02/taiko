@@ -42,7 +42,7 @@ export const SCAN_REQUEST_GAP_MS = 10_000;
 export const MAX_SEARCH_CHARS = 200;
 
 export interface AppDeps {
-  config: Pick<Config, 'publicBase' | 'basePath' | 'serverName' | 'appOrigins' | 'roots'> & Partial<Pick<Config, 'pairAttempts'>>;
+  config: Pick<Config, 'publicBase' | 'basePath' | 'serverName' | 'appOrigins' | 'roots'> & Partial<Pick<Config, 'pairAttempts' | 'lanBase'>>;
   /** The albums and songs of the scanned roots; off and empty when `LIBRARY_SCAN` names none. */
   library: Pick<Library, 'enabled' | 'scanning' | 'scannedAt' | 'albums' | 'search' | 'scan'>;
   /** The cache the library scan reads tags through, so the browser shares it. Left out: one of the app's own. */
@@ -501,8 +501,11 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
     if (parts.length === 3 && parts[0] === 'tracks' && parts[2] === 'ticket') {
       allow(req, 'POST');
       requireDevice(req);
-      const { fromSeconds = 0 }: TicketRequest = await readJsonBody(req, true);
+      const { fromSeconds = 0, lan = false }: TicketRequest = await readJsonBody(req, true);
       if (typeof fromSeconds !== 'number' || !Number.isFinite(fromSeconds) || fromSeconds < 0) throw new HttpError(400, 'bad-request');
+      // A Cast speaker or TV fetches the audio itself, from the home network.
+      const base = lan === true ? config.lanBase ?? '' : config.publicBase;
+      if (!base) throw new HttpError(409, 'no-lan');
       const track = await requireTrack(parts[1]);
       // For a FLAC file, the frame holding `fromSeconds`; any other file (or a damaged one) is played whole.
       const seek = await flacSeek(track.audioPath, fromSeconds);
@@ -511,7 +514,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       // `at` isn't signed: it only chooses where in an already permitted file to start, and the audio route checks it.
       const at = seek.at === null ? '' : `&at=${seek.at}`;
       sendJson(req, res, 200, {
-        url: `${config.publicBase}tracks/${parts[1]}/audio?exp=${exp}&sig=${sig}${at}`,
+        url: `${base}tracks/${parts[1]}/audio?exp=${exp}&sig=${sig}${at}`,
         expiresAt: new Date(exp * 1000).toISOString(),
         exactSeek: seek.exactSeek,
         startSeconds: seek.startSeconds,

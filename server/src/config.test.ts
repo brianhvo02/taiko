@@ -19,6 +19,7 @@ describe('loadConfig', () => {
       scanRoots: [],
       scanIntervalMinutes: 360,
       pairAttempts: 10,
+      lanBase: '',
     });
   });
 

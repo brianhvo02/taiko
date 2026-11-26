@@ -5,7 +5,7 @@
  * Every route lives under the server's PUBLIC_BASE, which ends in `/api/`. Routes marked "paired" need
  * `Authorization: Bearer <token>`, the token a device got from `POST pair`. A failure answers with a JSON
  * `ApiError` and a matching status (400, 401, 403, 404, 405, 413, 416, 429, 500). Codes the player acts on:
- * `bad-code` (403, pairing), `too-many-attempts` (429, pairing), `conflict` (409, playlists), `unauthorized` (401: the device is no longer
+ * `bad-code` (403, pairing), `too-many-attempts` (429, pairing), `conflict` (409, playlists), `no-lan` (409, casting), `unauthorized` (401: the device is no longer
  * paired), `bad-ticket` and `expired-ticket` (403, audio).
  *
  *   GET    health                      -> HealthResponse
@@ -411,6 +411,11 @@ export interface ScanResponse {
 export interface TicketRequest {
   /** Start the audio at this time. Left out or 0: the whole file. Ignored for a file the server can't start mid-way. */
   fromSeconds?: number;
+  /**
+   * Ask for an address on the home network, for a Cast speaker or TV to fetch the audio from (see `LAN_BASE`).
+   * 409 `no-lan` when the server has none.
+   */
+  lan?: boolean;
 }
 
 export interface TicketResponse {
