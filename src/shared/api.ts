@@ -37,6 +37,10 @@
  *          out stays as last said)
  *   POST   devices/:id/command paired  RemoteCommand -> 204     (to another of the user's own devices; 404 when it
  *          isn't connected)
+ *   POST   room                paired  -> 204                   (this device lets everyone on the NAS listen along
+ *          with what it plays; DELETE stops that)
+ *   POST   rooms/:id/join      paired  -> 204                   (listen along with the device `:id`; 404 when it
+ *          isn't sharing; DELETE leaves)
  *   POST   moved               paired  MovedRequest -> MovedResponse  (where songs that are gone from their old
  *          place went, for playlists and links made before an album was replaced)
  *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
@@ -155,9 +159,36 @@ export interface RemoteCommand {
   value?: number;
 }
 
+/** Someone letting others listen along: the device that is sharing, whose it is, and what it is playing. */
+export interface Room {
+  /** The sharing device's id. */
+  id: string;
+  /** The user's name, and the device's. */
+  by: string;
+  device: string;
+  track: SavedTrack | null;
+  /** How many devices are listening along. */
+  listeners: number;
+}
+
+/**
+ * What a sharing device is playing, as its listeners are told: its state, when the server heard it (`heardAt`)
+ * and the server's time now (`now`), both by the server's clock, so a listener can tell how far the song has
+ * moved on without trusting the two devices' clocks to agree.
+ */
+export interface RoomState {
+  id: string;
+  state: PlaybackState;
+  heardAt: number;
+  now: number;
+}
+
 export type LiveEvent =
   | { type: 'devices'; you: string; devices: LiveDevice[] }
-  | { type: 'command'; from: string; command: RemoteCommand };
+  | { type: 'command'; from: string; command: RemoteCommand }
+  /** Everyone is told who is sharing; a device is also told which of them it is listening along with, if any. */
+  | { type: 'rooms'; rooms: Room[]; joined: string | null }
+  | { type: 'room'; room: RoomState };
 
 /** The most songs of its queue a device tells the others about. */
 export const MAX_SHARED_QUEUE = 500;

@@ -41,6 +41,12 @@ writeFileSync(path.join(NAS.library, '.ringobushi', 'replaced.jsonl'), `${JSON.s
   event: 'replaced', oldRoot: 'Music', oldPath: 'Old Shelf/Night Market/02 lanterns.flac', newPath: 'Midori Vale/Night Market/2 - lanterns.flac',
 })}\n`);
 
+// If the test NAS falls over in the middle of a run, every later test that needs it fails without saying why.
+// This says why.
+process.on('uncaughtException', (error) => { console.error('TEST NAS STOPPED on an uncaught error:', error); process.exit(1); });
+process.on('unhandledRejection', (reason) => { console.error('TEST NAS STOPPED on an unhandled rejection:', reason); process.exit(1); });
+process.on('exit', (code) => console.error(`TEST NAS exited with code ${code}`));
+
 Object.assign(process.env, {
   PORT: String(NAS.port),
   PUBLIC_BASE: NAS.base,

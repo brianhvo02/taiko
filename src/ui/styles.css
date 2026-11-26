@@ -613,6 +613,10 @@ body.floating .part-name { padding-top: 0; }
 .invite-code span { display: block; margin-top: .2rem; font-family: var(--lyric-face); font-weight: 700; font-size: 1.5rem; letter-spacing: .08em; color: var(--hide); }
 /* While an album is being kept on the device: how far along, and a way to stop. */
 .keeping { display: inline-flex; align-items: center; gap: .7rem; color: var(--quiet); font-variant-numeric: tabular-nums; }
+/* Listening together: what this device offers, and what others do. */
+.together { display: grid; gap: .6rem; padding-bottom: 1rem; }
+.together > p { padding: 0 1rem; color: var(--quiet); }
+.together > .actions { padding: 0 1rem; }
 /* Another of the listener's devices: its name, what it is playing, and the means to steer it. */
 .devices { display: grid; gap: .25rem; }
 .device { display: grid; gap: .6rem; padding: 1rem; border-top: 1px solid var(--rule); }

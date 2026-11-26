@@ -979,3 +979,69 @@ test('remote control: one of your devices sees another, steers it, and takes its
   await expect(panel.getByRole('tab', { name: 'Other devices' })).toHaveCount(0);
   await other.context().close();
 });
+
+test('listening together: one person shares, another listens along and follows their song, pauses and skips', async ({ page, browser }) => {
+  await mockCatalog(page);
+  const friendName = `Aki ${Date.now() % 100000}`;
+  nasCommand('user', 'add', friendName);
+  await pair(page, 'Living room');
+  const friend = await (await browser.newContext()).newPage();
+  await mockCatalog(friend);
+  await pair(friend, 'Aki phone', friendName);
+  type Store = { position(): number; getSnapshot(): { currentTrack: { title: string } | null; playing: boolean; joined: string | null } };
+  const now = (on: Page) => on.evaluate(() => { const store = (window as unknown as { taikoStore: Store }).taikoStore; return { title: store.getSnapshot().currentTrack?.title ?? null, playing: store.getSnapshot().playing, at: store.position(), joined: store.getSnapshot().joined }; });
+  const apart = async () => { const [host, guest] = await Promise.all([now(page), now(friend)]); return Math.abs(host.at - guest.at); };
+
+  // The host plays an album and lets others listen along.
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await page.locator('.library .songlist .song', { hasText: 'Paper Lanterns' }).click();
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await page.getByRole('button', { name: 'Songs' }).first().click();
+  const hostPanel = page.getByRole('complementary', { name: 'Songs' });
+  await hostPanel.getByRole('tab', { name: 'Together' }).click();
+  await expect(hostPanel.getByText('Nobody else is sharing right now.')).toBeVisible();
+  await hostPanel.getByRole('button', { name: 'Let others listen along' }).click();
+  await expect(hostPanel.getByText('Nobody is yet.')).toBeVisible();
+
+  // The friend sees who is sharing and what, and listens along: the same song, at about the same moment.
+  await friend.getByRole('button', { name: 'Open from NAS' }).click();
+  const panel = friend.getByRole('complementary', { name: 'Songs' });
+  await panel.getByRole('tab', { name: 'Together' }).click();
+  const room = panel.locator('.device', { hasText: 'Owner' });
+  await expect(room.locator('.song-title')).toHaveText('Paper Lanterns');
+  await expect(room.locator('.song-detail')).toContainText('on Living room');
+  await room.getByRole('button', { name: 'Listen along' }).click();
+  await expect.poll(async () => (await now(friend)).title).toBe('Paper Lanterns');
+  await expect.poll(async () => (await now(friend)).playing).toBe(true);
+  await expect(panel.getByText('You are listening along with')).toBeVisible();
+  await expect(hostPanel.getByText('1 device is listening along.')).toBeVisible();
+  await expect.poll(apart, { timeout: 15_000 }).toBeLessThan(1.5);
+
+  // The host pauses, and the friend's music stops; plays, and it goes on; moves in the song, and the friend follows.
+  await page.locator('.play').click();
+  await expect.poll(async () => (await now(friend)).playing).toBe(false);
+  await page.locator('.play').click();
+  await expect.poll(async () => (await now(friend)).playing).toBe(true);
+  await seekTo(page, 30);
+  await expect.poll(async () => (await now(friend)).at, { timeout: 15_000 }).toBeGreaterThan(29);
+  await expect.poll(apart, { timeout: 15_000 }).toBeLessThan(1.5);
+
+  // The host goes on to the next song, and so does the friend.
+  await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await expect.poll(async () => (await now(friend)).title, { timeout: 15_000 }).toBe('港の灯');
+
+  // Choosing a song of their own, the friend stops listening along; the host is told nobody is.
+  await panel.getByRole('button', { name: 'Close' }).click();
+  await friend.getByRole('button', { name: 'Library', exact: true }).click();
+  await friend.locator('.library .tile', { hasText: 'Night Market' }).first().click();
+  expect((await now(friend)).joined).not.toBeNull();
+  await friend.locator('.library .songlist .song', { hasText: 'untagged' }).click();
+  await expect.poll(async () => (await now(friend)).joined).toBeNull();
+  await expect(hostPanel.getByText('Nobody is yet.')).toBeVisible();
+  expect((await now(friend)).title).toBe('untagged');
+
+  await hostPanel.getByRole('button', { name: 'Stop sharing' }).click();
+  await expect(hostPanel.getByRole('button', { name: 'Let others listen along' })).toBeVisible();
+  nasCommand('user', 'remove', friendName);
+  await friend.context().close();
+});

@@ -756,8 +756,10 @@ describe('what a user marks and hears', () => {
 
 describe('remote control between a user\'s devices', () => {
   /** Opens a device's stream and collects what the server sends down it. */
-  function listen(running: Running, token: string): { events: Record<string, unknown>[]; close: () => void; next: (count: number) => Promise<void> } {
+  function listen(running: Running, token: string): { events: Record<string, unknown>[]; together: Record<string, unknown>[]; close: () => void; next: (count: number) => Promise<void> } {
+    // What is said about devices and commands, and apart from it what is said about listening together.
     const events: Record<string, unknown>[] = [];
+    const together: Record<string, unknown>[] = [];
     const req = request(`${running.base}events`, { headers: { authorization: `Bearer ${token}` } }, (res) => {
       let pending = '';
       res.setEncoding('utf8');
@@ -766,7 +768,9 @@ describe('remote control between a user\'s devices', () => {
         for (let cut = pending.indexOf('\n\n'); cut >= 0; cut = pending.indexOf('\n\n')) {
           const block = pending.slice(0, cut);
           pending = pending.slice(cut + 2);
-          if (block.startsWith('data: ')) events.push(JSON.parse(block.slice(6)) as Record<string, unknown>);
+          if (!block.startsWith('data: ')) continue;
+          const event = JSON.parse(block.slice(6)) as Record<string, unknown>;
+          (event.type === 'rooms' || event.type === 'room' ? together : events).push(event);
         }
       });
     });
@@ -776,7 +780,7 @@ describe('remote control between a user\'s devices', () => {
       for (let tries = 0; events.length < count && tries < 200; tries++) await new Promise((resolve) => setTimeout(resolve, 10));
       expect(events.length).toBeGreaterThanOrEqual(count);
     };
-    return { events, close: () => req.destroy(), next };
+    return { events, together, close: () => req.destroy(), next };
   }
 
   it('tells a user\'s devices about each other, carries commands between them, and keeps other users out', async () => {
@@ -834,5 +838,69 @@ describe('remote control between a user\'s devices', () => {
     expect((onPhone.events[onPhone.events.length - 1] as { devices: { name: string }[] }).devices.map((device) => device.name)).toEqual(['Phone']);
     onPhone.close();
     onStranger.close();
+  });
+
+  it('lets a device share what it plays with everyone, and tells those who listen along where the song is', async () => {
+    const home = await start('/api/');
+    const aki = home.pairing.addUser('Aki')!;
+    const host = await pair(home, 'Living room');
+    const guest = (await home.call('POST', 'pair', { body: { code: home.pairing.createCode(1, aki.id).code, deviceName: 'Aki phone' } })).json<PairResponse>().token;
+    const onHost = listen(home, host);
+    const onGuest = listen(home, guest);
+    await onHost.next(1);
+    await onGuest.next(1);
+    const hostId = (onHost.events[0] as { you: string }).you;
+    const settle = async (list: Record<string, unknown>[], count: number) => { for (let tries = 0; list.length < count && tries < 200; tries++) await new Promise((resolve) => setTimeout(resolve, 10)); };
+    // Nobody is sharing; a device that isn't sharing can't be listened along with.
+    await settle(onGuest.together, 1);
+    expect(onGuest.together[0]).toEqual({ type: 'rooms', rooms: [], joined: null });
+    expect((await home.call('POST', `rooms/${hostId}/join`, { token: guest })).status).toBe(404);
+
+    // The host plays a song and shares; everyone, the other user included, is told who and what.
+    const song = { id: 'bWFpbi9hLmZsYWM', title: 'Paper Lanterns', artist: 'Midori Vale', album: '', trackNumber: null, discNumber: null, durationSeconds: 50 };
+    await home.call('POST', 'state', { token: host, body: { playing: true, position: 12, at: 5, duration: 50, track: song, queue: [song], order: [0] } });
+    expect((await home.call('POST', 'room', { token: host })).status).toBe(204);
+    await settle(onGuest.together, 2);
+    expect(onGuest.together[1]).toEqual({ type: 'rooms', rooms: [{ id: hostId, by: 'Owner', device: 'Living room', track: song, listeners: 0 }], joined: null });
+
+    // The guest listens along: it is told the song and its place at once, by the server's clock, without the queue.
+    clock += 4000;
+    expect((await home.call('POST', `rooms/${hostId}/join`, { token: guest })).status).toBe(204);
+    await settle(onGuest.together, 4);
+    const joined = onGuest.together.find((event) => event.type === 'rooms' && event.joined === hostId) as { rooms: { listeners: number }[] };
+    expect(joined.rooms[0].listeners).toBe(1);
+    const told = onGuest.together.find((event) => event.type === 'room') as { room: { id: string; state: Record<string, unknown>; heardAt: number; now: number } };
+    expect(told.room.id).toBe(hostId);
+    expect(told.room.state).toEqual({ playing: true, position: 12, at: 5, duration: 50, track: song });
+    expect(told.room.now - told.room.heardAt).toBe(4000);
+    // The host is not told its own state back.
+    expect(onHost.together.some((event) => event.type === 'room')).toBe(false);
+
+    // Every word from the host reaches the listener; when the host stops sharing, the listener is let go.
+    await home.call('POST', 'state', { token: host, body: { playing: false, position: 20, at: 9 } });
+    await settle(onGuest.together, 5);
+    expect((onGuest.together[onGuest.together.length - 1] as { room: { state: { playing: boolean; position: number } } }).room.state).toMatchObject({ playing: false, position: 20 });
+    expect((await home.call('DELETE', 'room', { token: host })).status).toBe(204);
+    await settle(onGuest.together, 6);
+    expect(onGuest.together[onGuest.together.length - 1]).toEqual({ type: 'rooms', rooms: [], joined: null });
+    onHost.close();
+    onGuest.close();
+  });
+
+  it('goes on serving when devices drop their streams at awkward moments', async () => {
+    const home = await start('/api/');
+    const tokens = [await pair(home, 'One'), await pair(home, 'Two'), await pair(home, 'Three')];
+    const song = { id: 'bWFpbi9hLmZsYWM', title: 'Paper Lanterns', artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: 50 };
+    for (let round = 0; round < 15; round++) {
+      const streams = tokens.map((token) => listen(home, token));
+      await streams[0].next(1);
+      // Streams are cut while the others are being written to about them and about what is playing.
+      const telling = tokens.map((token, index) => home.call('POST', 'state', { token, body: { playing: true, position: round + index, at: 1, duration: 50, track: song } }));
+      streams[1].close();
+      streams[2].close();
+      await Promise.all(telling);
+      streams[0].close();
+    }
+    expect((await home.call('GET', 'health')).status).toBe(200);
   });
 });

@@ -57,6 +57,24 @@ export function sendState(pairing: Pairing, state: Partial<PlaybackState>): void
   void post(pairing, 'state', state).catch(() => {});
 }
 
+/** Starts letting everyone on the NAS listen along with this device, or stops. True when the NAS took it. */
+export async function shareRoom(pairing: Pairing, on: boolean): Promise<boolean> {
+  try {
+    return (await fetch(`${pairing.base}room`, { method: on ? 'POST' : 'DELETE', headers: { Authorization: `Bearer ${pairing.token}` } })).ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Starts listening along with a sharing device, or (`on` false) stops. True when the NAS took it. */
+export async function joinRoom(pairing: Pairing, roomId: string, on: boolean): Promise<boolean> {
+  try {
+    return (await fetch(`${pairing.base}rooms/${encodeURIComponent(roomId)}/join`, { method: on ? 'POST' : 'DELETE', headers: { Authorization: `Bearer ${pairing.token}` } })).ok;
+  } catch {
+    return false;
+  }
+}
+
 /** Asks another of the user's devices to do something. False when it isn't there any more. */
 export async function sendCommand(pairing: Pairing, deviceId: string, command: RemoteCommand): Promise<boolean> {
   try {

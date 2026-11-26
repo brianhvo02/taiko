@@ -255,7 +255,7 @@ function Playlists({ snap, wanted, onChosen }: { snap: Snapshot; wanted: string;
   );
 }
 
-const TAB_NAMES: Record<SongsTab, string> = { queue: 'Queue', folders: 'Folders', playlists: 'Playlists', device: 'This device', devices: 'Other devices' };
+const TAB_NAMES: Record<SongsTab, string> = { queue: 'Queue', folders: 'Folders', playlists: 'Playlists', device: 'This device', devices: 'Other devices', together: 'Together' };
 
 /** One of the user's other devices: what it is playing, and the means to steer it or to bring its music here. */
 function OtherDevice({ device, onChosen }: { device: LiveDevice; onChosen: () => void }) {
@@ -317,6 +317,53 @@ function Devices({ snap, onChosen }: { snap: Snapshot; onChosen: () => void }) {
   );
 }
 
+/** Listening together: letting others listen along with this device, and listening along with someone who is sharing. */
+function Together({ snap }: { snap: Snapshot }) {
+  const nas = snap.pairing?.serverName ?? 'the NAS';
+  const joined = snap.rooms.find((room) => room.id === snap.joined);
+  return (
+    <>
+      <section className="together">
+        <h3>From this device</h3>
+        {snap.sharing ? (
+          <>
+            <p>Everyone on {nas} can listen along with what this device plays. {snap.listeners === 0 ? 'Nobody is yet.' : `${snap.listeners} ${snap.listeners === 1 ? 'device is' : 'devices are'} listening along.`}</p>
+            <div className="actions"><button className="plain-button" type="button" onClick={() => void store.shareListening(false)}>Stop sharing</button></div>
+          </>
+        ) : (
+          <>
+            <p>Let everyone on {nas} listen along with what this device plays: the same songs at the same moment, following your pauses and skips. Nobody sees what you play until you turn this on.</p>
+            <div className="actions"><button className="plain-button primary-button" type="button" disabled={snap.joined !== null} onClick={() => void store.shareListening(true)}>Let others listen along</button></div>
+          </>
+        )}
+      </section>
+      <section className="together">
+        <h3>From other people</h3>
+        {joined && (
+          <p className="whose" role="status">You are listening along with <strong>{joined.by}</strong>. Their songs, pauses and skips are yours; choose a song of your own to stop.</p>
+        )}
+        {snap.rooms.length === 0 && <p>Nobody else is sharing right now.</p>}
+        <ul className="devices">
+          {snap.rooms.map((room) => (
+            <li className="device" key={room.id}>
+              <div className="device-name">{room.by}</div>
+              <div className="device-song">
+                <span className="song-title">{room.track?.title ?? 'Nothing playing yet'}</span>
+                <span className="song-detail">{[room.track?.artist, `on ${room.device}`].filter(Boolean).join(', ')}</span>
+              </div>
+              <div className="actions">
+                {room.id === snap.joined
+                  ? <button className="plain-button" type="button" onClick={() => void store.listenAlong(null)}>Stop listening along</button>
+                  : <button className="plain-button primary-button" type="button" disabled={snap.sharing} onClick={() => void store.listenAlong(room.id)}>Listen along</button>}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </>
+  );
+}
+
 /** What is playing and what comes after it, in order, for the listener to rearrange. */
 function Queue({ snap }: { snap: Snapshot }) {
   const now = snap.currentTrack;
@@ -363,10 +410,10 @@ function Queue({ snap }: { snap: Snapshot }) {
 export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => void }) {
   const [filter, setFilter] = useState('');
   const wanted = filter.trim().toLowerCase();
-  const tabs: SongsTab[] = [...(snap.pairing ? ['folders' as const, 'playlists' as const, ...(snap.tracks.length ? ['device' as const] : [])] : ['device' as const]), ...(snap.currentTrack ? ['queue' as const] : []), ...(snap.devices.length ? ['devices' as const] : [])];
+  const tabs: SongsTab[] = [...(snap.pairing ? ['folders' as const, 'playlists' as const, ...(snap.tracks.length ? ['device' as const] : [])] : ['device' as const]), ...(snap.currentTrack ? ['queue' as const] : []), ...(snap.devices.length ? ['devices' as const] : []), ...(snap.live && snap.user ? ['together' as const] : [])];
   const tab = tabs.includes(snap.songsTab) ? snap.songsTab : tabs[0];
   const device = snap.tracks.filter((track) => !wanted || `${track.title}\n${track.artist}\n${track.album}`.toLowerCase().includes(wanted));
-  const listed = tab === 'queue' || tab === 'devices' ? 0 : tab === 'device' ? snap.tracks.length
+  const listed = tab === 'queue' || tab === 'devices' || tab === 'together' ? 0 : tab === 'device' ? snap.tracks.length
     : tab === 'folders' ? (snap.nasFolder ? snap.nasFolder.folders.length + snap.nasFolder.tracks.length : 0)
       : (snap.playlists.find((playlist) => playlist.id === snap.openPlaylist)?.tracks.length ?? snap.playlists.length);
   // On a phone the panel covers the screen, so choosing a song closes it.
@@ -391,6 +438,7 @@ export function SongsPanel({ snap, onClose }: { snap: Snapshot; onClose: () => v
       <div className="songs-scroll">
         {tab === 'queue' && <Queue snap={snap} />}
         {tab === 'devices' && <Devices snap={snap} onChosen={closeIfNarrow} />}
+        {tab === 'together' && <Together snap={snap} />}
         {tab === 'folders' && <Folders snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
         {tab === 'playlists' && <Playlists snap={snap} wanted={wanted} onChosen={closeIfNarrow} />}
         {tab === 'device' && (

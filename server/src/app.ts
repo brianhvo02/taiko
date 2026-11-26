@@ -129,7 +129,7 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   const paths = new LibraryPaths(config.roots);
   const moved = new MovedRecord(config.roots);
   // Who has the player open, and what they are playing: kept in memory only.
-  const hub = deps.hub ?? new LiveHub();
+  const hub = deps.hub ?? new LiveHub(now);
   const { listening } = deps;
   const tags = deps.tags ?? new TagCache();
   /** When each device last asked for a rescan. */
@@ -396,6 +396,22 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       if (body.action === 'seek' && value === undefined) throw new HttpError(400, 'bad-request');
       const command: RemoteCommand = { action: body.action as RemoteCommand['action'], ...(value !== undefined ? { value } : {}) };
       if (!hub.command(device, parts[1], command)) throw new HttpError(404, 'not-found');
+      res.writeHead(204).end();
+      return;
+    }
+
+    if (parts.length === 1 && parts[0] === 'room') {
+      allow(req, 'POST', 'DELETE');
+      const device = requireDevice(req);
+      hub.share(device, pairing.userOf(device).name, req.method === 'POST');
+      res.writeHead(204).end();
+      return;
+    }
+
+    if (parts.length === 3 && parts[0] === 'rooms' && parts[2] === 'join') {
+      allow(req, 'POST', 'DELETE');
+      const device = requireDevice(req);
+      if (!hub.follow(device, req.method === 'POST' ? parts[1] : null)) throw new HttpError(404, 'not-found');
       res.writeHead(204).end();
       return;
     }
