@@ -13,6 +13,8 @@
  * told to ask for its audio in a way that lets a page read it (`crossOrigin`) before the audio is loaded, or the
  * mixer hears silence; the NAS allows that for the player's address.
  */
+import { Engine, EnginePlayer, rampAlong } from './engine';
+
 /**
  * The two players a song can sound from ("decks"), and how loud each comes out.
  *
@@ -25,15 +27,36 @@
  * listener's volume is the device's own, and fades are ramps the audio system runs by itself, so they stay smooth
  * on a locked phone where a page's timers are slowed.
  */
+/** Something a song can sound from: an audio element, or one of the engine's players, which acts like one. */
+export type Player = HTMLAudioElement | EnginePlayer;
+
+/** The fade's shape: two songs crossing stay about as loud together as one (each at 71% half-way). */
+function fadeCurve(from: number, to: number): Float32Array<ArrayBuffer> {
+  return Float32Array.from({ length: 24 }, (_, step) => fadeAt(from, to, step / 23));
+}
+
+function fadeAt(from: number, to: number, progress: number): number {
+  const eased = to > from ? Math.sin((progress * Math.PI) / 2) : Math.cos((progress * Math.PI) / 2);
+  return to > from ? from + (to - from) * eased : to + (from - to) * eased;
+}
+
 export class Decks {
   readonly elements: [HTMLAudioElement, HTMLAudioElement] = [new Audio(), new Audio()];
+  /**
+   * The engine (engine.ts) and its two players, decks 2 and 3: a FLAC song plays on one of these when the
+   * listener has gapless playback on, so that the next song of an album can begin on the frame it ends on.
+   */
+  readonly engine = new Engine();
+  readonly engines: [EnginePlayer, EnginePlayer] = [new EnginePlayer(this.engine), new EnginePlayer(this.engine)];
+  /** Every deck: the two elements, then the engine's two players. */
+  get players(): Player[] { return [...this.elements, ...this.engines]; }
   /** The mixer's parts, once it is on. */
   mixer: { context: AudioContext; fades: [GainNode, GainNode]; levels: [GainNode, GainNode]; speaker: HTMLAudioElement } | null = null;
   private volume = 1;
-  private readonly level = [1, 1];
-  private readonly fade = [1, 1];
-  private readonly ducked = [false, false];
-  private readonly timers = [0, 0];
+  private readonly level = [1, 1, 1, 1];
+  private readonly fade = [1, 1, 1, 1];
+  private readonly ducked = [false, false, false, false];
+  private readonly timers = [0, 0, 0, 0];
 
   /** Takes both elements into the mixer. Throws where the browser can't. Done once. */
   startMixer(): void {
@@ -60,6 +83,7 @@ export class Decks {
 
   /** Gets the sound flowing: called when a song is asked to play, from a tap or from the lock screen. */
   wake(): void {
+    this.engine.wake();
     if (!this.mixer) return;
     if (this.mixer.context.state !== 'running') void this.mixer.context.resume().catch(() => {});
     if (this.mixer.speaker.paused) void this.mixer.speaker.play().catch(() => {});
@@ -67,11 +91,15 @@ export class Decks {
 
   /** Stops the speaker when the listener has paused, so the phone knows nothing is playing. */
   rest(): void {
+    this.engine.rest();
     this.mixer?.speaker.pause();
   }
 
   private apply(deck: number): void {
-    if (this.mixer) {
+    if (deck >= 2) {
+      // The engine's players have their own volume controls, and can turn a song up as well as down.
+      this.engines[deck - 2].setGain(this.ducked[deck] ? 0 : this.volume * this.level[deck]);
+    } else if (this.mixer) {
       const { context, levels } = this.mixer;
       levels[deck].gain.cancelScheduledValues(context.currentTime);
       if (this.ducked[deck]) levels[deck].gain.setValueAtTime(0, context.currentTime);
@@ -84,7 +112,7 @@ export class Decks {
   /** The listener's volume, for both decks. (Through the mixer the device's own buttons set it.) */
   setVolume(volume: number): void {
     this.volume = volume;
-    for (const deck of [0, 1]) this.apply(deck);
+    for (const deck of [0, 1, 2, 3]) this.apply(deck);
   }
 
   /** How loud a deck's song is to come out next to others: 1 is as it is. */
@@ -104,9 +132,13 @@ export class Decks {
   setFade(deck: number, value: number): void {
     clearInterval(this.timers[deck]);
     this.fade[deck] = value;
-    if (this.mixer) {
+    if (deck >= 2) {
+      this.engines[deck - 2].setFade(value);
+    } else if (this.mixer) {
       const { context, fades } = this.mixer;
-      fades[deck].gain.cancelScheduledValues(context.currentTime);
+      // Everything set for it goes, a fade that is under way included: some browsers refuse a new value in the
+      // middle of one unless it is cancelled from its start.
+      fades[deck].gain.cancelScheduledValues(0);
       fades[deck].gain.setValueAtTime(value, context.currentTime);
     } else {
       this.apply(deck);
@@ -114,8 +146,8 @@ export class Decks {
   }
 
   /**
-   * Fades a deck to `to` over `seconds`, from where it is. The curve keeps two songs crossing at about the same
-   * loudness together (each at 71% half-way), not dipping in the middle as a straight line would.
+   * Fades a deck to `to` over `seconds`, from where it is, along a curve that keeps two songs crossing about as
+   * loud together as one, not dipping in the middle as a straight line would.
    */
   rampFade(deck: number, to: number, seconds: number): void {
     const from = this.fade[deck];
@@ -123,22 +155,18 @@ export class Decks {
       this.setFade(deck, to);
       return;
     }
-    const shape = (progress: number): number => {
-      const eased = to > from ? Math.sin((progress * Math.PI) / 2) : Math.cos((progress * Math.PI) / 2);
-      return to > from ? from + (to - from) * eased : to + (from - to) * eased;
-    };
+    const shape = (progress: number): number => fadeAt(from, to, progress);
     clearInterval(this.timers[deck]);
     this.fade[deck] = to;
+    if (deck >= 2) {
+      this.engines[deck - 2].setFade(to, seconds, fadeCurve(from, to));
+      return;
+    }
     if (this.mixer) {
       const { context, fades } = this.mixer;
-      const curve = Float32Array.from({ length: 64 }, (_, step) => shape(step / 63));
-      fades[deck].gain.cancelScheduledValues(context.currentTime);
-      try {
-        fades[deck].gain.setValueCurveAtTime(curve, context.currentTime, seconds);
-      } catch {
-        fades[deck].gain.setValueAtTime(from, context.currentTime);
-        fades[deck].gain.linearRampToValueAtTime(to, context.currentTime + seconds);
-      }
+      const curve = fadeCurve(from, to);
+      fades[deck].gain.cancelScheduledValues(0);
+      rampAlong(fades[deck].gain, curve, context.currentTime, seconds);
       return;
     }
     const began = performance.now();

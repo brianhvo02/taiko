@@ -50,6 +50,8 @@ export interface Track {
   nas: NasTrack | null;
   /** Lyrics files picked on this device for this track. */
   lyricFiles: File[];
+  /** Set when the engine couldn't play this song, so that it is played the ordinary way from then on. */
+  noEngine?: boolean;
   /** For a NAS song kept on this device (offline.ts): its lyrics as they were kept, read in place of the NAS's. */
   keptLyrics?: { name: string; text: string }[];
 }

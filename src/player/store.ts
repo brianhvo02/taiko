@@ -26,7 +26,9 @@ import {
 } from './persist';
 import type { Playlist, QueueSource, SavedTrack, Session } from './persist';
 import { levelFactor } from './level';
+import { enginePossible } from './engine';
 import { Decks, keepMixerWanted, mixerPossible, mixerWanted } from './mixer';
+import type { Player } from './mixer';
 import { inPlayOrder, makeOrder, nextRepeat, stepFrom, withMovedInQueue, withQueued, withoutQueued, withoutUpcoming } from './queue';
 import type { Repeat } from './queue';
 import { folderOf, parseRoute, routeUrl } from './route';
@@ -140,6 +142,9 @@ export interface Snapshot {
   levelVolume: boolean;
   /** Seconds one song fades into the next; 0 for none. */
   crossfade: number;
+  /** Whether an album's songs are joined without a gap, by playing FLAC songs on the engine (engine.ts); and whether this browser could. */
+  gapless: boolean;
+  canGapless: boolean;
   /** This NAS's playlists, kept in the browser. */
   playlists: Playlist[];
   /** The playlist open in the panel, or null for the list of them. */
@@ -194,7 +199,7 @@ class PlayerStore {
   private readonly decks = new Decks();
   private active = 0;
   /** The element the open song plays on. It changes at a crossfade, when the next song starts on the other one. */
-  get audio(): HTMLAudioElement { return this.decks.elements[this.active]; }
+  get audio(): HTMLAudioElement { return this.decks.players[this.active] as HTMLAudioElement; }
   /** The mixer's parts as the tests look at them: its context, the open song's level, and the speaker. */
   get mixer(): { context: AudioContext; gain: GainNode; speaker: HTMLAudioElement } | null {
     const mixer = this.decks.mixer;
@@ -205,7 +210,7 @@ class PlayerStore {
     playing: false, duration: 0, offset: 0, ...loadSettings(), notice: '',
     view: 'library', page: { kind: 'home' }, library: { state: 'idle', albums: [], scanning: false }, album: null, libraryQuery: '', searchTracks: [],
     pairing: START_PAIRING, nasState: 'idle', nasFolder: null, songsOpen: false, songsTab: START_PAIRING ? 'folders' : 'device', source: { kind: 'device' },
-    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), mixing: false, canMix: mixerPossible(), canAirplay: false, pendingPair: null, pairError: '',
+    playlists: START_PAIRING ? loadPlaylists(START_PAIRING.base) : [], openPlaylist: null, playlistsShared: false, user: START_PAIRING?.user ?? null, sharedPlaylists: [], openShared: null, deviceInvite: null, favourites: null, history: null, playCounts: {}, offline: { sets: [], ids: [], busy: null, use: null }, volume: loadVolume(), muted: false, canSetVolume: volumeCanBeSet(), mixing: false, canMix: mixerPossible(), canGapless: enginePossible(), canAirplay: false, pendingPair: null, pairError: '',
   };
   private listeners = new Set<() => void>();
   private source: LyricsSource | null = null;
@@ -246,7 +251,11 @@ class PlayerStore {
   private restarting = false;
   private restTimer = 0;
   /** During a crossfade: the element the song before is fading out on, and what to tidy when it is done. */
-  private fading: { element: HTMLAudioElement; deck: number; cutUrl: string; timer: number } | null = null;
+  private fading: { element: Player; deck: number; cutUrl: string; timer: number } | null = null;
+  /** The next song of an album, already loading on the engine to begin where the open one ends (gapless playback). */
+  private prepared: { id: string; deck: number; exact: PlayerStore['exact'] } | null = null;
+  private prepareRun = 0;
+  private preparing = false;
   /** Seconds the song now starting is to fade in over; 0 outside a crossfade. */
   private fadeIn = 0;
   /** True while a crossfade is moving on to its next song, so that choosing that song doesn't end the fade. */
@@ -283,10 +292,10 @@ class PlayerStore {
     // What the song's own element says is heard from both decks, and acted on only for the one the song is on: the
     // other is idle, or playing out the end of the song before during a crossfade.
     const on = (type: string, handler: (event: Event) => void): void => {
-      for (const element of this.decks.elements) element.addEventListener(type, (event) => { if (element === this.audio) handler(event); });
+      for (const [deck, player] of this.decks.players.entries()) player.addEventListener(type, (event: Event) => { if (deck === this.active) handler(event); });
     };
     // The song before, fading out, ends: the crossfade is over.
-    for (const element of this.decks.elements) element.addEventListener('ended', () => { if (this.fading?.element === element) this.endFade(); });
+    for (const [deck, player] of this.decks.players.entries()) player.addEventListener('ended', () => { if (this.fading?.deck === deck) this.endFade(); });
     // The lock screen's buttons are claimed again each time sound starts: iOS only honours them once audio is
     // playing, and goes back to its own skip-10-seconds buttons otherwise.
     on('play', () => { this.decks.wake(); this.set({ playing: true }); this.wireMediaSession(); this.tellPosition(); this.sayPlaying(true); });
@@ -311,6 +320,7 @@ class PlayerStore {
       if (Date.now() - this.positionTold > 1000) this.tellPosition();
       this.noteHeard();
       this.maybeCrossfade();
+      void this.maybePrepare();
       // A second look at the clock, at the first time reported while playing, in case the browser only shows the
       // song's time once it plays. Only where a stream's own time couldn't have got that far yet.
       if (this.clockChecked || this.audio.currentTime <= 0) return;
@@ -332,6 +342,16 @@ class PlayerStore {
     on('seeked', () => this.decks.duck(this.active, false));
     on('ended', () => this.songEnded());
     on('error', () => {
+      // The engine couldn't play the song (a browser that won't start its sound, a file it can't decode): the song
+      // is played the ordinary way instead, from where it had got to.
+      if (this.active >= 2) {
+        const song = this.current();
+        if (song && !song.noEngine) {
+          song.noEngine = true;
+          void this.reloadCurrent(this.position(), true);
+          return;
+        }
+      }
       const track = this.current();
       if (track && this.audio.src) this.set({ notice: `This browser can't play ${track.fileName || track.title}.` });
     });
@@ -398,6 +418,8 @@ class PlayerStore {
     // A song whose stream hasn't been loaded yet can't have ended: this is the song before it ending a second time
     // (a browser can say both that it paused at its end and that it ended), which would skip the new song.
     if (this.finished || !this.streamLoaded) return;
+    // The song fading out under the next one ends: that is the crossfade's business, not a song to move on from.
+    if (this.fading?.deck === this.active) return;
     this.finished = true;
     const { queue, currentId, repeat } = this.snapshot;
     const at = queue.findIndex((track) => track.id === currentId);
@@ -733,21 +755,44 @@ class PlayerStore {
 
   /* ---------- Playing ---------- */
 
-  private async urlFor(track: Track): Promise<string> {
+  /** Where a song's audio is, and how it is sought exactly when it can be (a FLAC file: by index here, by the NAS there). */
+  private async audioFor(track: Track): Promise<{ url: string; exact: PlayerStore['exact'] }> {
     if (track.file) {
       let url = this.urls.get(track.id);
       if (!url) {
         url = URL.createObjectURL(track.file);
         this.urls.set(track.id, url);
       }
-      return url;
+      // A FLAC file on the device gets its index read first (a few small reads), so that every seek is exact.
+      const index = await readFlacIndex(fileReader(track.file), track.file.size).catch(() => null);
+      return { url, exact: index ? { index, total: index.totalSamples / index.sampleRate } : null };
     }
     if (track.nas && this.snapshot.pairing) {
       const ticket = await fetchTicket(this.snapshot.pairing, track.nas.id);
-      if (ticket.exactSeek && ticket.totalSeconds) this.exact = { index: null, total: ticket.totalSeconds };
-      return ticket.url;
+      return { url: ticket.url, exact: ticket.exactSeek && ticket.totalSeconds ? { index: null, total: ticket.totalSeconds } : null };
     }
     throw new Error('no audio');
+  }
+
+  /**
+   * Gets a song ready to play: its copy kept on this device opened, a stored song looked up again (or followed to
+   * where it moved), and its audio found. Null when the NAS no longer has it.
+   */
+  private async resolve(track: Track): Promise<{ url: string; exact: PlayerStore['exact'] } | null> {
+    // (What is kept is read when the page opens; a song restored at once waits that moment for it.)
+    await this.offlineRead;
+    // A song kept on this device plays from its copy, with or without the NAS.
+    if (track.nas && !track.file && this.snapshot.offline.ids.includes(track.nas.id)) {
+      const copy = await offlineTrack(track.nas.id);
+      if (copy && !track.file) {
+        track.file = new File([copy.blob], copy.name, { type: copy.blob.type });
+        track.keptLyrics = copy.lyrics;
+        track.stale = false;
+      }
+    }
+    // A song from a playlist or a saved session is looked up again first: its lyrics files and cover may have changed.
+    if (track.stale && !(await this.freshen(track)) && !(await this.followMove(track))) return null;
+    return this.audioFor(track);
   }
 
   private resetStream(): void {
@@ -787,7 +832,13 @@ class PlayerStore {
     this.heard = 0;
     this.heardFrom = -1;
     this.playTold = false;
-    this.audio.pause();
+    // The next song of an album may already be in place on the engine, set to begin on the frame this one ended on.
+    const ready = this.prepared?.id === id ? this.prepared : null;
+    if (!ready) this.cancelPrepared();
+    // The song before goes quiet, unless it is fading out under this one or this one is already following it.
+    if (!this.handingOver && !ready) this.audio.pause();
+    // In the tap itself: a phone only lets a tap start the engine's sound.
+    if (autoplay && this.engineOn() && track.sampleRate) this.decks.engine.prime(track.sampleRate);
     this.resetStream();
     this.set({
       currentId: id, currentTrack: track, queue, song: null, lyricsLoading: true, lyricsNames: [], songInfo: known?.song ?? null, usInfo: known?.us ?? null,
@@ -800,39 +851,45 @@ class PlayerStore {
     // A song that follows on by itself while the library is showing leaves the library's address alone.
     if (history === 'push' || (history === 'replace' && this.snapshot.view === 'lyrics')) this.writeRoute(this.playRoute(), history);
     this.updateMediaSession();
+    if (ready) {
+      // Gapless: nothing is loaded or started. The deck the song is already on becomes the one the player follows.
+      this.prepared = null;
+      const before = this.active;
+      this.active = ready.deck;
+      if (before !== ready.deck) this.clearDeck(before);
+      this.exact = ready.exact;
+      if (this.exact) this.set({ duration: this.exact.total });
+      this.applyVolume();
+      this.streamLoaded = true;
+      this.decks.wake();
+      this.set({ playing: true });
+      this.wireMediaSession();
+      this.tellPosition();
+      this.sayPlaying(true);
+      await this.loadLyrics(track, run);
+      return;
+    }
     try {
-      // A song from a playlist or a saved session is looked up again first: its lyrics files and cover may have changed.
-      // A song kept on this device plays from its copy, with or without the NAS.
-      // (What is kept is read when the page opens; a song restored at once waits that moment for it.)
-      await this.offlineRead;
+      const audio = await this.resolve(track);
       if (run !== this.loadRun) return;
-      if (track.nas && !track.file && this.snapshot.offline.ids.includes(track.nas.id)) {
-        const copy = await offlineTrack(track.nas.id);
-        if (run !== this.loadRun) return;
-        if (copy) {
-          track.file = new File([copy.blob], copy.name, { type: copy.blob.type });
-          track.keptLyrics = copy.lyrics;
-          track.stale = false;
-        }
-      }
-      if (track.stale && !(await this.freshen(track)) && !(await this.followMove(track))) {
-        if (run === this.loadRun) this.set({ lyricsLoading: false, notice: `The NAS doesn't have "${track.title}" any more.` });
+      if (!audio) {
+        this.set({ lyricsLoading: false, notice: `The NAS doesn't have "${track.title}" any more.` });
         return;
       }
-      if (run !== this.loadRun) return;
       if (track.nas) this.set({ duration: track.durationSeconds ?? 0 });
-      const url = await this.urlFor(track);
-      if (run !== this.loadRun) return;
-      if (track.file) {
-        // A FLAC file on the device gets its index read first (a few small reads), so that every seek is exact.
-        const index = await readFlacIndex(fileReader(track.file), track.file.size).catch(() => null);
-        if (run !== this.loadRun) return;
-        if (index) this.exact = { index, total: index.totalSamples / index.sampleRate };
-      }
+      this.exact = audio.exact;
       if (this.exact) this.set({ duration: this.exact.total });
+      // The song goes on a deck of the kind it needs: the engine for a FLAC song when gapless playback is on, an
+      // audio element otherwise. During a crossfade that is never the deck the song before is fading out on.
+      const deck = this.freeDeck(this.wantsEngine(track, audio.exact));
+      if (deck !== this.active) {
+        if (this.fading?.deck !== this.active) this.clearDeck(this.active);
+        this.active = deck;
+      }
+      if (this.fading && this.fadeIn > 0) this.decks.setFade(deck, 0);
       // By now a stored song has been looked up again, so how loud it is is known.
       this.applyVolume();
-      this.audio.src = url;
+      this.audio.src = audio.url;
       this.streamLoaded = true;
       if (autoplay) this.audio.play().catch(() => {});
     } catch (error) {
@@ -959,6 +1016,7 @@ class PlayerStore {
     if (!currentId) return;
     const list = inPlayOrder(queue, this.order);
     const next = change(list, currentId);
+    this.cancelPrepared();
     this.order = next.map((_, index) => index);
     this.set({ queue: next });
     this.saveSessionNow();
@@ -1009,6 +1067,7 @@ class PlayerStore {
   }
 
   cycleRepeat(): void {
+    this.cancelPrepared();
     this.set({ repeat: nextRepeat(this.snapshot.repeat) });
     this.keepSettings();
   }
@@ -1020,12 +1079,13 @@ class PlayerStore {
     this.order = makeOrder(queue.length, shuffle, queue.findIndex((track) => track.id === currentId));
     this.set({ shuffle });
     this.keepSettings();
+    this.cancelPrepared();
     this.applyVolume();
   }
 
   private keepSettings(): void {
-    const { showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine, levelVolume, crossfade } = this.snapshot;
-    saveSettings({ showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine, levelVolume, crossfade });
+    const { showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine, levelVolume, crossfade, gapless } = this.snapshot;
+    saveSettings({ showRoman, showTranslation, repeat, shuffle, sweepLines, seekOnLine, levelVolume, crossfade, gapless });
   }
 
   /** Opens Safari's list of AirPlay speakers and screens. */
@@ -1604,7 +1664,8 @@ class PlayerStore {
     this.seekCount++;
     // Through the mixer the song goes quiet for the jump: some browsers go on sounding the old moment while they look.
     this.endFade();
-    if (!this.audio.paused && this.decks.mixer) this.decks.duck(this.active, true);
+    this.cancelPrepared();
+    if (!this.audio.paused && (this.decks.mixer || this.active >= 2)) this.decks.duck(this.active, true);
     if (!this.exact) {
       this.audio.currentTime = target;
       return;
@@ -1634,7 +1695,7 @@ class PlayerStore {
           cut = true;
           start = found.startSeconds;
         } else {
-          url = await this.urlFor(track);
+          url = (await this.audioFor(track)).url;
         }
       } else if (track.nas && this.snapshot.pairing) {
         const ticket = await fetchTicket(this.snapshot.pairing, track.nas.id, target);
@@ -1693,7 +1754,7 @@ class PlayerStore {
 
   setVolume(volume: number): void {
     const level = Math.max(0, Math.min(1, volume));
-    for (const element of this.decks.elements) element.muted = false;
+    for (const player of this.decks.players) player.muted = false;
     try {
       localStorage.setItem(VOLUME_KEY, String(level));
     } catch {
@@ -1705,7 +1766,7 @@ class PlayerStore {
 
   toggleMute(): void {
     const muted = !this.snapshot.muted;
-    for (const element of this.decks.elements) element.muted = muted;
+    for (const player of this.decks.players) player.muted = muted;
     // Unmuting a volume of nothing would still be silent.
     if (!muted && this.snapshot.volume === 0) this.setVolume(0.5);
     else this.set({ muted });
@@ -1716,6 +1777,114 @@ class PlayerStore {
   setSweepLines(sweepLines: boolean): void { this.set({ sweepLines }); this.keepSettings(); }
   setSeekOnLine(seekOnLine: boolean): void { this.set({ seekOnLine }); this.keepSettings(); }
   setLevelVolume(levelVolume: boolean): void { this.set({ levelVolume }); this.keepSettings(); this.applyVolume(); }
+
+  /**
+   * How loud a song is to come out on a deck. Where a page can't set the volume, levelling is the mixer's switch.
+   * The mixer and the engine can turn a quiet song up as well as a loud one down (never past its peak, and at most
+   * double); an element's own volume can only turn it down.
+   */
+  private levelOf(track: Track, deck: number, album: boolean): number {
+    const { canSetVolume, levelVolume, mixing } = this.snapshot;
+    if (!(canSetVolume ? levelVolume : mixing)) return 1;
+    return levelFactor(track, album, deck >= 2 || (this.decks.mixer && this.snapshot.mixing) ? 2 : 1);
+  }
+
+  /* ---------- Decks, and gapless playback on the engine ---------- */
+
+  /** Whether the engine may be used here: the listener asked for gapless playback, and the browser can do it. */
+  private engineOn(): boolean {
+    const { gapless, canGapless, canSetVolume, mixing } = this.snapshot;
+    return gapless && canGapless && (canSetVolume || mixing);
+  }
+
+  /** Whether a song goes on the engine: a FLAC song that is sought by playing a new stream, when the engine is on. */
+  private wantsEngine(track: Track, exact: PlayerStore['exact']): boolean {
+    if (!this.engineOn() || !exact || track.noEngine) return false;
+    const name = track.file?.name || track.fileName || (track.nas ? pathOfTrackId(track.nas.id) ?? '' : '');
+    return /\.flac$/i.test(name);
+  }
+
+  /** A deck of the kind wanted that nothing is on: the one in use if it will do, never one a song is fading out on. */
+  private freeDeck(engine: boolean): number {
+    const kind = engine ? [2, 3] : [0, 1];
+    const busy = new Set([this.fading?.deck, this.prepared?.deck]);
+    if (kind.includes(this.active) && !busy.has(this.active)) return this.active;
+    return kind.find((deck) => !busy.has(deck)) ?? kind[0];
+  }
+
+  /** Empties a deck: whatever was on it stops, and is let go. */
+  private clearDeck(deck: number): void {
+    const player = this.decks.players[deck];
+    player.pause();
+    player.removeAttribute('src');
+    player.load();
+  }
+
+  /** Loads the open song again and carries on from `at`: after the way it is played has changed under it. */
+  private async reloadCurrent(at: number, playing: boolean): Promise<void> {
+    const { currentId } = this.snapshot;
+    if (!currentId) return;
+    await this.select(currentId, false, 'replace');
+    if (this.snapshot.currentId !== currentId) return;
+    if (at > 1) {
+      this.resumeAfterSeek = playing;
+      this.seek(at);
+      if (this.exact) return;
+    }
+    if (playing) this.audio.play().catch(() => {});
+  }
+
+  /**
+   * Gapless playback. When the open song is on the engine and has under twenty seconds left, the song that follows
+   * it is got ready on the engine's other deck and told to begin on the very frame this one ends on. When this one
+   * ends, `select` finds it there already sounding. Only where the two simply follow each other: not when a
+   * crossfade will blend them, and not when what comes next isn't settled (a shuffled queue coming round again).
+   */
+  private async maybePrepare(): Promise<void> {
+    const { duration, repeat, source, shuffle, crossfade, queue, currentId } = this.snapshot;
+    if (this.active < 2 || this.prepared || this.preparing || this.fading || this.audio.paused || this.pendingSeek !== null || this.restarting) return;
+    const left = duration - this.position();
+    if (left > 20 || left < 1.5 || repeat === 'one') return;
+    if (crossfade && !(source.kind === 'folder' && !shuffle)) return;
+    const next = stepFrom(this.order, queue.findIndex((track) => track.id === currentId), 1, repeat);
+    if (next.index < 0 || (next.wrapped && shuffle)) return;
+    const track = queue[next.index];
+    const run = ++this.prepareRun;
+    this.preparing = true;
+    try {
+      const audio = await this.resolve(track);
+      if (run !== this.prepareRun || this.snapshot.currentId !== currentId || this.active < 2) return;
+      if (!audio || !this.wantsEngine(track, audio.exact)) return;
+      const deck = this.active === 2 ? 3 : 2;
+      const player = this.decks.engines[deck - 2];
+      this.decks.setFade(deck, 1);
+      this.decks.setLevel(deck, this.levelOf(track, deck, source.kind === 'folder' && !shuffle));
+      player.src = audio.url;
+      player.follow(this.decks.engines[this.active - 2]);
+      this.prepared = { id: track.id, deck, exact: audio.exact };
+    } catch {
+      // The next song will be opened the ordinary way when this one ends.
+    } finally {
+      if (run === this.prepareRun) this.preparing = false;
+    }
+  }
+
+  /** Lets go of a song that was got ready to follow the open one: what comes next has changed. */
+  private cancelPrepared(): void {
+    this.prepareRun++;
+    this.preparing = false;
+    if (!this.prepared) return;
+    this.clearDeck(this.prepared.deck);
+    this.prepared = null;
+  }
+
+  setGapless(gapless: boolean): void {
+    this.set({ gapless });
+    this.keepSettings();
+    this.cancelPrepared();
+    // A song that is playing moves to the engine, or off it, at once.
+    if (this.snapshot.currentId && this.audio.src) void this.reloadCurrent(this.position(), !this.audio.paused);
+  }
 
   /* ---------- Crossfade ---------- */
 
@@ -1732,16 +1901,13 @@ class PlayerStore {
     if (!(duration > crossfade * 2 + 10) || left > crossfade || left < 1) return;
     if (stepFrom(this.order, queue.findIndex((track) => track.id === currentId), 1, repeat).index < 0) return;
 
-    // This deck goes on playing the song out, fading; the other becomes the one the next song is on.
-    const element = this.audio;
+    // This deck goes on playing the song out, fading; the next song is put on another (see `select`).
+    this.cancelPrepared();
     const deck = this.active;
     this.decks.rampFade(deck, 0, left);
-    this.fading = { element, deck, cutUrl: this.cutUrl, timer: window.setTimeout(() => this.endFade(), (left + 1) * 1000) };
+    this.fading = { element: this.decks.players[deck], deck, cutUrl: this.cutUrl, timer: window.setTimeout(() => this.endFade(), (left + 1) * 1000) };
     this.cutUrl = '';
-    this.active = 1 - deck;
-    this.decks.setFade(this.active, 0);
     this.fadeIn = left;
-    this.finished = true;
     this.handingOver = true;
     try {
       this.step(1, true);
@@ -1756,9 +1922,7 @@ class PlayerStore {
     if (!fading) return;
     this.fading = null;
     clearTimeout(fading.timer);
-    fading.element.pause();
-    fading.element.removeAttribute('src');
-    fading.element.load();
+    this.clearDeck(fading.deck);
     if (fading.cutUrl) URL.revokeObjectURL(fading.cutUrl);
     this.decks.setFade(fading.deck, 1);
     // The song that came in is at full strength from here, however far its own fade had got.
@@ -1767,6 +1931,7 @@ class PlayerStore {
   }
 
   setCrossfade(seconds: number): void {
+    this.cancelPrepared();
     this.set({ crossfade: Math.max(0, Math.min(12, Math.round(seconds))) });
     this.keepSettings();
     if (!this.snapshot.crossfade) this.endFade();
@@ -1807,16 +1972,7 @@ class PlayerStore {
     this.decks.wake();
     const { currentId } = this.snapshot;
     if (fresh && currentId && this.audio.src) {
-      const at = this.position();
-      const playing = !this.audio.paused;
-      await this.select(currentId, false, 'replace');
-      if (this.snapshot.currentId !== currentId) return;
-      if (at > 1) {
-        this.resumeAfterSeek = playing;
-        this.seek(at);
-        if (this.exact) return;
-      }
-      if (playing) this.audio.play().catch(() => {});
+      await this.reloadCurrent(this.position(), !this.audio.paused);
     } else {
       this.applyVolume();
     }
@@ -1833,12 +1989,10 @@ class PlayerStore {
    * a phone a page can't set it at all, so there this does nothing.
    */
   private applyVolume(): void {
-    const { volume, levelVolume, currentTrack, source, shuffle } = this.snapshot;
+    const { volume, currentTrack, source, shuffle } = this.snapshot;
     const album = source.kind === 'folder' && !shuffle;
     this.decks.setVolume(volume);
-    // The mixer can turn a quiet song up as well as a loud one down (never past its peak, and at most double).
-    if (this.decks.mixer) this.decks.setLevel(this.active, this.snapshot.mixing && currentTrack ? levelFactor(currentTrack, album, 2) : 1);
-    else this.decks.setLevel(this.active, levelVolume && currentTrack ? levelFactor(currentTrack, album, 1) : 1);
+    this.decks.setLevel(this.active, currentTrack ? this.levelOf(currentTrack, this.active, album) : 1);
   }
   dismissNotice(): void { this.set({ notice: '' }); }
 

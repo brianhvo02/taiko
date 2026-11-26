@@ -753,3 +753,105 @@ test('crossfade: the next song rises as this one falls away, and an album in ord
   await expect.poll(async () => { const now = await fades(); return [now.playing[from], now.fades[now.on], now.fades[from]]; }, { timeout: 10_000 }).toEqual([false, 1, 1]);
   await page.evaluate(async () => { await (window as unknown as { taikoStore: Mixed }).taikoStore.setMixing(false); });
 });
+
+test('gapless: the next song of an album begins on the very frame this one ends on', async ({ page, browserName }) => {
+  // The test Firefox keeps a new audio context suspended until an audio element has sounded, so there the first
+  // song falls back to an ordinary player (which is the engine's fallback working) and this test's steps don't hold.
+  test.skip(browserName === 'firefox', 'headless Firefox holds a fresh AudioContext suspended');
+  await mockCatalog(page);
+  await pair(page, 'Gapless test');
+  type Timeline = { rate: number; base: number; end: number; scheduled: number } | null;
+  type Engine = { joined: boolean; timeline: Timeline; paused: boolean; levelNode: GainNode | null };
+  type Store = {
+    active: number; prepared: { id: string; deck: number } | null; decks: { engines: Engine[] };
+    setGapless(on: boolean): void; position(): number; getSnapshot(): { currentTrack: { title: string } | null; playing: boolean };
+  };
+  const now = () => page.evaluate(() => {
+    const store = (window as unknown as { taikoStore: Store }).taikoStore;
+    return {
+      title: store.getSnapshot().currentTrack?.title, deck: store.active, at: store.position(), prepared: store.prepared?.deck ?? null,
+      engines: store.decks.engines.map((engine) => ({ joined: engine.joined, timeline: engine.timeline, paused: engine.paused })),
+    };
+  });
+  await page.evaluate(() => (window as unknown as { taikoStore: Store }).taikoStore.setGapless(true));
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await page.locator('.library .songlist .song', { hasText: 'Paper Lanterns' }).click();
+  await expect(page.locator('.play')).toHaveText('Pause');
+
+  // A FLAC song plays on the engine (decks 2 and 3), and its time runs.
+  await expect.poll(async () => (await now()).deck).toBe(2);
+  await expect.poll(async () => (await now()).at).toBeGreaterThan(0.5);
+  await expect(page.locator('.lyrics .line')).toHaveCount(3);
+
+  // What comes out is listened to: both engine decks into one meter, read many times a second.
+  await page.evaluate(() => {
+    const store = (window as unknown as { taikoStore: Store }).taikoStore;
+    const meters: AnalyserNode[] = [];
+    const tap = () => {
+      for (const [index, engine] of store.decks.engines.entries()) {
+        const node = engine.levelNode as (GainNode & { tapped?: boolean }) | null;
+        if (!node || node.tapped) continue;
+        node.tapped = true;
+        const meter = node.context.createAnalyser();
+        meter.fftSize = 256;
+        node.connect(meter);
+        meters[index] = meter;
+      }
+    };
+    const heard: number[] = [];
+    (window as unknown as { heard: number[] }).heard = heard;
+    const samples = new Float32Array(256);
+    const listen = () => {
+      tap();
+      let loudest = 0;
+      for (const meter of meters) {
+        if (!meter) continue;
+        meter.getFloatTimeDomainData(samples);
+        for (const sample of samples) loudest = Math.max(loudest, Math.abs(sample));
+      }
+      heard.push(loudest);
+      setTimeout(listen, 10);
+    };
+    listen();
+  });
+
+  // Near its end, the next song is got ready on the other engine deck, to begin where this one ends.
+  await seekTo(page, 40);
+  await expect.poll(async () => (await now()).at).toBeGreaterThan(40.2);
+  await expect.poll(async () => (await now()).prepared, { timeout: 15_000 }).toBe(3);
+  await expect.poll(async () => (await now()).engines[1].joined).toBe(true);
+  const armed = await now();
+  expect(armed.title).toBe('Paper Lanterns');
+  expect(armed.engines[1].timeline!.base).toBe(armed.engines[0].timeline!.end);
+  expect(armed.engines[1].timeline!.rate).toBe(armed.engines[0].timeline!.rate);
+  const listenedFrom = await page.evaluate(() => (window as unknown as { heard: number[] }).heard.length);
+
+  // The song changes at the join, with no load and no start: the other deck is simply the one being followed.
+  await expect.poll(async () => (await now()).title, { timeout: 20_000 }).toBe('港の灯');
+  const after = await now();
+  expect(after.deck).toBe(3);
+  expect(after.at).toBeLessThan(2);
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await page.waitForTimeout(1500);
+  // Across the join, sound never stopped.
+  const heard = await page.evaluate((from) => (window as unknown as { heard: number[] }).heard.slice(from), listenedFrom);
+  expect(heard.length).toBeGreaterThan(100);
+  expect(Math.min(...heard)).toBeGreaterThan(0.02);
+
+  // The song that came in seeks and pauses like any other, and the one after it is joined too.
+  await seekTo(page, 14);
+  await expect.poll(async () => (await now()).at).toBeGreaterThan(14.2);
+  await expect.poll(async () => (await now()).prepared, { timeout: 15_000 }).toBe(2);
+  await page.locator('.play').click();
+  await expect(page.locator('.play')).toHaveText('Play');
+  const paused = (await now()).at;
+  await page.waitForTimeout(700);
+  expect((await now()).at).toBeCloseTo(paused, 1);
+  await page.locator('.play').click();
+  await expect.poll(async () => (await now()).title, { timeout: 20_000 }).toBe('untagged');
+  expect((await now()).deck).toBe(2);
+
+  // Turned off, the open song goes back to an ordinary player and carries on.
+  await page.evaluate(() => (window as unknown as { taikoStore: Store }).taikoStore.setGapless(false));
+  await expect.poll(async () => (await now()).deck).toBeLessThan(2);
+});

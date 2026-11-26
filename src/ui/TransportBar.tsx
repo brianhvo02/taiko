@@ -240,6 +240,11 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
                   <p className="toggle-note">Songs whose files say how loud they are play at about the same loudness. While this is on, AirPlay can't carry the sound.</p>
                 </>
               )}
+              {snap.canGapless && (snap.canSetVolume || snap.mixing) && (
+                <label className="toggle" title="The songs of an album follow each other with no gap at all, as they were made. For FLAC songs.">
+                  <input type="checkbox" checked={snap.gapless} onChange={(e) => store.setGapless(e.currentTarget.checked)} /> Join an album's songs without a gap
+                </label>
+              )}
               {(snap.canSetVolume || snap.mixing) && (
                 <label className="choice" title="One song fades into the next over this long. Songs of an album played in order follow each other as they were made, without a fade.">
                   Crossfade
