@@ -31,6 +31,12 @@
  *   POST   plays               paired  PlayRequest -> 204        (the user heard a song: half of it, or four minutes)
  *   GET    history             paired  -> HistoryResponse       (the user's latest plays, most played songs, albums played lately)
  *   POST   plays/counts        paired  PlayCountsRequest -> PlayCountsResponse  (how often the user played some songs)
+ *   GET    events              paired  -> a stream of LiveEvent, as server-sent events (`data: <json>`), kept open
+ *          while the player is: who else of the user's devices is there and what each is playing, and commands
+ *   POST   state               paired  Partial<PlaybackState> -> 204  (what this device is playing; what is left
+ *          out stays as last said)
+ *   POST   devices/:id/command paired  RemoteCommand -> 204     (to another of the user's own devices; 404 when it
+ *          isn't connected)
  *   POST   moved               paired  MovedRequest -> MovedResponse  (where songs that are gone from their old
  *          place went, for playlists and links made before an album was replaced)
  *   POST   tracks/:id/ticket   paired  TicketRequest (optional body) -> TicketResponse
@@ -121,6 +127,40 @@ export interface PlayCountsRequest {
 export interface PlayCountsResponse {
   counts: Record<string, number>;
 }
+
+/** What a device is playing, as it tells the user's other devices. */
+export interface PlaybackState {
+  playing: boolean;
+  /** Seconds into the song at the time `at` (milliseconds since 1970, by the device's clock). */
+  position: number;
+  at: number;
+  duration: number;
+  /** The open song, when it is one from the NAS. */
+  track: SavedTrack | null;
+  /** The queue (NAS songs only) and the order it plays in, so another device can take it over. */
+  queue?: SavedTrack[];
+  order?: number[];
+}
+
+/** A device of the user's that has the player open. */
+export interface LiveDevice {
+  id: string;
+  name: string;
+  state: PlaybackState | null;
+}
+
+/** Something one device asks of another: to play, pause, step or move within the song (`value` seconds). */
+export interface RemoteCommand {
+  action: 'play' | 'pause' | 'next' | 'previous' | 'seek';
+  value?: number;
+}
+
+export type LiveEvent =
+  | { type: 'devices'; you: string; devices: LiveDevice[] }
+  | { type: 'command'; from: string; command: RemoteCommand };
+
+/** The most songs of its queue a device tells the others about. */
+export const MAX_SHARED_QUEUE = 500;
 
 /** Track ids to look up: songs a device has stored that may have moved. */
 export interface MovedRequest {

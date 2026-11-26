@@ -753,3 +753,86 @@ describe('what a user marks and hears', () => {
     expect(again.id).not.toBe(aki.id);
   });
 });
+
+describe('remote control between a user\'s devices', () => {
+  /** Opens a device's stream and collects what the server sends down it. */
+  function listen(running: Running, token: string): { events: Record<string, unknown>[]; close: () => void; next: (count: number) => Promise<void> } {
+    const events: Record<string, unknown>[] = [];
+    const req = request(`${running.base}events`, { headers: { authorization: `Bearer ${token}` } }, (res) => {
+      let pending = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => {
+        pending += chunk;
+        for (let cut = pending.indexOf('\n\n'); cut >= 0; cut = pending.indexOf('\n\n')) {
+          const block = pending.slice(0, cut);
+          pending = pending.slice(cut + 2);
+          if (block.startsWith('data: ')) events.push(JSON.parse(block.slice(6)) as Record<string, unknown>);
+        }
+      });
+    });
+    req.on('error', () => {});
+    req.end();
+    const next = async (count: number): Promise<void> => {
+      for (let tries = 0; events.length < count && tries < 200; tries++) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(events.length).toBeGreaterThanOrEqual(count);
+    };
+    return { events, close: () => req.destroy(), next };
+  }
+
+  it('tells a user\'s devices about each other, carries commands between them, and keeps other users out', async () => {
+    const home = await start('/api/');
+    const aki = home.pairing.addUser('Aki')!;
+    const phone = await pair(home, 'Phone');
+    const laptop = await pair(home, 'Laptop');
+    const stranger = (await home.call('POST', 'pair', { body: { code: home.pairing.createCode(1, aki.id).code, deviceName: 'Aki phone' } })).json<PairResponse>().token;
+    expect((await home.call('GET', 'events')).status).toBe(401);
+
+    // The phone connects and is told it is alone; then the laptop, and both are told of both.
+    const onPhone = listen(home, phone);
+    await onPhone.next(1);
+    const first = onPhone.events[0] as { type: string; you: string; devices: { id: string; name: string; state: unknown }[] };
+    expect(first.type).toBe('devices');
+    expect(first.devices).toEqual([{ id: first.you, name: 'Phone', state: null }]);
+    const onLaptop = listen(home, laptop);
+    await onLaptop.next(1);
+    await onPhone.next(2);
+    const laptopId = (onLaptop.events[0] as { you: string }).you;
+    expect((onPhone.events[1] as { devices: { name: string }[] }).devices.map((device) => device.name).sort()).toEqual(['Laptop', 'Phone']);
+    // Another user's device sees only itself.
+    const onStranger = listen(home, stranger);
+    await onStranger.next(1);
+    expect((onStranger.events[0] as { devices: { name: string }[] }).devices.map((device) => device.name)).toEqual(['Aki phone']);
+
+    // The laptop says what it is playing; the phone hears. A later word about the position alone keeps the rest.
+    const song = { id: 'bWFpbi9hLmZsYWM', title: 'Paper Lanterns', artist: 'Midori Vale', album: '', trackNumber: null, discNumber: null, durationSeconds: 50 };
+    expect((await home.call('POST', 'state', { token: laptop, body: { playing: true, position: 3, at: 1000, duration: 50, track: song, queue: [song], order: [0], extra: 'dropped' } })).status).toBe(204);
+    expect((await home.call('POST', 'state', { token: laptop, body: { position: 9, at: 7000 } })).status).toBe(204);
+    await onPhone.next(4);
+    const heard = (onPhone.events[3] as { devices: { id: string; state: unknown }[] }).devices.find((device) => device.id === laptopId);
+    expect(heard?.state).toEqual({ playing: true, position: 9, at: 7000, duration: 50, track: song, queue: [song], order: [0] });
+    expect(onStranger.events).toHaveLength(1);
+
+    // The phone pauses the laptop, and moves it; the laptop is told who asked.
+    expect((await home.call('POST', `devices/${laptopId}/command`, { token: phone, body: { action: 'pause' } })).status).toBe(204);
+    expect((await home.call('POST', `devices/${laptopId}/command`, { token: phone, body: { action: 'seek', value: 30 } })).status).toBe(204);
+    for (let tries = 0; onLaptop.events.filter((event) => event.type === 'command').length < 2 && tries < 200; tries++) await new Promise((resolve) => setTimeout(resolve, 10));
+    const commands = onLaptop.events.filter((event) => event.type === 'command');
+    expect(commands).toEqual([
+      { type: 'command', from: first.you, command: { action: 'pause' } },
+      { type: 'command', from: first.you, command: { action: 'seek', value: 30 } },
+    ]);
+    // Not another user's device, not a device that isn't there, not a command that isn't one.
+    expect((await home.call('POST', `devices/${laptopId}/command`, { token: stranger, body: { action: 'pause' } })).status).toBe(404);
+    expect((await home.call('POST', 'devices/nobody/command', { token: phone, body: { action: 'pause' } })).status).toBe(404);
+    expect((await home.call('POST', `devices/${laptopId}/command`, { token: phone, body: { action: 'explode' } })).status).toBe(400);
+    expect((await home.call('POST', `devices/${laptopId}/command`, { token: phone, body: { action: 'seek' } })).status).toBe(400);
+
+    // The laptop closes the player: the phone is told it is alone again.
+    const before = onPhone.events.length;
+    onLaptop.close();
+    await onPhone.next(before + 1);
+    expect((onPhone.events[onPhone.events.length - 1] as { devices: { name: string }[] }).devices.map((device) => device.name)).toEqual(['Phone']);
+    onPhone.close();
+    onStranger.close();
+  });
+});

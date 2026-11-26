@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
   ApiError, BrowseResponse, HealthResponse, LibraryResponse, MeResponse, PairResponse, ScanResponse, SearchResponse,
-  FavouritesResponse, HistoryResponse, InviteResponse, MovedResponse, NasUser, PlayCountsResponse, PlaylistsResponse, SharedPlaylistsResponse, TicketRequest, TicketResponse,
+  FavouritesResponse, HistoryResponse, InviteResponse, MovedResponse, NasUser, PlayCountsResponse, PlaybackState, RemoteCommand, PlaylistsResponse, SharedPlaylistsResponse, TicketRequest, TicketResponse,
 } from '../../src/shared/api';
-import { MAX_MOVED_IDS } from '../../src/shared/api';
+import { MAX_MOVED_IDS, MAX_SHARED_QUEUE } from '../../src/shared/api';
 import { acceptPlaylists, acceptTracks, toSavedTrack } from '../../src/shared/playlists';
 import type { SharedPlaylist } from '../../src/shared/playlists';
 import { MAX_DEVICE_NAME_LENGTH, RateLimiter, TICKET_LIFETIME_SECONDS, signTicket, verifyTicket } from './auth';
@@ -17,6 +17,7 @@ import { nasTrack } from './library';
 import type { Library } from './library';
 import type { PlaylistStore } from './playlists';
 import type { ListeningStore } from './listening';
+import { LiveHub } from './live';
 import { MovedRecord } from './moved';
 import { LibraryPaths, byNameNumeric, decodeTrackId, encodeTrackId, listFolder } from './paths';
 import type { FolderListing, ResolvedTrack } from './paths';
@@ -29,6 +30,8 @@ export const MAX_JSON_BODY_BYTES = 16 * 1024;
 /** The playlists arrive whole, so their body may be far larger than any other. */
 export const MAX_PLAYLISTS_BODY_BYTES = 8 * 1024 * 1024;
 export const MAX_MOVED_BODY_BYTES = 4 * 1024 * 1024;
+/** What a device says it is playing may carry its queue. */
+export const MAX_STATE_BODY_BYTES = 2 * 1024 * 1024;
 export { DEFAULT_PAIR_ATTEMPTS as PAIR_ATTEMPTS } from './config';
 export const PAIR_WINDOW_MS = 10 * 60 * 1000;
 /** Invites a device may make for its own user in that window, and how long each lasts. */
@@ -47,6 +50,8 @@ export interface AppDeps {
   pairing: PairingStore;
   /** The playlists the paired devices share. */
   playlists: PlaylistStore;
+  /** The live connections to open players. Left out: one of the app's own. */
+  hub?: LiveHub;
   /** Each user's favourites and listening history. Left out: none are kept, and the routes answer 404. */
   listening?: ListeningStore;
   /** Signs tickets. */
@@ -123,6 +128,8 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
   const inviteLimit = new RateLimiter(DEVICE_INVITES, PAIR_WINDOW_MS);
   const paths = new LibraryPaths(config.roots);
   const moved = new MovedRecord(config.roots);
+  // Who has the player open, and what they are playing: kept in memory only.
+  const hub = deps.hub ?? new LiveHub();
   const { listening } = deps;
   const tags = deps.tags ?? new TagCache();
   /** When each device last asked for a rescan. */
@@ -341,6 +348,55 @@ export function createApp(deps: AppDeps): (req: IncomingMessage, res: ServerResp
       allow(req, 'GET');
       const device = requireDevice(req);
       sendJson(req, res, 200, listening.history(device.userId) satisfies HistoryResponse);
+      return;
+    }
+
+    if (parts.length === 1 && parts[0] === 'events') {
+      allow(req, 'GET');
+      const device = requireDevice(req);
+      res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no' });
+      res.write(': connected\n\n');
+      const leave = hub.connect(device, res);
+      req.on('close', leave);
+      return;
+    }
+
+    if (parts.length === 1 && parts[0] === 'state') {
+      allow(req, 'POST');
+      const device = requireDevice(req);
+      const body = await readJsonBody(req, false, MAX_STATE_BODY_BYTES);
+      const number = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined);
+      const state: Partial<PlaybackState> = {};
+      if (typeof body.playing === 'boolean') state.playing = body.playing;
+      for (const key of ['position', 'at', 'duration'] as const) {
+        const value = number(body[key]);
+        if (value !== undefined) state[key] = value;
+      }
+      if ('track' in body) state.track = toSavedTrack(body.track);
+      if (Array.isArray(body.queue)) {
+        // The queue and its order go together: an order that doesn't fit the queue is left out.
+        const queue = acceptTracks(body.queue.slice(0, MAX_SHARED_QUEUE)) ?? [];
+        const order = Array.isArray(body.order) ? body.order : [];
+        state.queue = queue;
+        state.order = order.length === queue.length && new Set(order).size === queue.length && order.every((index) => Number.isInteger(index) && index >= 0 && index < queue.length)
+          ? order as number[] : queue.map((_, index) => index);
+      }
+      hub.setState(device, state);
+      res.writeHead(204).end();
+      return;
+    }
+
+    if (parts.length === 3 && parts[0] === 'devices' && parts[2] === 'command') {
+      allow(req, 'POST');
+      const device = requireDevice(req);
+      const body = await readJsonBody(req);
+      const actions = ['play', 'pause', 'next', 'previous', 'seek'];
+      if (typeof body.action !== 'string' || !actions.includes(body.action)) throw new HttpError(400, 'bad-request');
+      const value = typeof body.value === 'number' && Number.isFinite(body.value) && body.value >= 0 ? body.value : undefined;
+      if (body.action === 'seek' && value === undefined) throw new HttpError(400, 'bad-request');
+      const command: RemoteCommand = { action: body.action as RemoteCommand['action'], ...(value !== undefined ? { value } : {}) };
+      if (!hub.command(device, parts[1], command)) throw new HttpError(404, 'not-found');
+      res.writeHead(204).end();
       return;
     }
 
