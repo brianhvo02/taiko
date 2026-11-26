@@ -287,3 +287,54 @@ test('lyrics with no timing are shown to read, and timed lyrics for the same son
   await expect(page.getByText("These lyrics have no timing, so they don't follow the song")).toHaveCount(0);
   await expect(page.locator('.toast')).toHaveCount(0);
 });
+
+test('lyrics on the full screen: only the lyrics, with the controls while the listener stirs', async ({ page }) => {
+  await pick(page, 'Choose files', [lanterns(), ...versions]);
+  await expect(page.locator('.lyrics .line')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Lyrics on the full screen' }).click();
+  await expect(page.locator('.app')).toHaveClass(/\bfocus\b/);
+  await expect(page.locator('.top')).toBeHidden();
+  // While the pointer moves, the song is named and the controls are there.
+  await page.mouse.move(300, 300);
+  await page.mouse.move(320, 320);
+  await expect(page.locator('.focus-head')).toHaveCSS('opacity', '1');
+  await expect(page.locator('.focus-title')).toHaveText('紙の灯籠');
+  await expect(page.locator('.bar')).toHaveCSS('opacity', '1');
+  // Left alone, they go, and the lyrics are all there is.
+  await expect(page.locator('.bar')).toHaveCSS('opacity', '0', { timeout: 8000 });
+  await expect(page.locator('.focus-head')).toHaveCSS('opacity', '0');
+  await expect(page.locator('.lyrics .line').first()).toBeVisible();
+  // Space still plays; Escape, F or the button leaves.
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.app')).not.toHaveClass(/\bfocus\b/);
+  await expect(page.locator('.top')).toBeVisible();
+  await page.keyboard.press('f');
+  await expect(page.locator('.app')).toHaveClass(/\bfocus\b/);
+  await page.mouse.move(200, 200);
+  await page.getByRole('button', { name: 'Leave full screen' }).click();
+  await expect(page.locator('.app')).not.toHaveClass(/\bfocus\b/);
+});
+
+test('the lyrics float in a window of their own, where the browser has one', async ({ page }) => {
+  test.skip(!(await page.evaluate(() => 'documentPictureInPicture' in window)), 'this browser has no floating windows for pages');
+  await pick(page, 'Choose files', [lanterns(), ...versions]);
+  await expect(page.locator('.lyrics .line')).toHaveCount(3);
+  const opened = page.context().waitForEvent('page');
+  await page.getByRole('button', { name: 'Float the lyrics in a window' }).click();
+  const floating = await opened;
+  // The same lyrics, with the song's name over them, following the song from there.
+  await expect(floating.locator('.floating-title')).toHaveText('紙の灯籠');
+  await expect(floating.locator('.lyrics .line')).toHaveCount(3);
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await expect(floating.locator('.lyrics .line').first()).toHaveAttribute('data-state', 'active', { timeout: 10_000 });
+  // Pressing a line there moves the song.
+  await floating.locator('.lyrics .line').nth(2).click();
+  await expect.poll(() => shown(page)).toBeGreaterThan(29.8);
+  // The page's switches reach it, and the button closes it.
+  await page.getByRole('button', { name: 'Options' }).click();
+  await page.getByLabel('Romanization').uncheck();
+  await expect(floating.locator('.lyrics .roman').first()).toBeHidden();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Close the floating lyrics' }).click();
+  await expect.poll(() => floating.isClosed()).toBe(true);
+});

@@ -42,6 +42,9 @@ export function LyricsView({ song }: { song: Song }) {
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
+    // The window the lyrics are shown in: the page's own, or the small floating one (see FloatingLyrics.tsx),
+    // whose frames keep coming when the page itself is in the background.
+    const win = root.ownerDocument.defaultView ?? window;
     const lines: ShownLine[] = [];
     root.replaceChildren();
 
@@ -92,13 +95,13 @@ export function LyricsView({ song }: { song: Song }) {
         line.el.setAttribute('aria-disabled', 'true');
         for (const word of line.words) word.el.style.setProperty('--p', '1');
       }
-      scrollTo(0, 0);
+      win.scrollTo(0, 0);
       return () => root.classList.remove('still', 'untimed');
     }
 
-    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+    const reducedMotion = win.matchMedia('(prefers-reduced-motion: reduce)');
     // On a phone the line being sung sits at the top, where the styles leave room for it; on a wide screen, in the middle.
-    const narrow = matchMedia('(max-width: 44rem)');
+    const narrow = win.matchMedia('(max-width: 44rem)');
     let shown = -1;
     // Whether a press on a line moves the song there. When it doesn't, the lines stop looking and acting like buttons.
     let pressable = true;
@@ -110,9 +113,9 @@ export function LyricsView({ song }: { song: Song }) {
       if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown'].includes(e.key)) hold();
     };
     let seeks = store.seekCount;
-    addEventListener('wheel', hold, { passive: true });
-    addEventListener('touchmove', hold, { passive: true });
-    addEventListener('keydown', onKey);
+    win.addEventListener('wheel', hold, { passive: true });
+    win.addEventListener('touchmove', hold, { passive: true });
+    win.addEventListener('keydown', onKey);
 
     const tick = () => {
       const settings = store.getSnapshot();
@@ -148,16 +151,16 @@ export function LyricsView({ song }: { song: Song }) {
           lines[current].el.scrollIntoView({ block: narrow.matches ? 'start' : 'center',behavior: reducedMotion.matches ? 'auto' : 'smooth' });
         }
       }
-      frame = requestAnimationFrame(tick);
+      frame = win.requestAnimationFrame(tick);
     };
-    scrollTo(0, 0);
-    frame = requestAnimationFrame(tick);
+    win.scrollTo(0, 0);
+    frame = win.requestAnimationFrame(tick);
 
     return () => {
-      cancelAnimationFrame(frame);
-      removeEventListener('wheel', hold);
-      removeEventListener('touchmove', hold);
-      removeEventListener('keydown', onKey);
+      win.cancelAnimationFrame(frame);
+      win.removeEventListener('wheel', hold);
+      win.removeEventListener('touchmove', hold);
+      win.removeEventListener('keydown', onKey);
     };
   }, [song]);
 

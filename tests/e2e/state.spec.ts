@@ -280,7 +280,7 @@ test('comes back to where the listener left off, with the queue, the moment and 
   expect(again).toBeGreaterThan(left - 0.3);
 
   // Reloading the song's own page comes back to the moment too, with its lyrics showing.
-  await page.getByRole('button', { name: 'Lyrics' }).click();
+  await page.getByRole('button', { name: 'Lyrics', exact: true }).click();
   await expect(page).toHaveURL('/nas/play/Music/Midori%20Vale/Night%20Market/2%20-%20lanterns.flac');
   await page.reload();
   await listen(page);
@@ -300,7 +300,7 @@ test('comes back to where the listener left off, with the queue, the moment and 
   await expect(page.getByText('0.10 s later')).toBeVisible();
   await expect(page.getByLabel('Romanization')).not.toBeChecked();
   await page.keyboard.press('Escape');
-  await page.getByRole('button', { name: 'Lyrics' }).click();
+  await page.getByRole('button', { name: 'Lyrics', exact: true }).click();
   await next(page).click();
   await expect(page.getByRole('heading', { name: '港の灯' })).toBeVisible();
   await page.getByRole('button', { name: 'Options' }).click();

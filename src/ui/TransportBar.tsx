@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { Snapshot } from '../player/store';
 import { store } from '../player/store';
+import { canFloat } from './FloatingLyrics';
 import { formatTime, nowPlaying, pickFiles, qualityOf } from './format';
 
 /** The bar's icons, drawn on a 24-unit grid in the text colour. A button's name comes from its hidden label. */
@@ -43,6 +44,10 @@ const ICONS = {
       <path d="M11.3 9.6a.900.9 0 0 1 1.6.560v4.24a.900.9 0 1 1-1.8 0v-2.33l-.300.19a.900.9 0 0 1-.960-1.52l1.46-.940Z" />
     </>
   ),
+  // Four corners pulling outward: the whole screen.
+  expand: <path d="M4 5a1 1 0 0 1 1-1h4a1 1 0 1 1 0 2H6v3a1 1 0 1 1-2 0V5Zm10 0a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v4a1 1 0 1 1-2 0V6h-3a1 1 0 0 1-1-1ZM5 14a1 1 0 0 1 1 1v3h3a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1v-4a1 1 0 0 1 1-1Zm14 0a1 1 0 0 1 1 1v4a1 1 0 0 1-1 1h-4a1 1 0 1 1 0-2h3v-3a1 1 0 0 1 1-1Z" />,
+  // A window with a smaller one set in its corner.
+  float: <path d="M5 4h14a2 2 0 0 1 2 2v5a1 1 0 1 1-2 0V6H5v12h4a1 1 0 1 1 0 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm8 9h7a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-5a1 1 0 0 1 1-1Z" />,
   heart: <path d="M12 20.3 4.9 13.4a4.9 4.9 0 0 1 0-7 5 5 0 0 1 7.1 0 5 5 0 0 1 7.1 0 4.9 4.9 0 0 1 0 7L12 20.3Zm0-2.8 5.7-5.5a2.9 2.9 0 0 0 0-4.2 3 3 0 0 0-4.2 0L12 9.2l-1.5-1.4a3 3 0 0 0-4.2 0 2.9 2.9 0 0 0 0 4.2L12 17.5Z" />,
   heartOn: <path d="M12 20.3 4.9 13.4a4.9 4.9 0 0 1 0-7 5 5 0 0 1 7.1 0 5 5 0 0 1 7.1 0 4.9 4.9 0 0 1 0 7L12 20.3Z" />,
   // A screen with a triangle rising into it: where the sound can be sent.
@@ -86,7 +91,18 @@ const fillOf = (value: number, max: number) => `${max > 0 ? Math.min(100, (value
  * The player's bar: the song on the left, the transport over the seek bar in the middle, and on the right the
  * options, the Songs list and the volume. On a phone the three stack.
  */
-export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong: () => void }) {
+interface TransportBarProps {
+  snap: Snapshot;
+  onFindSong: () => void;
+  /** Whether lyrics are on the screen, so there is something to put on the full screen. */
+  lyricsShown: boolean;
+  onFocus: () => void;
+  /** Whether the lyrics are floating in a window of their own, and the way to float them or bring them back. */
+  floating: boolean;
+  onFloat: () => void;
+}
+
+export function TransportBar({ snap, onFindSong, lyricsShown, onFocus, floating, onFloat }: TransportBarProps) {
   const seekRef = useRef<HTMLInputElement>(null);
   const elapsedRef = useRef<HTMLOutputElement>(null);
   const optionsRef = useRef<HTMLDivElement>(null);
@@ -271,6 +287,11 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
               )}
               <button className="plain-button" type="button" onClick={async () => store.addFiles(await pickFiles())}>Add lyrics or music</button>
               <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); onFindSong(); }}>Find this song in Apple Music</button>
+              {lyricsShown && (
+                <div className="extras-narrow">
+                  <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); onFocus(); }}>Lyrics on the full screen</button>
+                </div>
+              )}
               {snap.canAirplay && !snap.mixing && (
                 <div className="extras-airplay">
                   <button className="plain-button" type="button" onClick={() => { setOptionsOpen(false); store.chooseAirplay(); }}>Play on an AirPlay speaker</button>
@@ -280,6 +301,8 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
             </div>
           )}
         </div>
+        {lyricsShown && <IconButton icon="expand" label="Lyrics on the full screen" className="wide-only" onClick={onFocus} />}
+        {canFloat() && snap.song && <IconButton icon="float" label={floating ? 'Close the floating lyrics' : 'Float the lyrics in a window'} className="wide-only" pressed={floating} onClick={onFloat} />}
         {snap.canAirplay && !snap.mixing && <IconButton icon="airplay" label="AirPlay" className="airplay" onClick={() => store.chooseAirplay()} />}
         <IconButton icon="songs" label="Songs" pressed={snap.songsOpen} onClick={() => (snap.songsOpen ? store.closeSongs() : store.openSongs())} />
         {volume}
