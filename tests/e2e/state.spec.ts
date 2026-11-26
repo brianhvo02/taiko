@@ -855,3 +855,78 @@ test('gapless: the next song of an album begins on the very frame this one ends 
   await page.evaluate(() => (window as unknown as { taikoStore: Store }).taikoStore.setGapless(false));
   await expect.poll(async () => (await now()).deck).toBeLessThan(2);
 });
+
+test('a join shaped in a playlist: leaves the first song early, fades, starts the next part-way in, and is kept', async ({ page }) => {
+  await mockCatalog(page);
+  await pair(page, 'Join test');
+  type Store = {
+    decks: { players: { paused: boolean }[] }; active: number; position(): number; syncPlaylists(): Promise<void>;
+    getSnapshot(): { album: { tracks: { title: string }[] }; playlists: { id: string; transitions?: Record<string, unknown> }[]; currentTrack: { title: string } | null };
+    createPlaylist(name: string, tracks: unknown[], show: boolean): void;
+  };
+  const now = () => page.evaluate(() => {
+    const store = (window as unknown as { taikoStore: Store }).taikoStore;
+    return { title: store.getSnapshot().currentTrack?.title, at: store.position(), deck: store.active, sounding: store.decks.players.filter((player) => !player.paused).length };
+  });
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await expect(page.locator('.library .songlist .song')).toHaveCount(3);
+  await page.evaluate(() => {
+    const store = (window as unknown as { taikoStore: Store }).taikoStore;
+    store.createPlaylist('Shaped', store.getSnapshot().album.tracks.filter((track) => track.title !== 'untagged'), true);
+    (store as unknown as { openSongs(tab: string): void }).openSongs('playlists');
+  });
+
+  // The first song's menu opens the join with the next; the last song has no next to lead into.
+  const panel = page.getByRole('complementary', { name: 'Songs' });
+  await panel.getByRole('button', { name: 'More for 港の灯' }).click();
+  await expect(panel.getByRole('button', { name: 'Shape how it leads into the next song' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await panel.getByRole('button', { name: 'More for Paper Lanterns' }).click();
+  await panel.getByRole('button', { name: 'Shape how it leads into the next song' }).click();
+  const dialog = page.getByRole('dialog', { name: 'From Paper Lanterns into 港の灯' });
+  await expect(dialog).toBeVisible();
+  // As set under Options there is nothing to adjust; a crossfade can be.
+  await expect(dialog.getByLabel('Leave Paper Lanterns')).toBeDisabled();
+  await dialog.getByLabel('The join').selectOption('fade');
+  await dialog.getByLabel('Crossfade for').fill('3');
+  await dialog.getByLabel('Leave Paper Lanterns').fill('10');
+  await dialog.getByLabel('Start 港の灯').fill('5');
+  await expect(dialog.getByRole('img')).toHaveAccessibleName('A 3 second crossfade, leaving the first song 10 seconds early, starting the next 5 seconds in');
+
+  // Heard before it is kept: it plays from a few seconds before the join (50 s, less 10, less 3, less 6).
+  await dialog.getByRole('button', { name: 'Hear it' }).click();
+  await expect.poll(async () => (await now()).at).toBeGreaterThan(31);
+  expect((await now()).at).toBeLessThan(37);
+  // The next song comes in ten seconds before the first would have ended, from five seconds in, both sounding.
+  await expect.poll(async () => (await now()).title, { timeout: 15_000 }).toBe('港の灯');
+  await expect.poll(async () => (await now()).sounding).toBe(2);
+  await expect.poll(async () => (await now()).at).toBeGreaterThan(5);
+  expect((await now()).at).toBeLessThan(9);
+  await expect.poll(async () => (await now()).sounding, { timeout: 8000 }).toBe(1);
+
+  // Kept, the row says so, and it is the NAS's too: a new visit has it.
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(panel.locator('.song', { hasText: 'Paper Lanterns' })).toContainText('fades 3 s');
+  await page.waitForTimeout(700);
+  await page.evaluate(() => (window as unknown as { taikoStore: Store }).taikoStore.syncPlaylists());
+  await page.goto('/');
+  expect(await page.evaluate(() => Object.values((window as unknown as { taikoStore: Store }).taikoStore.getSnapshot().playlists[0].transitions ?? {}))).toEqual([{ kind: 'fade', seconds: 3, leave: 10, startAt: 5 }]);
+
+  // Played in order from the playlist, the join is made the same way without being asked.
+  await page.getByRole('button', { name: 'Playlists' }).click();
+  await panel.locator('.song.list', { hasText: 'Shaped' }).click();
+  await panel.locator('.song', { hasText: 'Paper Lanterns' }).first().click();
+  await expect.poll(async () => (await now()).at).toBeGreaterThan(0.3);
+  await seekTo(page, 33);
+  await expect.poll(async () => (await now()).title, { timeout: 15_000 }).toBe('港の灯');
+  await expect.poll(async () => (await now()).at).toBeGreaterThan(5);
+  expect((await now()).at).toBeLessThan(9);
+
+  // Put back to the usual, the shaping is gone.
+  await panel.getByRole('button', { name: 'More for Paper Lanterns' }).click();
+  await panel.getByRole('button', { name: 'Shape how it leads into the next song' }).click();
+  await dialog.getByLabel('The join').selectOption('usual');
+  await dialog.getByRole('button', { name: 'Put it back to the usual' }).click();
+  await expect(panel.locator('.song', { hasText: 'Paper Lanterns' })).not.toContainText('fades');
+});

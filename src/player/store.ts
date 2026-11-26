@@ -18,8 +18,8 @@ import {
 } from '../nas/client';
 import type { PairLink, Pairing } from '../nas/client';
 import { lyricsBelongTo, pathOfTrackId, trackIdOf } from '../shared/api';
-import { noteChanges, reconcile } from '../shared/playlists';
-import type { PlaylistAccess, SharedPlaylist } from '../shared/playlists';
+import { noteChanges, reconcile, transitionKey, withoutLostTransitions } from '../shared/playlists';
+import type { PlaylistAccess, SharedPlaylist, Transition } from '../shared/playlists';
 import type { FavouritesResponse, HistoryResponse, InviteResponse, NasUser } from '../shared/api';
 import {
   cleanName, loadOffsets, loadPendingPlays, loadPlaylistSync, loadPlaylists, loadSession, loadSettings, saveOffset, savePendingPlays, savePlaylistSync, savePlaylists, saveSession, saveSettings, withMoved, withTracks, withoutTrack,
@@ -255,6 +255,12 @@ class PlayerStore {
   /** The next song of an album, already loading on the engine to begin where the open one ends (gapless playback). */
   private prepared: { id: string; deck: number; exact: PlayerStore['exact'] } | null = null;
   private prepareRun = 0;
+  /** Seconds into the next song to start it at, set by a join the listener shaped and used once by `select`. */
+  private startNextAt = 0;
+  /** A moment the listener sought to while the open song was still being fetched; it starts there. */
+  private wantedStart: number | null = null;
+  /** A join being tried out before it is kept: which one, and how. */
+  private trying: { key: string; transition: Transition } | null = null;
   private preparing = false;
   /** Seconds the song now starting is to fade in over; 0 outside a crossfade. */
   private fadeIn = 0;
@@ -434,6 +440,8 @@ class PlayerStore {
     } else if (stepFrom(this.order, at, 1, repeat).index < 0) {
       this.set({ playing: false });
     } else {
+      // A join the listener shaped may start the next song part-way in.
+      this.startNextAt = this.handover()?.startAt ?? 0;
       this.step(1, true);
     }
   }
@@ -812,6 +820,10 @@ class PlayerStore {
 
   /** Opens a track: its audio, then its lyrics. */
   async select(id: string, autoplay = true, history: 'push' | 'replace' | 'none' = 'push'): Promise<void> {
+    // Where in the song to start: its beginning, unless a join the listener shaped says otherwise.
+    const joinAt = this.startNextAt;
+    this.startNextAt = 0;
+    this.wantedStart = null;
     if (autoplay) this.decks.wake();
     // Choosing a song cuts short a crossfade that is under way, unless this is the crossfade's own next song.
     if (!this.handingOver) this.endFade();
@@ -889,9 +901,25 @@ class PlayerStore {
       if (this.fading && this.fadeIn > 0) this.decks.setFade(deck, 0);
       // By now a stored song has been looked up again, so how loud it is is known.
       this.applyVolume();
-      this.audio.src = audio.url;
-      this.streamLoaded = true;
-      if (autoplay) this.audio.play().catch(() => {});
+      // A seek made while the song was being fetched wins over where a shaped join would have started it.
+      const startAt = this.wantedStart ?? joinAt;
+      this.wantedStart = null;
+      if (startAt > 0.5 && this.exact && startAt < this.exact.total - 2) {
+        // Started part-way in, the way a seek is made exact: with a stream that begins there.
+        this.streamLoaded = true;
+        this.pendingSeek = startAt;
+        this.resumeAfterSeek = autoplay;
+        void this.restartAt(startAt);
+      } else {
+        this.audio.src = audio.url;
+        this.streamLoaded = true;
+        if (startAt > 0.5) {
+          const element = this.audio;
+          element.addEventListener('loadedmetadata', () => { if (run === this.loadRun) element.currentTime = startAt; }, { once: true });
+        }
+        if (this.pendingSeek !== null) this.pendingSeek = null;
+        if (autoplay) this.audio.play().catch(() => {});
+      }
     } catch (error) {
       if (run !== this.loadRun) return;
       this.nasFailed(error, `Can't get ${track.title} from the NAS.`);
@@ -1337,7 +1365,7 @@ class PlayerStore {
     this.set({ notice: added ? `Added ${added} ${added === 1 ? 'song' : 'songs'} to ${playlist.name}.` : `${tracks.length === 1 ? 'That song is' : 'Those songs are'} already in ${playlist.name}.` });
   }
 
-  removeFromPlaylist(id: string, index: number): void { this.changePlaylist(id, (playlist) => withoutTrack(playlist, index)); }
+  removeFromPlaylist(id: string, index: number): void { this.changePlaylist(id, (playlist) => withoutLostTransitions(withoutTrack(playlist, index))); }
   moveInPlaylist(id: string, index: number, direction: 1 | -1): void { this.changePlaylist(id, (playlist) => withMoved(playlist, index, direction)); }
   renamePlaylist(id: string, name: string): void { this.changePlaylist(id, (playlist) => ({ ...playlist, name: cleanName(name) })); }
 
@@ -1349,6 +1377,51 @@ class PlayerStore {
   }
 
   showPlaylist(id: string | null): void { this.set({ openPlaylist: id, openShared: null }); }
+
+  /** Shapes the join between two songs of one of the listener's playlists, or puts it back to the usual (null). */
+  setTransition(id: string, from: string, to: string, transition: Transition | null): void {
+    this.cancelPrepared();
+    this.changePlaylist(id, (playlist) => {
+      const { [transitionKey(from, to)]: _was, ...others } = playlist.transitions ?? {};
+      const transitions = transition ? { ...others, [transitionKey(from, to)]: transition } : others;
+      const { transitions: _all, ...rest } = playlist;
+      return Object.keys(transitions).length ? { ...rest, transitions } : rest;
+    });
+  }
+
+  /**
+   * Plays a join as it would be with `transition`, before it is kept: the playlist from the first of the two
+   * songs, starting a few seconds before the join. It stays in force until `stopTrying`.
+   */
+  async tryTransition(id: string, index: number, transition: Transition | null): Promise<void> {
+    const playlist = this.snapshot.playlists.find((candidate) => candidate.id === id);
+    const from = playlist?.tracks[index];
+    const to = playlist?.tracks[index + 1];
+    if (!playlist || !from || !to) return;
+    // Trying "the usual" means the join without the shaping that is kept for it.
+    this.trying = { key: transitionKey(from.id, to.id), transition: transition ?? this.usualJoin() };
+    if (this.snapshot.shuffle) this.toggleShuffle();
+    await this.playPlaylist(id, index);
+    if (this.snapshot.currentId !== `nas:${from.id}`) return;
+    const shaped = this.trying?.transition;
+    const lead = (shaped?.leave ?? 0) + (shaped?.kind === 'fade' ? shaped.seconds : 0) + 6;
+    const at = Math.max(0, this.snapshot.duration - lead);
+    if (at > 1) {
+      this.resumeAfterSeek = true;
+      this.seek(at);
+    }
+  }
+
+  /** The join as the settings under Options make it, as a transition. */
+  private usualJoin(): Transition {
+    const { crossfade } = this.snapshot;
+    return crossfade ? { kind: 'fade', seconds: crossfade, leave: 0, startAt: 0 } : { kind: 'cut', seconds: 0, leave: 0, startAt: 0 };
+  }
+
+  stopTrying(): void {
+    this.trying = null;
+    this.cancelPrepared();
+  }
 
   /** Says who but the owner may use a playlist: nobody, everyone to play it, or everyone to change it too. */
   setPlaylistAccess(id: string, access: PlaylistAccess): void {
@@ -1665,6 +1738,13 @@ class PlayerStore {
     // Through the mixer the song goes quiet for the jump: some browsers go on sounding the old moment while they look.
     this.endFade();
     this.cancelPrepared();
+    // The song is still being fetched: it will start at the moment asked for (see `select`).
+    if (!this.streamLoaded) {
+      this.wantedStart = target;
+      this.pendingSeek = target;
+      this.tellPosition();
+      return;
+    }
     if (!this.audio.paused && (this.decks.mixer || this.active >= 2)) this.decks.duck(this.active, true);
     if (!this.exact) {
       this.audio.currentTime = target;
@@ -1841,14 +1921,13 @@ class PlayerStore {
    * crossfade will blend them, and not when what comes next isn't settled (a shuffled queue coming round again).
    */
   private async maybePrepare(): Promise<void> {
-    const { duration, repeat, source, shuffle, crossfade, queue, currentId } = this.snapshot;
+    const { duration, repeat, source, shuffle, queue, currentId } = this.snapshot;
     if (this.active < 2 || this.prepared || this.preparing || this.fading || this.audio.paused || this.pendingSeek !== null || this.restarting) return;
     const left = duration - this.position();
-    if (left > 20 || left < 1.5 || repeat === 'one') return;
-    if (crossfade && !(source.kind === 'folder' && !shuffle)) return;
-    const next = stepFrom(this.order, queue.findIndex((track) => track.id === currentId), 1, repeat);
-    if (next.index < 0 || (next.wrapped && shuffle)) return;
-    const track = queue[next.index];
+    if (left > 20 || left < 1.5) return;
+    const plan = this.handover();
+    if (!plan || !plan.plain || !plan.settled) return;
+    const track = queue[stepFrom(this.order, queue.findIndex((candidate) => candidate.id === currentId), 1, repeat).index];
     const run = ++this.prepareRun;
     this.preparing = true;
     try {
@@ -1889,17 +1968,63 @@ class PlayerStore {
   /* ---------- Crossfade ---------- */
 
   /**
-   * Starts a crossfade when the song has that long left: the next song begins on the other deck and rises while
-   * this one falls away. Not within an album played in order, whose songs are meant to follow each other as they
-   * were made; not for a song too short to give up that much of itself; and not where the loudness can't be set.
+   * How the open song hands over to the one after it: a crossfade of `fade` seconds (0 for none), begun `leave`
+   * seconds before the song's end, the next song starting `startAt` seconds in. `plain` is a simple join at the
+   * song's own end, the kind gapless playback can make exact. The listener's own shaping of that join in a
+   * playlist (a `Transition`) comes first; otherwise it is the crossfade set under Options, which leaves alone the
+   * songs of an album played in order, and songs too short to give up that much of themselves. Null when nothing
+   * follows.
+   */
+  private handover(): { fade: number; leave: number; startAt: number; plain: boolean; settled: boolean } | null {
+    const { crossfade, duration, repeat, source, shuffle, canSetVolume, mixing, queue, currentId } = this.snapshot;
+    if (repeat === 'one') return null;
+    const at = queue.findIndex((track) => track.id === currentId);
+    const next = stepFrom(this.order, at, 1, repeat);
+    if (next.index < 0) return null;
+    const canFade = canSetVolume || mixing;
+    // A shuffled queue coming round again is shuffled afresh: which song is next isn't known until then.
+    const settled = !(next.wrapped && shuffle);
+    const shaped = settled ? this.shapedJoin(queue[at], queue[next.index]) : null;
+    if (shaped) {
+      const fade = shaped.kind === 'fade' && canFade ? Math.min(shaped.seconds, Math.max(0, duration - shaped.leave - 2)) : 0;
+      return { fade, leave: Math.min(shaped.leave, Math.max(0, duration - 2)), startAt: shaped.startAt, plain: fade === 0 && !shaped.leave && !shaped.startAt, settled };
+    }
+    const album = source.kind === 'folder' && !shuffle;
+    const fade = crossfade && canFade && !album && duration > crossfade * 2 + 10 ? crossfade : 0;
+    return { fade, leave: 0, startAt: 0, plain: fade === 0, settled };
+  }
+
+  /** The listener's own shaping of the join between two songs: one being tried out, or one kept in the playlist that is playing in order. */
+  private shapedJoin(from: Track | undefined, to: Track | undefined): Transition | null {
+    if (!from?.nas || !to?.nas) return null;
+    const key = transitionKey(from.nas.id, to.nas.id);
+    if (this.trying?.key === key) return this.trying.transition;
+    const { source, shuffle, playlists, sharedPlaylists } = this.snapshot;
+    if (source.kind !== 'playlist' || shuffle) return null;
+    const playlist = playlists.find((candidate) => candidate.id === source.id) ?? sharedPlaylists.find((candidate) => sharedKey(candidate) === source.id);
+    return playlist?.transitions?.[key] ?? null;
+  }
+
+  /**
+   * Hands over to the next song when it is time: starts a crossfade when the song has that long left (the next
+   * song begins on another deck and rises while this one falls away), or, for a join the listener shaped to leave
+   * this song before its end without a fade, cuts to the next one at that moment.
    */
   private maybeCrossfade(): void {
-    const { crossfade, duration, repeat, source, shuffle, canSetVolume, mixing, queue, currentId } = this.snapshot;
-    if (!crossfade || this.fading || this.handingOver || this.audio.paused || this.pendingSeek !== null || this.restarting || this.finished) return;
-    if (!(canSetVolume || mixing) || repeat === 'one' || (source.kind === 'folder' && !shuffle)) return;
-    const left = duration - this.position();
-    if (!(duration > crossfade * 2 + 10) || left > crossfade || left < 1) return;
-    if (stepFrom(this.order, queue.findIndex((track) => track.id === currentId), 1, repeat).index < 0) return;
+    if (this.fading || this.handingOver || this.audio.paused || this.pendingSeek !== null || this.restarting || this.finished) return;
+    const plan = this.handover();
+    if (!plan || plan.plain) return;
+    const left = this.snapshot.duration - plan.leave - this.position();
+    if (plan.fade <= 0) {
+      // No fade. A join at the song's own end is the ending's business (`songEnded`); one before it is made here.
+      if (plan.leave <= 0 || left > 0.05) return;
+      this.cancelPrepared();
+      this.finished = true;
+      this.startNextAt = plan.startAt;
+      this.step(1, true);
+      return;
+    }
+    if (left > plan.fade || left < 0.4) return;
 
     // This deck goes on playing the song out, fading; the next song is put on another (see `select`).
     this.cancelPrepared();
@@ -1908,6 +2033,7 @@ class PlayerStore {
     this.fading = { element: this.decks.players[deck], deck, cutUrl: this.cutUrl, timer: window.setTimeout(() => this.endFade(), (left + 1) * 1000) };
     this.cutUrl = '';
     this.fadeIn = left;
+    this.startNextAt = plan.startAt;
     this.handingOver = true;
     try {
       this.step(1, true);

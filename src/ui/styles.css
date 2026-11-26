@@ -412,7 +412,7 @@ input::placeholder { color: var(--unsung); }
 .seek-row output:first-child { text-align: right; }
 
 /* Sliders: a thin track filled up to the value (--fill, set from script), with a thumb that shows on approach. */
-.bar input[type="range"] {
+:is(.bar, .trim) input[type="range"] {
   --fill: 0%;
   appearance: none;
   width: 100%;
@@ -422,14 +422,14 @@ input::placeholder { color: var(--unsung); }
   background: none;
   cursor: pointer;
 }
-.bar input[type="range"]::-webkit-slider-runnable-track { height: .25rem; border-radius: 999px; background: linear-gradient(to right, var(--hide) var(--fill), var(--rule) var(--fill)); }
-.bar input[type="range"]::-moz-range-track { height: .25rem; border-radius: 999px; background: linear-gradient(to right, var(--hide) var(--fill), var(--rule) var(--fill)); }
-.bar input[type="range"]::-webkit-slider-thumb { appearance: none; width: .75rem; height: .75rem; margin-top: -.25rem; border: 0; border-radius: 50%; background: var(--hide); opacity: 0; }
-.bar input[type="range"]::-moz-range-thumb { width: .75rem; height: .75rem; border: 0; border-radius: 50%; background: var(--hide); opacity: 0; }
-.bar input[type="range"]:hover::-webkit-slider-runnable-track, .bar input[type="range"]:focus-visible::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--brass) var(--fill), var(--rule) var(--fill)); }
-.bar input[type="range"]:hover::-moz-range-track, .bar input[type="range"]:focus-visible::-moz-range-track { background: linear-gradient(to right, var(--brass) var(--fill), var(--rule) var(--fill)); }
-.bar input[type="range"]:hover::-webkit-slider-thumb, .bar input[type="range"]:focus-visible::-webkit-slider-thumb { opacity: 1; }
-.bar input[type="range"]:hover::-moz-range-thumb, .bar input[type="range"]:focus-visible::-moz-range-thumb { opacity: 1; }
+:is(.bar, .trim) input[type="range"]::-webkit-slider-runnable-track { height: .25rem; border-radius: 999px; background: linear-gradient(to right, var(--hide) var(--fill), var(--rule) var(--fill)); }
+:is(.bar, .trim) input[type="range"]::-moz-range-track { height: .25rem; border-radius: 999px; background: linear-gradient(to right, var(--hide) var(--fill), var(--rule) var(--fill)); }
+:is(.bar, .trim) input[type="range"]::-webkit-slider-thumb { appearance: none; width: .75rem; height: .75rem; margin-top: -.25rem; border: 0; border-radius: 50%; background: var(--hide); opacity: 0; }
+:is(.bar, .trim) input[type="range"]::-moz-range-thumb { width: .75rem; height: .75rem; border: 0; border-radius: 50%; background: var(--hide); opacity: 0; }
+:is(.bar, .trim) input[type="range"]:hover::-webkit-slider-runnable-track, :is(.bar, .trim) input[type="range"]:focus-visible::-webkit-slider-runnable-track { background: linear-gradient(to right, var(--brass) var(--fill), var(--rule) var(--fill)); }
+:is(.bar, .trim) input[type="range"]:hover::-moz-range-track, :is(.bar, .trim) input[type="range"]:focus-visible::-moz-range-track { background: linear-gradient(to right, var(--brass) var(--fill), var(--rule) var(--fill)); }
+:is(.bar, .trim) input[type="range"]:hover::-webkit-slider-thumb, :is(.bar, .trim) input[type="range"]:focus-visible::-webkit-slider-thumb { opacity: 1; }
+:is(.bar, .trim) input[type="range"]:hover::-moz-range-thumb, :is(.bar, .trim) input[type="range"]:focus-visible::-moz-range-thumb { opacity: 1; }
 .bar input[type="range"]:disabled { cursor: default; }
 
 .side-zone { display: flex; align-items: center; justify-content: flex-end; gap: .35rem; min-width: 0; }
@@ -453,6 +453,22 @@ input::placeholder { color: var(--unsung); }
 .extras .plain-button { justify-self: start; }
 .extras-volume { display: none; }
 .extras-airplay { display: none; }
+/* Shaping a join between two songs. The picture is the two songs as bars, the first in the drumhead's colour and
+   the next in brass ("now" is about to be it); what is skipped is only an outline. */
+.dialog.join { width: min(32rem, 100%); max-height: calc(100dvh - 2rem); overflow: auto; }
+.dialog.join h2 { overflow-wrap: anywhere; }
+.join-picture { display: block; width: 100%; height: auto; }
+.join-first { fill: var(--hide); opacity: .85; }
+.join-next { fill: var(--brass); }
+.join-skipped { fill: none; stroke: var(--unsung); stroke-width: 1; stroke-dasharray: 3 3; }
+.join-mark { stroke: var(--rule); stroke-width: 1; }
+.trim { display: grid; grid-template-columns: minmax(0, 1fr) minmax(6rem, 1.2fr) 5.5rem; align-items: center; gap: .8rem; color: var(--quiet); font-size: var(--small); }
+.trim span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trim output { color: var(--hide); font-variant-numeric: tabular-nums; text-align: right; }
+.trim input:disabled { opacity: .4; }
+/* In the dialog the handle always shows: there is no hovering on a phone. */
+.trim input[type="range"]::-webkit-slider-thumb { opacity: 1; }
+.trim input[type="range"]::-moz-range-thumb { opacity: 1; }
 /* A setting chosen from a short list, named on the same line. */
 .choice { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .25rem 0; }
 .choice select { font-size: var(--small); }

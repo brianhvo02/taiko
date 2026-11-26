@@ -2,7 +2,9 @@ import { useState } from 'react';
 import { smallCover } from '../library/tracks';
 import type { Snapshot, SongsTab } from '../player/store';
 import { playlistKey, sharedKey, store } from '../player/store';
-import type { PlaylistAccess } from '../shared/playlists';
+import { transitionKey } from '../shared/playlists';
+import type { PlaylistAccess, Transition } from '../shared/playlists';
+import { TransitionDialog } from './TransitionDialog';
 import { canPickFolder, pickFiles } from './format';
 import { ACCESS, AddToPlaylist, FOLDER, ForgetSongs, KeepButton, NOTE, QueueItems, playlistsKept, LIST, RowMenu, SongRow, hasLyrics, rowText } from './rows';
 
@@ -116,11 +118,19 @@ function SharedView({ snap, at, wanted, onChosen }: { snap: Snapshot; at: string
   );
 }
 
+/** A shaped join, said in a few words on the row of the song it follows. */
+function joinSaid(transition: Transition | undefined): string {
+  if (!transition) return '';
+  return transition.kind === 'fade' ? `fades ${transition.seconds} s` : transition.leave || transition.startAt ? 'cuts' : 'no fade';
+}
+
 /** One playlist: its songs in order, to play, reorder and remove, and the playlist itself to rename or delete. */
 function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: string; wanted: string; onChosen: () => void }) {
   const playlist = snap.playlists.find((candidate) => candidate.id === id);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // The song whose join with the one after it is being shaped.
+  const [shaping, setShaping] = useState<number | null>(null);
   if (!playlist) return null;
   const count = playlist.tracks.length;
 
@@ -167,13 +177,14 @@ function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: stri
         {playlist.tracks.map((song, index) => (!wanted || song.title.toLowerCase().includes(wanted)) && (
           <SongRow
             key={song.id}
-            text={{ ...rowText(song), lead: index + 1 }}
+            text={{ ...rowText(song), lead: index + 1, meta: [joinSaid(playlist.transitions?.[transitionKey(song.id, playlist.tracks[index + 1]?.id ?? '')]), rowText(song).meta].filter(Boolean).join(', ') }}
             current={`nas:${song.id}` === snap.currentId}
             onPlay={() => { void store.playPlaylist(id, index); onChosen(); }}
             menu={(
               <RowMenu label={`More for ${song.title}`}>{(close) => (
                 <>
                   <QueueItems song={song} close={close} />
+                  {index < count - 1 && <button type="button" className="menu-item" onClick={() => { setShaping(index); close(); }}>Shape how it leads into the next song</button>}
                   <button type="button" className="menu-item" disabled={index === 0} onClick={() => { store.moveInPlaylist(id, index, -1); close(); }}>Move up</button>
                   <button type="button" className="menu-item" disabled={index === count - 1} onClick={() => { store.moveInPlaylist(id, index, 1); close(); }}>Move down</button>
                   <button type="button" className="menu-item" onClick={() => { store.removeFromPlaylist(id, index); close(); }}>Remove from playlist</button>
@@ -183,6 +194,9 @@ function PlaylistView({ snap, id, wanted, onChosen }: { snap: Snapshot; id: stri
           />
         ))}
       </ul>
+      {shaping !== null && playlist.tracks[shaping] && playlist.tracks[shaping + 1] && (
+        <TransitionDialog snap={snap} id={id} from={playlist.tracks[shaping]} to={playlist.tracks[shaping + 1]} index={shaping} onClose={() => setShaping(null)} />
+      )}
     </>
   );
 }

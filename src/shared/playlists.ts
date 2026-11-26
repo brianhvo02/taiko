@@ -14,11 +14,61 @@ export type SavedTrack = Omit<NasTrack, 'lyrics'>;
  */
 export type PlaylistAccess = 'private' | 'public' | 'collaborative';
 
+/**
+ * How one song of a playlist hands over to the next, when the listener has shaped that join themselves: with no
+ * fade (`cut`) or a crossfade of `seconds`; `leave` seconds before the first song's end (to skip an outro); and
+ * starting the next song `startAt` seconds in (to skip an intro).
+ */
+export interface Transition {
+  kind: 'cut' | 'fade';
+  seconds: number;
+  leave: number;
+  startAt: number;
+}
+
+export const MAX_TRANSITION_SECONDS = 20;
+export const MAX_TRANSITION_TRIM = 120;
+
+/** What names a join in a playlist's `transitions`: the song before and the song after, by id. */
+export const transitionKey = (from: string, to: string): string => `${from}>${to}`;
+
 export interface Playlist {
   id: string;
   name: string;
   tracks: SavedTrack[];
   access?: PlaylistAccess;
+  /** The joins the listener has shaped, by `transitionKey`. Every other join is as the player's settings say. */
+  transitions?: Record<string, Transition>;
+}
+
+/** A stored transition, or null when what was stored isn't one. Numbers are kept inside what the player allows. */
+export function toTransition(value: unknown): Transition | null {
+  if (!isObject(value) || (value.kind !== 'cut' && value.kind !== 'fade')) return null;
+  const within = (number: unknown, max: number): number => (typeof number === 'number' && Number.isFinite(number) ? Math.max(0, Math.min(max, Math.round(number * 10) / 10)) : 0);
+  const seconds = value.kind === 'fade' ? Math.max(1, within(value.seconds, MAX_TRANSITION_SECONDS)) : 0;
+  return { kind: value.kind, seconds, leave: within(value.leave, MAX_TRANSITION_TRIM), startAt: within(value.startAt, MAX_TRANSITION_TRIM) };
+}
+
+function toTransitions(value: unknown): Record<string, Transition> | null {
+  if (!isObject(value)) return null;
+  const out: Record<string, Transition> = {};
+  for (const [key, entry] of Object.entries(value).slice(0, MAX_PLAYLIST_TRACKS)) {
+    const transition = toTransition(entry);
+    if (transition && key.length <= 2 * MAX_ID + 1) out[key] = transition;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/** The playlist's shaped joins without those whose songs are no longer both in it. */
+export function withoutLostTransitions(playlist: Playlist): Playlist {
+  if (!playlist.transitions) return playlist;
+  const ids = new Set(playlist.tracks.map((track) => track.id));
+  const kept = Object.entries(playlist.transitions).filter(([key]) => {
+    const [from, to] = key.split('>');
+    return ids.has(from) && ids.has(to);
+  });
+  const { transitions: _all, ...rest } = playlist;
+  return kept.length ? { ...rest, transitions: Object.fromEntries(kept) } : rest;
 }
 
 /** Someone else's playlist, as the NAS shows it to a user who may see it. */
@@ -64,7 +114,8 @@ export function toPlaylists(value: unknown): Playlist[] {
   return value.flatMap((entry): Playlist[] => {
     if (!isObject(entry) || typeof entry.id !== 'string' || !entry.id || typeof entry.name !== 'string') return [];
     const access: { access?: PlaylistAccess } = entry.access === 'public' || entry.access === 'collaborative' ? { access: entry.access } : {};
-    return [{ id: entry.id, name: entry.name, tracks: toSavedTracks(entry.tracks), ...access }];
+    const transitions = toTransitions(entry.transitions);
+    return [{ id: entry.id, name: entry.name, tracks: toSavedTracks(entry.tracks), ...access, ...(transitions ? { transitions } : {}) }];
   });
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { NEVER_SYNCED, acceptPlaylists, noteChanges, reconcile } from './playlists';
+import { NEVER_SYNCED, acceptPlaylists, noteChanges, reconcile, withoutLostTransitions } from './playlists';
 import type { Playlist } from './playlists';
 
 const song = (id: string) => ({ id, title: id, artist: '', album: '', trackNumber: null, discNumber: null, durationSeconds: null });
@@ -39,6 +39,29 @@ describe('noteChanges', () => {
     // The same list changes nothing; a deleted playlist made again is no longer deleted.
     expect(noteChanges([a], [a], { version: 2, dirty: [], deleted: [] })).toEqual({ version: 2, dirty: [], deleted: [] });
     expect(noteChanges([], [b], sync).deleted).toEqual([]);
+  });
+});
+
+describe('transitions', () => {
+  it('are kept with the playlist, inside what the player allows, and dropped when they are not transitions', () => {
+    const kept = acceptPlaylists([{ ...list('a', 'x', 'y'), transitions: {
+      'x>y': { kind: 'fade', seconds: 99, leave: 12.34, startAt: -3, extra: true },
+      'y>x': { kind: 'cut', seconds: 8, leave: 500, startAt: 2 },
+      'x>z': { kind: 'wipe', seconds: 4 },
+      nonsense: 'yes',
+    } }]);
+    expect(kept![0].transitions).toEqual({
+      'x>y': { kind: 'fade', seconds: 20, leave: 12.3, startAt: 0 },
+      'y>x': { kind: 'cut', seconds: 0, leave: 120, startAt: 2 },
+    });
+    expect(acceptPlaylists([{ ...list('a'), transitions: { 'x>y': 1 } }])![0]).not.toHaveProperty('transitions');
+  });
+
+  it('go when one of their two songs leaves the playlist', () => {
+    const fade = { kind: 'fade' as const, seconds: 4, leave: 0, startAt: 0 };
+    const playlist = { ...list('a', 'x', 'y'), transitions: { 'x>y': fade, 'y>z': fade } };
+    expect(withoutLostTransitions(playlist).transitions).toEqual({ 'x>y': fade });
+    expect(withoutLostTransitions({ ...list('a', 'x'), transitions: { 'x>y': fade } })).not.toHaveProperty('transitions');
   });
 });
 
