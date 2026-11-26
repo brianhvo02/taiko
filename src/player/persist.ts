@@ -31,6 +31,8 @@ export interface Settings {
   seekOnLine: boolean;
   /** Whether songs are brought to about the same loudness, where their files say how loud they are. On unless turned off. */
   levelVolume: boolean;
+  /** Seconds one song fades into the next, 0 to 12; 0 (the default) for none. */
+  crossfade: number;
 }
 
 /** Where the listener was: the queue, the song open in it and how far in. */
@@ -57,7 +59,7 @@ export const KEYS = {
   session: 'taiko:session',
 } as const;
 
-export const DEFAULT_SETTINGS: Settings = { showRoman: true, showTranslation: true, repeat: 'off', shuffle: false, sweepLines: false, seekOnLine: true, levelVolume: true };
+export const DEFAULT_SETTINGS: Settings = { showRoman: true, showTranslation: true, repeat: 'off', shuffle: false, sweepLines: false, seekOnLine: true, levelVolume: true, crossfade: 0 };
 
 /** The most songs' timings kept; the oldest go first. */
 const MAX_OFFSETS = 2000;
@@ -112,6 +114,7 @@ export function loadSettings(store: Store | null = browserStore()): Settings {
     sweepLines: saved.sweepLines === true,
     seekOnLine: typeof saved.seekOnLine === 'boolean' ? saved.seekOnLine : DEFAULT_SETTINGS.seekOnLine,
     levelVolume: typeof saved.levelVolume === 'boolean' ? saved.levelVolume : DEFAULT_SETTINGS.levelVolume,
+    crossfade: typeof saved.crossfade === 'number' && saved.crossfade >= 0 && saved.crossfade <= 12 ? Math.round(saved.crossfade) : 0,
   };
 }
 

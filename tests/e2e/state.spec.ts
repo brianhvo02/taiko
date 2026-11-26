@@ -679,3 +679,77 @@ test('through the mixer: a song is levelled, heard, seeks and pauses, as on a ph
   expect(await store(() => (window as unknown as { taikoStore: Store }).taikoStore.getSnapshot().mixing)).toBe(true);
   await store(async () => { await (window as unknown as { taikoStore: Store }).taikoStore.setMixing(false); });
 });
+
+test('crossfade: the next song rises as this one falls away, and an album in order is left alone', async ({ page }) => {
+  await mockCatalog(page);
+  await pair(page, 'Crossfade test');
+  type Store = {
+    decks: { elements: HTMLAudioElement[] }; audio: HTMLAudioElement; setCrossfade(seconds: number): void;
+    getSnapshot(): { album: { tracks: { title: string }[] }; playlists: { id: string }[]; currentTrack: { title: string } | null };
+    createPlaylist(name: string, tracks: unknown[], show: boolean): void; playPlaylist(id: string, index: number): Promise<void>;
+  };
+  const decks = () => page.evaluate(() => {
+    const store = (window as unknown as { taikoStore: Store }).taikoStore;
+    return { title: store.getSnapshot().currentTrack?.title, on: store.decks.elements.indexOf(store.audio), decks: store.decks.elements.map((element) => ({ playing: !element.paused, loaded: Boolean(element.getAttribute('src')), volume: element.volume })) };
+  });
+  await page.goto('/album/Music/Midori%20Vale/Night%20Market');
+  await expect(page.locator('.library .songlist .song')).toHaveCount(3);
+
+  // In a playlist, with two seconds of crossfade: near the end of the first song the second starts on the other
+  // deck, both sound for a moment, and then the first is gone.
+  await page.evaluate(async () => {
+    const store = (window as unknown as { taikoStore: Store }).taikoStore;
+    store.setCrossfade(2);
+    store.createPlaylist('Fading', store.getSnapshot().album.tracks.filter((track) => track.title !== 'untagged'), false);
+    await store.playPlaylist(store.getSnapshot().playlists[0].id, 0);
+  });
+  await expect(page.locator('.play')).toHaveText('Pause');
+  expect((await decks()).on).toBe(0);
+  await seekTo(page, 45);
+  await expect.poll(async () => (await decks()).title, { timeout: 15_000 }).toBe('港の灯');
+  await expect.poll(async () => { const now = await decks(); return now.on === 1 && now.decks[0].playing && now.decks[1].playing; }).toBe(true);
+  const during = await decks();
+  expect(during.decks[0].volume).toBeLessThan(1);
+  await expect.poll(async () => { const now = await decks(); return [now.decks[0].playing, now.decks[0].loaded]; }, { timeout: 10_000 }).toEqual([false, false]);
+  // The song that came in is at its full strength: its own level (it says it is loud, so about half; see the levelling test).
+  await expect.poll(async () => (await decks()).decks[1].volume).toBeCloseTo(0.501, 2);
+  await expect(page.locator('.play')).toHaveText('Pause');
+  expect(await shown(page)).toBeGreaterThan(1);
+
+  // The setting is under Options, and kept.
+  await page.getByRole('button', { name: 'Options' }).click();
+  await expect(page.getByLabel('Crossfade')).toHaveValue('2');
+  await page.keyboard.press('Escape');
+
+  // The same album played in order: its songs follow each other, and the deck never changes.
+  await page.getByRole('button', { name: 'Library' }).first().click();
+  await page.locator('.library .songlist .song', { hasText: 'Paper Lanterns' }).click();
+  // (The song has to be under way before the test jumps near its end.)
+  await expect.poll(async () => (await decks()).title).toBe('Paper Lanterns');
+  await expect.poll(() => shown(page)).toBeGreaterThan(0.3);
+  const deck = (await decks()).on;
+  await seekTo(page, 46);
+  await expect.poll(async () => (await decks()).title, { timeout: 15_000 }).toBe('港の灯');
+  expect((await decks()).on).toBe(deck);
+
+  // Through the mixer, as on a phone: the same crossfade, done by the mixer's own fades.
+  type Mixed = Store & { setMixing(on: boolean): Promise<void>; decks: Store['decks'] & { mixer: { fades: GainNode[] } } };
+  const fades = () => page.evaluate(() => {
+    const store = (window as unknown as { taikoStore: Mixed }).taikoStore;
+    return { title: store.getSnapshot().currentTrack?.title, on: store.decks.elements.indexOf(store.audio), fades: store.decks.mixer.fades.map((fade) => fade.gain.value), playing: store.decks.elements.map((element) => !element.paused) };
+  });
+  await page.evaluate(async () => {
+    const store = (window as unknown as { taikoStore: Mixed }).taikoStore;
+    await store.setMixing(true);
+    await store.playPlaylist(store.getSnapshot().playlists[0].id, 0);
+  });
+  await expect(page.locator('.play')).toHaveText('Pause');
+  await expect.poll(async () => (await fades()).title).toBe('Paper Lanterns');
+  await expect.poll(() => shown(page)).toBeGreaterThan(0.3);
+  const from = (await fades()).on;
+  await seekTo(page, 45);
+  await expect.poll(async () => (await fades()).title, { timeout: 15_000 }).toBe('港の灯');
+  await expect.poll(async () => { const now = await fades(); return now.on !== from && now.playing[0] && now.playing[1] && now.fades[from] < 1 && now.fades[now.on] > 0; }).toBe(true);
+  await expect.poll(async () => { const now = await fades(); return [now.playing[from], now.fades[now.on], now.fades[from]]; }, { timeout: 10_000 }).toEqual([false, 1, 1]);
+  await page.evaluate(async () => { await (window as unknown as { taikoStore: Mixed }).taikoStore.setMixing(false); });
+});

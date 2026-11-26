@@ -240,6 +240,15 @@ export function TransportBar({ snap, onFindSong }: { snap: Snapshot; onFindSong:
                   <p className="toggle-note">Songs whose files say how loud they are play at about the same loudness. While this is on, AirPlay can't carry the sound.</p>
                 </>
               )}
+              {(snap.canSetVolume || snap.mixing) && (
+                <label className="choice" title="One song fades into the next over this long. Songs of an album played in order follow each other as they were made, without a fade.">
+                  Crossfade
+                  <select value={snap.crossfade} onChange={(e) => store.setCrossfade(Number(e.currentTarget.value))}>
+                    <option value={0}>Off</option>
+                    {[2, 4, 6, 8, 12].map((seconds) => <option key={seconds} value={seconds}>{seconds} seconds</option>)}
+                  </select>
+                </label>
+              )}
               {snap.song?.timed && (
                 <label className="toggle" title="When this is off, pressing a line does nothing, so a stray touch can't move the song.">
                   <input type="checkbox" checked={snap.seekOnLine} onChange={(e) => store.setSeekOnLine(e.currentTarget.checked)} /> Press a line to go to it

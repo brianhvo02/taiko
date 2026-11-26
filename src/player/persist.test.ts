@@ -73,11 +73,11 @@ describe('settings', () => {
 
   it('come back as they were saved', () => {
     const store = memory();
-    saveSettings({ showRoman: false, showTranslation: true, repeat: 'one', shuffle: true, sweepLines: true, seekOnLine: false, levelVolume: false }, store);
-    expect(loadSettings(store)).toEqual({ showRoman: false, showTranslation: true, repeat: 'one', shuffle: true, sweepLines: true, seekOnLine: false, levelVolume: false });
+    saveSettings({ showRoman: false, showTranslation: true, repeat: 'one', shuffle: true, sweepLines: true, seekOnLine: false, levelVolume: false, crossfade: 6 }, store);
+    expect(loadSettings(store)).toEqual({ showRoman: false, showTranslation: true, repeat: 'one', shuffle: true, sweepLines: true, seekOnLine: false, levelVolume: false, crossfade: 6 });
     // A setting added later is at its default in what an older visit stored.
     store.setItem(KEYS.settings, JSON.stringify({ showRoman: false, repeat: 'all' }));
-    expect(loadSettings(store)).toEqual({ showRoman: false, showTranslation: true, repeat: 'all', shuffle: false, sweepLines: false, seekOnLine: true, levelVolume: true });
+    expect(loadSettings(store)).toEqual({ showRoman: false, showTranslation: true, repeat: 'all', shuffle: false, sweepLines: false, seekOnLine: true, levelVolume: true, crossfade: 0 });
   });
 
   it('survive a storage that refuses to write', () => {
